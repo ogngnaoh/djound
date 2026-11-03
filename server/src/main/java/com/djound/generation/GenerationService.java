@@ -22,17 +22,20 @@ public class GenerationService {
     private final TransactionTemplate transactions;
     private final GenerationConfiguration configuration;
     private final MediaStore media;
+    private final FixtureReviewControls controls;
     private final PromptAssembler assembler = new PromptAssembler();
 
     public GenerationService(
             JdbcClient jdbc,
             PlatformTransactionManager manager,
             GenerationConfiguration configuration,
-            MediaStore media) {
+            MediaStore media,
+            FixtureReviewControls controls) {
         this.jdbc = jdbc;
         this.transactions = new TransactionTemplate(manager);
         this.configuration = configuration;
         this.media = media;
+        this.controls = controls;
     }
 
     public GenerationConfiguration configuration() {
@@ -208,9 +211,15 @@ public class GenerationService {
                             .update();
                     jdbc.sql(
                                     "INSERT INTO"
-                                        + " generation_attempt(id,request_id,exploration_id,state,created_at,updated_at)"
-                                        + " VALUES(?,?,?,'ACCEPTED',?,?)")
-                            .params(attempt, request, explorationId, now, now)
+                                        + " generation_attempt(id,request_id,exploration_id,state,created_at,updated_at,fixture_outcome)"
+                                        + " VALUES(?,?,?,'ACCEPTED',?,?,?)")
+                            .params(
+                                    attempt,
+                                    request,
+                                    explorationId,
+                                    now,
+                                    now,
+                                    controls.consumeOutcome())
                             .update();
                     jdbc.sql(
                                     "INSERT INTO"
@@ -234,10 +243,10 @@ public class GenerationService {
                     int consumed =
                             jdbc.sql(
                                             "UPDATE exploration SET"
-                                                + " draft_text='',draft_basis_id=?,draft_revision=draft_revision+1,updated_at=?"
+                                                + " draft_text='',draft_basis_id=?,draft_revision=draft_revision+1,updated_at=?,latest_attempt_id=?"
                                                 + " WHERE id=? AND source_revision=? AND"
                                                 + " draft_revision=?")
-                                    .params(basis, now, explorationId, source, draft)
+                                    .params(basis, now, attempt, explorationId, source, draft)
                                     .update();
                     if (consumed != 1)
                         throw new ApiProblem(
@@ -252,6 +261,177 @@ public class GenerationService {
                 });
     }
 
+    public RetryReceipt retry(String requestId, RetryCommand command, String key) {
+        if (key == null || !key.matches("[A-Za-z0-9._:-]{8,128}"))
+            throw new ApiProblem(
+                    400, "INVALID_IDEMPOTENCY_KEY", "Provide a unique Idempotency-Key.", "RETRY");
+        if (command == null
+                || command.expectedPreviousAttemptId() == null
+                || command.expectedPreviousAttemptId().isBlank())
+            throw new ApiProblem(
+                    400, "INVALID_REQUEST", "Provide the previous attempt being retried.", "RETRY");
+        String operation = "RETRY_REQUEST:" + requestId;
+        String fingerprint;
+        try {
+            fingerprint =
+                    HexFormat.of()
+                            .formatHex(
+                                    java.security.MessageDigest.getInstance("SHA-256")
+                                            .digest(
+                                                    (operation
+                                                                    + "|"
+                                                                    + field(
+                                                                            command
+                                                                                    .expectedPreviousAttemptId()))
+                                                            .getBytes(StandardCharsets.UTF_8)));
+        } catch (java.security.NoSuchAlgorithmException impossible) {
+            throw new IllegalStateException(impossible);
+        }
+        return transactions.execute(
+                status -> {
+                    var workspace =
+                            jdbc.sql(
+                                            "SELECT active_attempt_id FROM workspace WHERE id=1 FOR"
+                                                    + " UPDATE")
+                                    .query()
+                                    .singleRow();
+                    var receipt =
+                            jdbc
+                                    .sql("SELECT * FROM command_receipt WHERE command_key=?")
+                                    .param(key)
+                                    .query()
+                                    .listOfRows()
+                                    .stream()
+                                    .findFirst();
+                    if (receipt.isPresent()) {
+                        var row = receipt.get();
+                        if (!operation.equals(row.get("operation"))
+                                || !fingerprint.equals(row.get("fingerprint")))
+                            throw new ApiProblem(
+                                    409,
+                                    "IDEMPOTENCY_CONFLICT",
+                                    "This key already belongs to a different command.",
+                                    "RETRY");
+                        return retryReceipt(requestId, (String) row.get("attempt_id"), true);
+                    }
+                    if (!configuration.fixture())
+                        throw new ApiProblem(
+                                503,
+                                "PROVIDER_NOT_CONFIGURED",
+                                "Music creation is not configured. The fixed request remains"
+                                        + " saved.",
+                                "EDIT_TEXT");
+                    var requestRow =
+                            jdbc.sql("SELECT exploration_id FROM generation_request WHERE id=?")
+                                    .param(requestId)
+                                    .query(String.class)
+                                    .optional()
+                                    .orElseThrow(GenerationService::missing);
+                    var exploration =
+                            jdbc.sql("SELECT * FROM exploration WHERE id=? FOR UPDATE")
+                                    .param(requestRow)
+                                    .query()
+                                    .singleRow();
+                    String previousId = command.expectedPreviousAttemptId();
+                    if (!previousId.equals(exploration.get("latest_attempt_id")))
+                        throw new ApiProblem(
+                                409,
+                                "STALE_ATTEMPT",
+                                "A newer creation has replaced this Retry action.",
+                                "REFRESH_EXPLORATION");
+                    Attempt previous = get(previousId);
+                    if (!previous.requestId().equals(requestId)
+                            || !previous.state().equals("FAILED")
+                            || previous.outcome() == null
+                            || !Set.of(
+                                            "GENERATION_FAILED",
+                                            "OUTPUT_INVALID",
+                                            "MEDIA_STORAGE_FAILED",
+                                            "PROCESS_INTERRUPTED")
+                                    .contains(previous.outcome().code())) {
+                        throw new ApiProblem(
+                                409,
+                                "STALE_ATTEMPT",
+                                "This attempt is not available for Retry.",
+                                "REFRESH_EXPLORATION");
+                    }
+                    var frozen = previous.request();
+                    if (!frozen.sourceRecordingId().equals(exploration.get("original_id"))
+                            || frozen.sourceRevision()
+                                    != ((Number) exploration.get("source_revision")).longValue())
+                        throw new ApiProblem(
+                                409,
+                                "SOURCE_CHANGED",
+                                "The source has changed since this request. Create a new version"
+                                        + " from the current source.",
+                                "EDIT_TEXT");
+                    if (!frozen.adapterConfigurationId().equals(configuration.adapterId())
+                            || !frozen.provenance().equals("FIXTURE"))
+                        throw new ApiProblem(
+                                409,
+                                "RETRY_CONTEXT_UNAVAILABLE",
+                                "The saved request uses an incompatible creation configuration.",
+                                "EDIT_TEXT");
+                    if (workspace.get("active_attempt_id") != null)
+                        throw new ApiProblem(
+                                409,
+                                "CREATION_ACTIVE",
+                                "Another creation is already in progress.",
+                                "WAIT");
+                    String attempt = "attempt_" + UUID.randomUUID();
+                    Timestamp now = Timestamp.from(Instant.now());
+                    jdbc.sql(
+                                    "INSERT INTO"
+                                        + " generation_attempt(id,request_id,exploration_id,state,created_at,updated_at,previous_attempt_id,fixture_outcome)"
+                                        + " VALUES(?,?,?,'ACCEPTED',?,?,?,?)")
+                            .params(
+                                    attempt,
+                                    requestId,
+                                    requestRow,
+                                    now,
+                                    now,
+                                    previousId,
+                                    controls.consumeOutcome())
+                            .update();
+                    // Retry records authority without consuming, clearing, rebasing, or advancing
+                    // the current draft.
+                    jdbc.sql("UPDATE exploration SET latest_attempt_id=?,updated_at=? WHERE id=?")
+                            .params(attempt, now, requestRow)
+                            .update();
+                    jdbc.sql("UPDATE workspace SET active_attempt_id=? WHERE id=1")
+                            .param(attempt)
+                            .update();
+                    jdbc.sql(
+                                    "INSERT INTO"
+                                        + " command_receipt(command_key,operation,fingerprint,exploration_id,recording_id,source_revision,draft_revision,created_at,request_id,attempt_id)"
+                                        + " VALUES(?,?,?,?,?,?,?,?,?,?)")
+                            .params(
+                                    key,
+                                    operation,
+                                    fingerprint,
+                                    requestRow,
+                                    frozen.sourceRecordingId(),
+                                    frozen.sourceRevision(),
+                                    ((Number) exploration.get("draft_revision")).longValue(),
+                                    now,
+                                    requestId,
+                                    attempt)
+                            .update();
+                    return retryReceipt(requestId, attempt, false);
+                });
+    }
+
+    private static RetryReceipt retryReceipt(String requestId, String attemptId, boolean replayed) {
+        return new RetryReceipt(requestId, attemptId, "/api/attempts/" + attemptId, replayed);
+    }
+
+    public String fixtureOutcome(String attemptId) {
+        return jdbc.sql("SELECT fixture_outcome FROM generation_attempt WHERE id=?")
+                .param(attemptId)
+                .query(String.class)
+                .single();
+    }
+
     private static String field(String value) {
         return value == null ? "-1:" : value.length() + ":" + value;
     }
@@ -264,9 +444,7 @@ public class GenerationService {
 
     public Attempt latest(String explorationId) {
         var id =
-                jdbc.sql(
-                                "SELECT id FROM generation_attempt WHERE exploration_id=? ORDER BY"
-                                        + " created_at DESC,id DESC LIMIT 1")
+                jdbc.sql("SELECT latest_attempt_id FROM exploration WHERE id=?")
                         .param(explorationId)
                         .query(String.class)
                         .optional();
@@ -276,11 +454,16 @@ public class GenerationService {
     public Attempt get(String id) {
         return jdbc.sql(
                         """
-                        SELECT a.id AS attempt_key,a.state,a.version,a.outcome_code,a.outcome_detail,a.result_recording_id,
-                               a.created_at AS attempt_created_at,a.updated_at,r.*
-                        FROM generation_attempt a JOIN generation_request r ON r.id=a.request_id WHERE a.id=?
+                        SELECT a.id AS attempt_key,a.state,a.version,a.outcome_code,a.outcome_detail,a.result_recording_id,a.previous_attempt_id,
+                               a.created_at AS attempt_created_at,a.updated_at,r.*,
+                               (? AND a.state='FAILED' AND a.outcome_code IN ('GENERATION_FAILED','OUTPUT_INVALID','MEDIA_STORAGE_FAILED','PROCESS_INTERRUPTED')
+                                AND e.latest_attempt_id=a.id AND e.original_id=r.source_recording_id AND e.source_revision=r.source_revision
+                                AND r.adapter_configuration_id=? AND r.provenance='FIXTURE'
+                                AND w.active_attempt_id IS NULL) AS can_retry
+                        FROM generation_attempt a JOIN generation_request r ON r.id=a.request_id
+                        JOIN exploration e ON e.id=a.exploration_id CROSS JOIN workspace w WHERE w.id=1 AND a.id=?
                         """)
-                .param(id)
+                .params(configuration.fixture(), configuration.adapterId(), id)
                 .query(
                         (r, n) -> {
                             var request =
@@ -311,11 +494,14 @@ public class GenerationService {
                                             : new AttemptOutcome(
                                                     code, r.getString("outcome_detail")),
                                     r.getString("result_recording_id"),
-                                    false,
+                                    r.getString("previous_attempt_id"),
+                                    r.getBoolean("can_retry"),
                                     state.equals("SUCCEEDED")
                                             ? List.of("OPEN_RESULT")
                                             : state.equals("FAILED")
-                                                    ? List.of("EDIT_TEXT")
+                                                    ? r.getBoolean("can_retry")
+                                                            ? List.of("RETRY", "EDIT_TEXT")
+                                                            : List.of("EDIT_TEXT")
                                                     : List.of("WAIT"),
                                     r.getTimestamp("attempt_created_at").toInstant(),
                                     r.getTimestamp("updated_at").toInstant());

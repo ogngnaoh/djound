@@ -61,3 +61,36 @@ test("an old response cannot delete a newer pending command", async () => {
   await pendingCommand(slot, null, "old-key");
   assert.deepEqual(await pendingCommand(slot), { key: "new-key" });
 });
+
+test("uncertain retry owns the same admission slot as creation and preserves its exact request and predecessor", async () => {
+  const slot = "creation-retry-admission";
+  const retry = {
+    kind: "RETRY",
+    version: 1,
+    key: "retry-ack-lost",
+    explorationId: "exploration-a",
+    requestId: "immutable-request",
+    submittedText: "Original direction",
+    body: { expectedPreviousAttemptId: "failed-attempt" },
+  };
+  await pendingCommand(slot, retry);
+  await assert.rejects(
+    pendingCommand(slot, {
+      kind: "CREATE",
+      key: "new-request",
+      body: { text: "Later notes" },
+    }),
+    PendingCommandConflict,
+  );
+  const recovered = await pendingCommand<typeof retry>(slot);
+  assert.deepEqual(recovered, retry);
+  await pendingCommand(slot, {
+    ...retry,
+    body: { expectedPreviousAttemptId: "new-active-attempt" },
+  });
+  assert.deepEqual(await pendingCommand(slot), retry);
+  await pendingCommand(slot, null, "new-request");
+  assert.deepEqual(await pendingCommand(slot), retry);
+  await pendingCommand(slot, null, retry.key);
+  assert.equal(await pendingCommand(slot), undefined);
+});

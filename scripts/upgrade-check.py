@@ -4,6 +4,7 @@ import json
 import os
 from pathlib import Path
 import sys
+import time
 import urllib.request
 import uuid
 
@@ -57,14 +58,42 @@ if phase == 'prepare':
         'basisRecordingId': detail['original']['id'],
         'expectedDraftRevision': detail['draft']['revision'],
     }).encode(), {'Content-Type': 'application/json'})
+    creation = None
+    if os.environ.get('DJOUND_UPGRADE_MODE') == 'FIXTURE':
+        current = json.loads(request(path))
+        command = dict(text='A warm instrumental interpretation.',
+                       basisRecordingId=current['original']['id'],
+                       expectedSourceRevision=current['sourceRevision'],
+                       expectedDraftRevision=current['draft']['revision'])
+        key = str(uuid.uuid4())
+        receipt = json.loads(request(path + '/requests', 'POST', json.dumps(command).encode(),
+                                     {'Content-Type': 'application/json', 'Idempotency-Key': key}))
+        deadline = time.monotonic() + 30
+        while time.monotonic() < deadline:
+            current = json.loads(request(path))
+            if current['latestAttempt']['state'] == 'SUCCEEDED':
+                break
+            assert current['latestAttempt']['state'] != 'FAILED', current
+            time.sleep(.1)
+        assert len(current['renditions']) == 1
+        result = current['renditions'][0]
+        request('/api/recordings/' + result['id'], 'PATCH', b'{"kept":true}',
+                {'Content-Type': 'application/json'})
+        request(path + '/draft', 'PUT', json.dumps({
+            'text': 'Newer refinement notes must survive migration and old receipt replay.',
+            'basisRecordingId': result['id'],
+            'expectedDraftRevision': current['draft']['revision'],
+        }).encode(), {'Content-Type': 'application/json'})
+        creation = dict(command=command, key=key, receipt=receipt)
     snapshot = dict(path=path, detail=json.loads(request(path)), original=original,
-                    uploaded=uploaded, replaced=replaced, uploadKey=upload_key, replaceKey=replace_key)
+                    uploaded=uploaded, replaced=replaced, uploadKey=upload_key, replaceKey=replace_key,
+                    creation=creation)
     Path(snapshot_path).write_text(json.dumps(snapshot))
 elif phase == 'verify':
     saved = json.loads(Path(snapshot_path).read_text())
     path = saved['path']
     matches_old(saved['detail'], json.loads(request(path)))
-    for recording in (saved['original'], saved['detail']['original']):
+    for recording in (saved['original'], saved['detail']['original'], *saved['detail']['renditions']):
         assert hashlib.sha256(request(recording['mediaUrl'])).hexdigest() == recording['sha256']
     upload = multipart('/api/explorations', 'POST', 'source-study.wav',
                        'initialDraft', 'Preserve my first words.', saved['uploadKey'])
@@ -72,6 +101,14 @@ elif phase == 'verify':
                             'expectedSourceRevision', 1, saved['replaceKey'])
     matches_old({**saved['uploaded'], 'replayed': True}, upload)
     matches_old({**saved['replaced'], 'replayed': True}, replacement)
+    if saved.get('creation'):
+        creation = saved['creation']
+        replay = json.loads(request(path + '/requests', 'POST', json.dumps(creation['command']).encode(),
+                                   {'Content-Type': 'application/json', 'Idempotency-Key': creation['key']}))
+        matches_old({**creation['receipt'], 'replayed': True}, replay)
+        library = json.loads(request('/api/explorations'))['items']
+        summary = next(item for item in library if item['id'] == saved['detail']['id'])
+        assert [r['id'] for r in summary['keptRecordings']] == [saved['detail']['renditions'][0]['id']]
     matches_old(saved['detail'], json.loads(request(path)))
 else:
     raise SystemExit('Expected prepare or verify')

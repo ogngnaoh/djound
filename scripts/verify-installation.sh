@@ -4,7 +4,7 @@ set -euo pipefail
 source "$(dirname "$0")/env.sh"
 cd "$DJOUND_ROOT"
 check_mode="${1:-all}"
-case "$check_mode" in all|api|fixture|listening) ;; *) echo 'Usage: verify-installation.sh [all|api|fixture|listening]' >&2; exit 2 ;; esac
+case "$check_mode" in all|api|fixture|listening|recovery) ;; *) echo 'Usage: verify-installation.sh [all|api|fixture|listening|recovery]' >&2; exit 2 ;; esac
 mkdir -p .runtime/checks
 run_dir="$(mktemp -d "$DJOUND_ROOT/.runtime/checks/run.XXXXXX")"
 test_db="djound_check_$$_${RANDOM}"
@@ -32,9 +32,11 @@ export DJOUND_ALLOWED_ORIGINS="http://127.0.0.1:$test_port"
 export DJOUND_TEST_BASE_URL="http://127.0.0.1:$test_port"
 export DJOUND_TEST_ALLOW_WRITE=1
 export DJOUND_MODE=UNCONFIGURED
-if [[ "$check_mode" == fixture || "$check_mode" == listening ]]; then
+export DJOUND_FIXTURE_REVIEW_CONTROLS=false
+if [[ "$check_mode" == fixture || "$check_mode" == listening || "$check_mode" == recovery ]]; then
   export DJOUND_MODE=FIXTURE
   export DJOUND_FIXTURE_DELAY_MS=8000
+  export DJOUND_FIXTURE_REVIEW_CONTROLS=true
 fi
 export DJOUND_SCREENSHOT_DIR="$(mktemp -d /tmp/djound-qa.XXXXXX)"
 shopt -s nullglob
@@ -54,12 +56,17 @@ start_app() {
   exit 1
 }
 start_app
-if [[ "$check_mode" == listening ]]; then
+if [[ "$check_mode" == recovery ]]; then
+  python3 tests/recovery_acceptance.py | tee "$run_dir/api-result.json"
+  node scripts/recovery-smoke.mjs | tee "$run_dir/recovery-result.json"
+elif [[ "$check_mode" == listening ]]; then
   node scripts/listening-smoke.mjs | tee "$run_dir/api-result.json"
 elif [[ "$check_mode" == fixture ]]; then
   python3 tests/fixture_acceptance.py | tee "$run_dir/api-result.json"
   node scripts/creation-smoke.mjs | tee "$run_dir/creation-result.json"
   node scripts/listening-smoke.mjs | tee "$run_dir/listening-result.json"
+  python3 tests/recovery_acceptance.py | tee "$run_dir/recovery-api-result.json"
+  node scripts/recovery-smoke.mjs | tee "$run_dir/recovery-result.json"
 else
   if [[ "$check_mode" == all ]]; then
     node scripts/browser-smoke.mjs | tee "$run_dir/browser-result.json"
@@ -108,14 +115,14 @@ for recording in [saved['original'], *saved['renditions']]:
     assert hashlib.sha256(audio).hexdigest() == recording['sha256']
 if 'acceptedCommand' in result:
     command = urllib.request.Request(
-        base + '/api/explorations/' + result['explorationId'] + '/requests',
+        base + result.get('acceptedPath', '/api/explorations/' + result['explorationId'] + '/requests'),
         method='POST', data=json.dumps(result['acceptedCommand']).encode(),
         headers={'Content-Type': 'application/json', 'Idempotency-Key': result['acceptedKey']})
     with urllib.request.urlopen(command) as response:
         assert response.status == 202
         receipt = json.load(response)
     assert receipt['replayed'] and receipt['attemptId'] == result['attemptId']
-    print('PASS: accepted creation receipt replays with generation disabled, without new work')
+    print('PASS: accepted command receipt replays with generation disabled, without new work')
 print('PASS: restart with generation disabled retains all metadata, provenance, drafts, and exact audio bytes')
 PY
 expect_startup_failure "$run_dir/wrong-directory.log" "$run_dir/wrong-directory" 'bound to another'

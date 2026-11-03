@@ -101,8 +101,20 @@ public final class Models {
             GenerationRequest request,
             AttemptOutcome outcome,
             String resultRecordingId,
+            String previousAttemptId,
             boolean canRetry,
             List<String> permittedActions,
             Instant createdAt,
             Instant updatedAt) {}
+
+    public record RetryCommand(String expectedPreviousAttemptId) {}
+
+    public record RetryReceipt(
+            String requestId, String attemptId, String statusUrl, boolean replayed) {}
+
+    public record FixtureControls(String nextOutcome, String unavailableRecordingId) {}
+
+    public record FixtureOutcomeControl(String outcome) {}
+
+    public record FixturePlaybackControl(String recordingId, Boolean unavailable) {}
 }

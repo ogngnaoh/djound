@@ -15,11 +15,14 @@ public class ApiController {
     private final Explorations explorations;
     private final MediaStore media;
     private final com.djound.generation.GenerationService generations;
+    private final com.djound.generation.FixtureReviewControls controls;
 
     public ApiController(
             Explorations explorations,
             MediaStore media,
-            com.djound.generation.GenerationService generations) {
+            com.djound.generation.GenerationService generations,
+            com.djound.generation.FixtureReviewControls controls) {
+        this.controls = controls;
         this.generations = generations;
         this.explorations = explorations;
         this.media = media;
@@ -36,6 +39,7 @@ public class ApiController {
         result.put("canSubmit", fixture && active == null);
         result.put("canCreateExploration", active == null);
         result.put("activeAttemptId", active);
+        result.put("fixtureControlsEnabled", controls.enabled());
         result.put(
                 "inputPolicy",
                 Map.of(
@@ -115,11 +119,43 @@ public class ApiController {
         return explorations.setKept(id, command);
     }
 
+    @PostMapping(value = "/requests/{id}/retries", consumes = MediaType.APPLICATION_JSON_VALUE)
+    public ResponseEntity<Models.RetryReceipt> retry(
+            @PathVariable String id,
+            @RequestBody Models.RetryCommand command,
+            @RequestHeader("Idempotency-Key") String key) {
+        var receipt = generations.retry(id, command, key);
+        return ResponseEntity.accepted().header("Location", receipt.statusUrl()).body(receipt);
+    }
+
+    @GetMapping("/fixture/controls")
+    public Models.FixtureControls fixtureControls() {
+        return controls.get();
+    }
+
+    @PutMapping(
+            value = "/fixture/controls/next-attempt",
+            consumes = MediaType.APPLICATION_JSON_VALUE)
+    public Models.FixtureControls fixtureOutcome(
+            @RequestBody Models.FixtureOutcomeControl command) {
+        return controls.setOutcome(command);
+    }
+
+    @PutMapping(value = "/fixture/controls/playback", consumes = MediaType.APPLICATION_JSON_VALUE)
+    public Models.FixtureControls fixturePlayback(
+            @RequestBody Models.FixturePlaybackControl command) {
+        return controls.setPlayback(command);
+    }
+
     @RequestMapping(
             value = "/media/{id}",
             method = {RequestMethod.GET, RequestMethod.HEAD})
-    public ResponseEntity<FileSystemResource> media(@PathVariable String id) {
+    public ResponseEntity<FileSystemResource> media(
+            @PathVariable String id, jakarta.servlet.http.HttpServletResponse response) {
         var recording = explorations.recording(id);
+        boolean reviewMedia = controls.enabled() && recording.provenance().equals("FIXTURE");
+        if (reviewMedia) response.setHeader("Cache-Control", "no-store");
+        controls.requirePlayable(id);
         var path = media.path(explorations.storageKey(id));
         if (!Files.isRegularFile(path))
             throw new ApiProblem(
@@ -132,7 +168,9 @@ public class ApiController {
                 .contentType(MediaType.parseMediaType(recording.contentType()))
                 .contentLength(recording.byteSize())
                 .header("Accept-Ranges", "bytes")
-                .header("Cache-Control", "private, max-age=31536000, immutable")
+                .header(
+                        "Cache-Control",
+                        reviewMedia ? "no-store" : "private, max-age=31536000, immutable")
                 .eTag("\"" + recording.sha256() + "\"")
                 .body(new FileSystemResource(path));
     }

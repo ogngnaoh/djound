@@ -35,7 +35,9 @@ public class GenerationRunner {
             if (attempt == null) return;
             // claimNext committed SUBMITTING before the adapter can execute.
             attempt = service.transition(attempt, "RUNNING");
-            var output = adapter.execute(service.outputOrdinal(attempt));
+            var output =
+                    adapter.execute(
+                            service.outputOrdinal(attempt), service.fixtureOutcome(attempt.id()));
             attempt = service.transition(attempt, "SAVING");
             try (var upload = media.ingest(output)) {
                 service.complete(attempt, upload);

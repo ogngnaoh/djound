@@ -485,7 +485,7 @@ public class Explorations {
                 jdbc
                         .sql(
                                 "SELECT * FROM recording WHERE kind='RENDITION' AND kept=true ORDER"
-                                    + " BY created_at,id")
+                                        + " BY created_at,id")
                         .query(Explorations::mapRecording)
                         .list()
                         .stream()

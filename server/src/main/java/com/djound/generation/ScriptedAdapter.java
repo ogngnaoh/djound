@@ -33,6 +33,13 @@ public class ScriptedAdapter {
         return new FixtureFile(new ClassPathResource("fixtures/audio/" + name), name);
     }
 
+    public MultipartFile execute(long ordinal, String frozenOutcome) throws InterruptedException {
+        var sample = execute(ordinal);
+        if (frozenOutcome.equals("FAILURE"))
+            throw new IllegalStateException("Intentional one-shot sample failure");
+        return sample;
+    }
+
     private record FixtureFile(ClassPathResource resource, String filename)
             implements MultipartFile {
         public String getName() {

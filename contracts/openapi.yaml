@@ -135,6 +135,65 @@ paths:
             application/json:
               schema: { $ref: '#/components/schemas/Attempt' }
         default: { $ref: '#/components/responses/Problem' }
+  /api/requests/{id}/retries:
+    parameters:
+      - $ref: '#/components/parameters/ResourceId'
+    post:
+      operationId: retryRequest
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/RetryCommand' }
+      responses:
+        '202':
+          description: New attempt of the same immutable request, or receipt replay; never consumes a draft
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/RetryReceipt' }
+        default: { $ref: '#/components/responses/Problem' }
+  /api/fixture/controls:
+    get:
+      operationId: getFixtureControls
+      responses:
+        '200':
+          description: Local sample review controls, only when explicitly enabled in FIXTURE mode
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/FixtureControls' }
+        default: { $ref: '#/components/responses/Problem' }
+  /api/fixture/controls/next-attempt:
+    put:
+      operationId: setFixtureOutcome
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/FixtureOutcomeControl' }
+      responses:
+        '200':
+          description: One-shot outcome for the next deliberately accepted attempt; no request is submitted
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/FixtureControls' }
+        default: { $ref: '#/components/responses/Problem' }
+  /api/fixture/controls/playback:
+    put:
+      operationId: setFixturePlayback
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/FixturePlaybackControl' }
+      responses:
+        '200':
+          description: Toggle a non-destructive playback failure for one stored fixture rendition
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/FixtureControls' }
+        default: { $ref: '#/components/responses/Problem' }
   /api/recordings/{id}:
     parameters:
       - $ref: '#/components/parameters/ResourceId'
@@ -233,7 +292,7 @@ components:
         providerCompatibilityKnown: { type: boolean }
     Workspace:
       type: object
-      required: [mode, configuration, eligibility, canSubmit, canCreateExploration, activeAttemptId, inputPolicy]
+      required: [mode, configuration, eligibility, canSubmit, canCreateExploration, activeAttemptId, fixtureControlsEnabled, inputPolicy]
       properties:
         mode: { type: string, enum: [UNCONFIGURED, FIXTURE] }
         configuration: { type: string, enum: [UNCONFIGURED, CONFIGURED] }
@@ -241,6 +300,7 @@ components:
         canSubmit: { type: boolean }
         canCreateExploration: { type: boolean }
         activeAttemptId: { type: [string, 'null'] }
+        fixtureControlsEnabled: { type: boolean }
         inputPolicy: { $ref: '#/components/schemas/InputPolicy' }
     Recording:
       type: object
@@ -357,7 +417,7 @@ components:
         createdAt: { type: string, format: date-time }
     Attempt:
       type: object
-      required: [id, explorationId, requestId, state, version, request, outcome, resultRecordingId, canRetry, permittedActions, createdAt, updatedAt]
+      required: [id, explorationId, requestId, state, version, request, outcome, resultRecordingId, previousAttemptId, canRetry, permittedActions, createdAt, updatedAt]
       properties:
         id: { type: string }
         explorationId: { type: string }
@@ -370,6 +430,7 @@ components:
             - $ref: '#/components/schemas/AttemptOutcome'
             - type: 'null'
         resultRecordingId: { type: [string, 'null'] }
+        previousAttemptId: { type: [string, 'null'] }
         canRetry: { type: boolean }
         permittedActions:
           type: array
@@ -387,3 +448,33 @@ components:
       required: [kept]
       properties:
         kept: { type: boolean }
+    RetryCommand:
+      type: object
+      required: [expectedPreviousAttemptId]
+      properties:
+        expectedPreviousAttemptId: { type: string, minLength: 1 }
+    RetryReceipt:
+      type: object
+      required: [requestId, attemptId, statusUrl, replayed]
+      properties:
+        requestId: { type: string }
+        attemptId: { type: string }
+        statusUrl: { type: string }
+        replayed: { type: boolean }
+    FixtureControls:
+      type: object
+      required: [nextOutcome, unavailableRecordingId]
+      properties:
+        nextOutcome: { type: string, enum: [SUCCESS, FAILURE] }
+        unavailableRecordingId: { type: [string, 'null'] }
+    FixtureOutcomeControl:
+      type: object
+      required: [outcome]
+      properties:
+        outcome: { type: string, enum: [SUCCESS, FAILURE] }
+    FixturePlaybackControl:
+      type: object
+      required: [recordingId, unavailable]
+      properties:
+        recordingId: { type: string, minLength: 1 }
+        unavailable: { type: boolean }

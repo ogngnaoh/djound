@@ -75,6 +75,12 @@ status, _, body = request('/api/workspace')
 expect(200, status, 'workspace')
 workspace = json.loads(body)
 assert workspace['configuration'] == 'UNCONFIGURED' and not workspace['canSubmit']
+assert workspace['fixtureControlsEnabled'] is False
+status, _, body = request('/api/fixture/controls')
+problem(status, body, {404})
+status, _, body = request('/api/fixture/controls/next-attempt', 'PUT', json.dumps({'outcome': 'FAILURE'}).encode(),
+                         {'Content-Type': 'application/json'})
+problem(status, body, {404})
 assert workspace['inputPolicy']['maxBytes'] == 64 * 1024 * 1024
 status, _, body = request('/api/explorations')
 expect(200, status, 'library')
@@ -211,4 +217,4 @@ print(json.dumps({'result': 'PASS', 'explorationId': exploration_id, 'recordingI
                   'checks': ['real upload', 'receipt replay', 'concurrent replay', 'conflict', 'metadata/hash identity', 'HEAD', '206/416',
                              'corrupt/empty/rate/text rejection', 'origin policy', 'no failed library entries',
                              'packaged deep route', 'typed API 404', 'draft CAS conflict', 'source replacement/rebind',
-                             'old original retained', 'replacement replay preserves newer words', 'stale source rejection', 'unconfigured request rejects without consuming draft']}, indent=2))
+                             'old original retained', 'replacement replay preserves newer words', 'stale source rejection', 'unconfigured request rejects without consuming draft', 'review controls unavailable in normal mode']}, indent=2))

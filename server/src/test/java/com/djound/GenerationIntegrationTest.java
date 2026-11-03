@@ -360,7 +360,7 @@ class GenerationIntegrationTest {
         var attempt = finished(accepted.attemptId());
         assertEquals("FAILED", attempt.state());
         assertEquals("GENERATION_FAILED", attempt.outcome().code());
-        assertFalse(attempt.canRetry());
+        assertTrue(attempt.canRetry());
         assertNull(generations().activeAttemptId());
         assertTrue(explorations().get(source.explorationId()).renditions().isEmpty());
         assertEquals("frozen before failure", attempt.request().text());

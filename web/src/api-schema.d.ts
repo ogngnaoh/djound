@@ -126,6 +126,72 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/requests/{id}/retries": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: components["parameters"]["ResourceId"];
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: operations["retryRequest"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/fixture/controls": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["getFixtureControls"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/fixture/controls/next-attempt": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put: operations["setFixtureOutcome"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/fixture/controls/playback": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put: operations["setFixturePlayback"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/recordings/{id}": {
         parameters: {
             query?: never;
@@ -198,6 +264,7 @@ export interface components {
             canSubmit: boolean;
             canCreateExploration: boolean;
             activeAttemptId: string | null;
+            fixtureControlsEnabled: boolean;
             inputPolicy: components["schemas"]["InputPolicy"];
         };
         Recording: {
@@ -318,6 +385,7 @@ export interface components {
             request: components["schemas"]["GenerationRequest"];
             outcome: components["schemas"]["AttemptOutcome"] | null;
             resultRecordingId: string | null;
+            previousAttemptId: string | null;
             canRetry: boolean;
             permittedActions: string[];
             /** Format: date-time */
@@ -331,6 +399,28 @@ export interface components {
         };
         RecordingUpdate: {
             kept: boolean;
+        };
+        RetryCommand: {
+            expectedPreviousAttemptId: string;
+        };
+        RetryReceipt: {
+            requestId: string;
+            attemptId: string;
+            statusUrl: string;
+            replayed: boolean;
+        };
+        FixtureControls: {
+            /** @enum {string} */
+            nextOutcome: "SUCCESS" | "FAILURE";
+            unavailableRecordingId: string | null;
+        };
+        FixtureOutcomeControl: {
+            /** @enum {string} */
+            outcome: "SUCCESS" | "FAILURE";
+        };
+        FixturePlaybackControl: {
+            recordingId: string;
+            unavailable: boolean;
         };
     };
     responses: {
@@ -558,6 +648,106 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["Attempt"];
+                };
+            };
+            default: components["responses"]["Problem"];
+        };
+    };
+    retryRequest: {
+        parameters: {
+            query?: never;
+            header: {
+                "Idempotency-Key": components["parameters"]["IdempotencyKey"];
+            };
+            path: {
+                id: components["parameters"]["ResourceId"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["RetryCommand"];
+            };
+        };
+        responses: {
+            /** @description New attempt of the same immutable request, or receipt replay; never consumes a draft */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RetryReceipt"];
+                };
+            };
+            default: components["responses"]["Problem"];
+        };
+    };
+    getFixtureControls: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Local sample review controls, only when explicitly enabled in FIXTURE mode */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["FixtureControls"];
+                };
+            };
+            default: components["responses"]["Problem"];
+        };
+    };
+    setFixtureOutcome: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["FixtureOutcomeControl"];
+            };
+        };
+        responses: {
+            /** @description One-shot outcome for the next deliberately accepted attempt; no request is submitted */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["FixtureControls"];
+                };
+            };
+            default: components["responses"]["Problem"];
+        };
+    };
+    setFixturePlayback: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["FixturePlaybackControl"];
+            };
+        };
+        responses: {
+            /** @description Toggle a non-destructive playback failure for one stored fixture rendition */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["FixtureControls"];
                 };
             };
             default: components["responses"]["Problem"];
