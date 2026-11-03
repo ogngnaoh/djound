@@ -22,6 +22,9 @@ public final class Models {
             String mediaUrl,
             String provenance,
             boolean kept,
+            String direction,
+            String requestId,
+            String attemptId,
             Instant createdAt) {}
 
     public record Draft(String text, String basisRecordingId, long revision) {}
@@ -36,6 +39,7 @@ public final class Models {
             Recording original,
             List<Recording> renditions,
             Draft draft,
+            Attempt latestAttempt,
             Instant createdAt,
             Instant updatedAt) {}
 
@@ -54,4 +58,49 @@ public final class Models {
             long draftRevision,
             String location,
             boolean replayed) {}
+
+    public record CreateRequestCommand(
+            String text,
+            String basisRecordingId,
+            Long expectedSourceRevision,
+            Long expectedDraftRevision) {}
+
+    public record CreationReceipt(
+            String requestId,
+            String attemptId,
+            String statusUrl,
+            long consumedDraftRevision,
+            long nextDraftRevision,
+            boolean replayed) {}
+
+    public record GenerationRequest(
+            String id,
+            String explorationId,
+            String sourceRecordingId,
+            long sourceRevision,
+            String basisRecordingId,
+            String text,
+            String inheritedDirection,
+            String direction,
+            String assembledInstructions,
+            String assemblerVersion,
+            String adapterConfigurationId,
+            String provenance,
+            Instant createdAt) {}
+
+    public record AttemptOutcome(String code, String detail) {}
+
+    public record Attempt(
+            String id,
+            String explorationId,
+            String requestId,
+            String state,
+            long version,
+            GenerationRequest request,
+            AttemptOutcome outcome,
+            String resultRecordingId,
+            boolean canRetry,
+            List<String> permittedActions,
+            Instant createdAt,
+            Instant updatedAt) {}
 }

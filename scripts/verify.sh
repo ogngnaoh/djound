@@ -5,6 +5,7 @@ cd "$DJOUND_ROOT"
 mode="${1:-all}"
 case "$mode" in
   fast)
+    export DJOUND_MODE=UNCONFIGURED
     docker compose up -d --pull never --wait db
     pnpm --dir web run format:check
     pnpm --dir web test
@@ -16,11 +17,16 @@ case "$mode" in
     ;;
   browser)
     node scripts/browser-smoke.mjs
+    node scripts/editor-smoke.mjs
+    ;;
+  fixture)
+    bash scripts/verify-installation.sh fixture
     ;;
   all)
     bash scripts/verify.sh fast
     bash scripts/package.sh
     bash scripts/verify-installation.sh
+    bash scripts/verify-installation.sh fixture
     ;;
-  *) echo 'Usage: scripts/verify.sh [all|fast|api|browser]' >&2; exit 2 ;;
+  *) echo 'Usage: scripts/verify.sh [all|fast|api|browser|fixture]' >&2; exit 2 ;;
 esac

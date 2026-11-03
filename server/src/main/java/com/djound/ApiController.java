@@ -14,8 +14,13 @@ import java.util.*;
 public class ApiController {
     private final Explorations explorations;
     private final MediaStore media;
+    private final com.djound.generation.GenerationService generations;
 
-    public ApiController(Explorations explorations, MediaStore media) {
+    public ApiController(
+            Explorations explorations,
+            MediaStore media,
+            com.djound.generation.GenerationService generations) {
+        this.generations = generations;
         this.explorations = explorations;
         this.media = media;
     }
@@ -23,12 +28,14 @@ public class ApiController {
     @GetMapping("/workspace")
     public Map<String, Object> workspace() {
         Map<String, Object> result = new LinkedHashMap<>();
-        result.put("mode", "UNCONFIGURED");
-        result.put("configuration", "UNCONFIGURED");
-        result.put("eligibility", "UNKNOWN");
-        result.put("canSubmit", false);
-        result.put("canCreateExploration", explorations.canCreate());
-        result.put("activeAttemptId", null);
+        String active = generations.activeAttemptId();
+        boolean fixture = generations.configuration().fixture();
+        result.put("mode", generations.configuration().mode());
+        result.put("configuration", fixture ? "CONFIGURED" : "UNCONFIGURED");
+        result.put("eligibility", fixture ? "ELIGIBLE" : "UNKNOWN");
+        result.put("canSubmit", fixture && active == null);
+        result.put("canCreateExploration", active == null);
+        result.put("activeAttemptId", active);
         result.put(
                 "inputPolicy",
                 Map.of(
@@ -86,6 +93,20 @@ public class ApiController {
             throws IOException {
         var receipt = explorations.replaceSource(id, file, expectedSourceRevision, key);
         return ResponseEntity.ok().header("Location", receipt.location()).body(receipt);
+    }
+
+    @PostMapping(value = "/explorations/{id}/requests", consumes = MediaType.APPLICATION_JSON_VALUE)
+    public ResponseEntity<Models.CreationReceipt> createRequest(
+            @PathVariable String id,
+            @RequestBody Models.CreateRequestCommand command,
+            @RequestHeader("Idempotency-Key") String key) {
+        var receipt = generations.create(id, command, key);
+        return ResponseEntity.accepted().header("Location", receipt.statusUrl()).body(receipt);
+    }
+
+    @GetMapping("/attempts/{id}")
+    public Models.Attempt attempt(@PathVariable String id) {
+        return generations.get(id);
     }
 
     @RequestMapping(

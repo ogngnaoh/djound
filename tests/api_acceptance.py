@@ -184,6 +184,19 @@ assert problem(status, body, {409})['code'] == 'IDEMPOTENCY_CONFLICT'
 status, _, body = replace_source(exploration_id, replacement, 1, 'stale-replace-' + uuid.uuid4().hex)
 assert problem(status, body, {409})['code'] == 'SOURCE_CHANGED'
 
+# S03 normal mode must remain unavailable, with no accepted request or draft consumption.
+status, _, body = request('/api/explorations/' + exploration_id + '/requests', 'POST',
+                         json.dumps({'text': 'Do not run generation in unconfigured mode.',
+                                     'basisRecordingId': current['original']['id'],
+                                     'expectedSourceRevision': current['sourceRevision'],
+                                     'expectedDraftRevision': current['draft']['revision']}).encode(),
+                         {'Content-Type': 'application/json', 'Idempotency-Key': 'unconfigured-' + uuid.uuid4().hex})
+assert problem(status, body, {503})['code'] == 'PROVIDER_NOT_CONFIGURED'
+status, _, body = request('/api/explorations/' + exploration_id)
+unconfigured = json.loads(body)
+assert unconfigured['latestAttempt'] is None and unconfigured['renditions'] == []
+assert unconfigured['draft'] == current['draft']
+
 status, _, body = request('/api/explorations')
 expect(200, status, 'library after failed uploads')
 assert len(json.loads(body)['items']) == before + 2, 'Rejected uploads created library entries or replay duplicated one'
@@ -198,4 +211,4 @@ print(json.dumps({'result': 'PASS', 'explorationId': exploration_id, 'recordingI
                   'checks': ['real upload', 'receipt replay', 'concurrent replay', 'conflict', 'metadata/hash identity', 'HEAD', '206/416',
                              'corrupt/empty/rate/text rejection', 'origin policy', 'no failed library entries',
                              'packaged deep route', 'typed API 404', 'draft CAS conflict', 'source replacement/rebind',
-                             'old original retained', 'replacement replay preserves newer words', 'stale source rejection']}, indent=2))
+                             'old original retained', 'replacement replay preserves newer words', 'stale source rejection', 'unconfigured request rejects without consuming draft']}, indent=2))

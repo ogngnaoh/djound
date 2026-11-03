@@ -20,8 +20,14 @@ public class Explorations {
     private final JdbcClient jdbc;
     private final MediaStore media;
     private final TransactionTemplate transactions;
+    private final com.djound.generation.GenerationService generations;
 
-    public Explorations(JdbcClient jdbc, MediaStore media, PlatformTransactionManager manager) {
+    public Explorations(
+            JdbcClient jdbc,
+            MediaStore media,
+            PlatformTransactionManager manager,
+            com.djound.generation.GenerationService generations) {
+        this.generations = generations;
         this.jdbc = jdbc;
         this.media = media;
         this.transactions = new TransactionTemplate(manager);
@@ -402,42 +408,64 @@ public class Explorations {
     }
 
     public Exploration get(String id) {
-        return jdbc.sql(
-                        """
-                        SELECT e.id AS exploration_key, e.title AS exploration_title,
-                               e.source_revision, e.draft_text, e.draft_basis_id, e.draft_revision,
-                               e.created_at AS exploration_created_at, e.updated_at,
-                               ((SELECT active_attempt_id IS NULL FROM workspace WHERE id=1)
-                                AND NOT EXISTS(SELECT 1 FROM recording rendition
-                                               WHERE rendition.exploration_id=e.id AND rendition.kind='RENDITION'))
-                                AS can_replace_source, original.*
-                        FROM exploration e JOIN recording original ON original.id=e.original_id
-                        WHERE e.id=?
-                        """)
-                .param(id)
-                .query(
-                        (rs, n) ->
-                                new Exploration(
-                                        rs.getString("exploration_key"),
-                                        rs.getString("exploration_title"),
-                                        rs.getLong("source_revision"),
-                                        rs.getBoolean("can_replace_source"),
-                                        mapRecording(rs, n),
-                                        List.of(),
-                                        new Draft(
-                                                rs.getString("draft_text"),
-                                                rs.getString("draft_basis_id"),
-                                                rs.getLong("draft_revision")),
-                                        rs.getTimestamp("exploration_created_at").toInstant(),
-                                        rs.getTimestamp("updated_at").toInstant()))
-                .optional()
-                .orElseThrow(Explorations::missing);
+        Exploration core =
+                jdbc.sql(
+                                """
+                                SELECT e.id AS exploration_key, e.title AS exploration_title,
+                                       e.source_revision, e.draft_text, e.draft_basis_id, e.draft_revision,
+                                       e.created_at AS exploration_created_at, e.updated_at,
+                                       ((SELECT active_attempt_id IS NULL FROM workspace WHERE id=1)
+                                        AND NOT EXISTS(SELECT 1 FROM recording rendition
+                                                       WHERE rendition.exploration_id=e.id AND rendition.kind='RENDITION'))
+                                        AS can_replace_source, original.*
+                                FROM exploration e JOIN recording original ON original.id=e.original_id
+                                WHERE e.id=?
+                                """)
+                        .param(id)
+                        .query(
+                                (rs, n) ->
+                                        new Exploration(
+                                                rs.getString("exploration_key"),
+                                                rs.getString("exploration_title"),
+                                                rs.getLong("source_revision"),
+                                                rs.getBoolean("can_replace_source"),
+                                                mapRecording(rs, n),
+                                                List.of(),
+                                                new Draft(
+                                                        rs.getString("draft_text"),
+                                                        rs.getString("draft_basis_id"),
+                                                        rs.getLong("draft_revision")),
+                                                null,
+                                                rs.getTimestamp("exploration_created_at")
+                                                        .toInstant(),
+                                                rs.getTimestamp("updated_at").toInstant()))
+                        .optional()
+                        .orElseThrow(Explorations::missing);
+        var renditions =
+                jdbc.sql(
+                                "SELECT * FROM recording WHERE exploration_id=? AND"
+                                        + " kind='RENDITION' ORDER BY created_at,id")
+                        .param(id)
+                        .query(Explorations::mapRecording)
+                        .list();
+        return new Exploration(
+                core.id(),
+                core.title(),
+                core.sourceRevision(),
+                core.canReplaceSource(),
+                core.original(),
+                renditions,
+                core.draft(),
+                generations.latest(id),
+                core.createdAt(),
+                core.updatedAt());
     }
 
     public List<Summary> list() {
         return jdbc.sql(
                         """
-                        SELECT e.id AS exploration_key, e.title AS exploration_title, e.updated_at, original.*
+                        SELECT e.id AS exploration_key, e.title AS exploration_title, e.updated_at, original.*,
+                               (SELECT COUNT(*) FROM recording result WHERE result.exploration_id=e.id AND result.kind='RENDITION') AS rendition_count
                         FROM exploration e JOIN recording original ON original.id=e.original_id
                         ORDER BY e.updated_at DESC,e.id
                         """)
@@ -447,7 +475,7 @@ public class Explorations {
                                         rs.getString("exploration_key"),
                                         rs.getString("exploration_title"),
                                         mapRecording(rs, n),
-                                        0,
+                                        rs.getInt("rendition_count"),
                                         List.of(),
                                         rs.getTimestamp("updated_at").toInstant()))
                 .list();
@@ -500,6 +528,9 @@ public class Explorations {
                 "/api/media/" + r.getString("id"),
                 r.getString("provenance"),
                 r.getBoolean("kept"),
+                r.getString("direction"),
+                r.getString("request_id"),
+                r.getString("attempt_id"),
                 r.getTimestamp("created_at").toInstant());
     }
 }

@@ -90,6 +90,42 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/explorations/{id}/requests": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: components["parameters"]["ResourceId"];
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: operations["createRequest"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/attempts/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: components["parameters"]["ResourceId"];
+            };
+            cookie?: never;
+        };
+        get: operations["getAttempt"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/media/{id}": {
         parameters: {
             query?: never;
@@ -165,6 +201,9 @@ export interface components {
             /** @enum {string} */
             provenance: "ORIGINAL" | "FIXTURE" | "LIVE";
             kept: boolean;
+            direction: string | null;
+            requestId: string | null;
+            attemptId: string | null;
             /** Format: date-time */
             createdAt: string;
         };
@@ -189,6 +228,7 @@ export interface components {
             renditions: components["schemas"]["Recording"][];
             draft: components["schemas"]["Draft"];
             canReplaceSource: boolean;
+            latestAttempt: components["schemas"]["Attempt"] | null;
             /** Format: date-time */
             createdAt: string;
             /** Format: date-time */
@@ -212,6 +252,64 @@ export interface components {
             draftRevision: number;
             location: string;
             replayed: boolean;
+        };
+        CreateRequestCommand: {
+            text: string;
+            basisRecordingId: string | null;
+            /** Format: int64 */
+            expectedSourceRevision: number;
+            /** Format: int64 */
+            expectedDraftRevision: number;
+        };
+        CreationReceipt: {
+            requestId: string;
+            attemptId: string;
+            statusUrl: string;
+            /** Format: int64 */
+            consumedDraftRevision: number;
+            /** Format: int64 */
+            nextDraftRevision: number;
+            replayed: boolean;
+        };
+        GenerationRequest: {
+            id: string;
+            explorationId: string;
+            sourceRecordingId: string;
+            /** Format: int64 */
+            sourceRevision: number;
+            basisRecordingId: string | null;
+            text: string;
+            inheritedDirection: string;
+            direction: string;
+            assembledInstructions: string;
+            assemblerVersion: string;
+            adapterConfigurationId: string;
+            /** @enum {string} */
+            provenance: "FIXTURE" | "LIVE";
+            /** Format: date-time */
+            createdAt: string;
+        };
+        Attempt: {
+            id: string;
+            explorationId: string;
+            requestId: string;
+            /** @enum {string} */
+            state: "ACCEPTED" | "SUBMITTING" | "RUNNING" | "SAVING" | "RECONCILING" | "SUCCEEDED" | "FAILED";
+            /** Format: int64 */
+            version: number;
+            request: components["schemas"]["GenerationRequest"];
+            outcome: components["schemas"]["AttemptOutcome"] | null;
+            resultRecordingId: string | null;
+            canRetry: boolean;
+            permittedActions: string[];
+            /** Format: date-time */
+            createdAt: string;
+            /** Format: date-time */
+            updatedAt: string;
+        };
+        AttemptOutcome: {
+            code: string;
+            detail: string;
         };
     };
     responses: {
@@ -387,6 +485,58 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["UploadReceipt"];
+                };
+            };
+            default: components["responses"]["Problem"];
+        };
+    };
+    createRequest: {
+        parameters: {
+            query?: never;
+            header: {
+                "Idempotency-Key": components["parameters"]["IdempotencyKey"];
+            };
+            path: {
+                id: components["parameters"]["ResourceId"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CreateRequestCommand"];
+            };
+        };
+        responses: {
+            /** @description Durable acceptance or identical receipt replay; fetch current attempt and draft */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CreationReceipt"];
+                };
+            };
+            default: components["responses"]["Problem"];
+        };
+    };
+    getAttempt: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: components["parameters"]["ResourceId"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Durable attempt phase, immutable request, and any published result */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Attempt"];
                 };
             };
             default: components["responses"]["Problem"];

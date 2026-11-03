@@ -467,7 +467,9 @@ class BackendIntegrationTest {
                         .code);
         var jdbc = app.getBean(JdbcClient.class);
         jdbc.sql(
-                        "INSERT INTO recording SELECT"
+                        "INSERT INTO"
+                            + " recording(id,exploration_id,title,kind,file_name,storage_key,content_type,byte_size,duration_ms,sample_rate,channels,codec,sha256,provenance,kept,created_at)"
+                            + " SELECT"
                             + " 'rendition_test',exploration_id,title,'RENDITION',file_name,'unique-test-storage',content_type,byte_size,duration_ms,sample_rate,channels,codec,sha256,'FIXTURE',false,created_at"
                             + " FROM recording WHERE id=?")
                 .param(current.original().id())
@@ -577,7 +579,8 @@ class BackendIntegrationTest {
                             JdbcClient.create(single),
                             app.getBean(MediaStore.class),
                             new org.springframework.jdbc.datasource.DataSourceTransactionManager(
-                                    single));
+                                    single),
+                            app.getBean(com.djound.generation.GenerationService.class));
             var first =
                     service.create(
                             wav("one connection.wav", 44100, 1, 16, 1), "notes", "single-pool-key");
@@ -592,6 +595,65 @@ class BackendIntegrationTest {
                         assertEquals(1, summaries.size());
                         assertEquals(detail.original(), summaries.getFirst().original());
                     });
+        }
+    }
+
+    @Test
+    void emptyInitialDraftIsAcceptedThroughRealMultipartHttp() throws Exception {
+        String endpoint =
+                "http://127.0.0.1:"
+                        + app.getEnvironment().getProperty("local.server.port")
+                        + "/api/explorations";
+        String boundary = "djound-empty-draft";
+        byte[] audio = wave(44100, 1, 16, 1);
+        String fileHeader =
+                "--"
+                        + boundary
+                        + "\r\n"
+                        + "Content-Disposition: form-data; name=\"file\"; filename=\"empty"
+                        + " draft.wav\"\r\n"
+                        + "Content-Type: audio/wav\r\n\r\n";
+        String emptyField =
+                "--"
+                        + boundary
+                        + "\r\nContent-Disposition: form-data; name=\"initialDraft\"\r\n\r\n\r\n";
+        String ending = "\r\n--" + boundary + "--\r\n";
+        try (var client = java.net.http.HttpClient.newHttpClient()) {
+            var payload =
+                    java.net.http.HttpRequest.BodyPublishers.concat(
+                            java.net.http.HttpRequest.BodyPublishers.ofString(
+                                    emptyField + fileHeader),
+                            java.net.http.HttpRequest.BodyPublishers.ofByteArray(audio),
+                            java.net.http.HttpRequest.BodyPublishers.ofString(ending));
+            var request =
+                    java.net.http.HttpRequest.newBuilder(java.net.URI.create(endpoint))
+                            .header("Content-Type", "multipart/form-data; boundary=" + boundary)
+                            .header("Idempotency-Key", "empty-draft-http-key")
+                            .POST(payload)
+                            .build();
+            var response = client.send(request, java.net.http.HttpResponse.BodyHandlers.ofString());
+            assertEquals(201, response.statusCode(), response.body());
+            var details =
+                    app.getBean(Explorations.class)
+                            .get(app.getBean(Explorations.class).list().getFirst().id());
+            assertEquals("", details.draft().text());
+            var missing =
+                    java.net.http.HttpRequest.newBuilder(java.net.URI.create(endpoint))
+                            .header("Content-Type", "multipart/form-data; boundary=" + boundary)
+                            .header("Idempotency-Key", "missing-draft-http-key")
+                            .POST(
+                                    java.net.http.HttpRequest.BodyPublishers.concat(
+                                            java.net.http.HttpRequest.BodyPublishers.ofString(
+                                                    fileHeader),
+                                            java.net.http.HttpRequest.BodyPublishers.ofByteArray(
+                                                    audio),
+                                            java.net.http.HttpRequest.BodyPublishers.ofString(
+                                                    ending)))
+                            .build();
+            assertEquals(
+                    400,
+                    client.send(missing, java.net.http.HttpResponse.BodyHandlers.ofString())
+                            .statusCode());
         }
     }
 

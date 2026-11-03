@@ -104,6 +104,37 @@ paths:
             application/json:
               schema: { $ref: '#/components/schemas/UploadReceipt' }
         default: { $ref: '#/components/responses/Problem' }
+  /api/explorations/{id}/requests:
+    parameters:
+      - $ref: '#/components/parameters/ResourceId'
+    post:
+      operationId: createRequest
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/CreateRequestCommand' }
+      responses:
+        '202':
+          description: Durable acceptance or identical receipt replay; fetch current attempt and draft
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/CreationReceipt' }
+        default: { $ref: '#/components/responses/Problem' }
+  /api/attempts/{id}:
+    parameters:
+      - $ref: '#/components/parameters/ResourceId'
+    get:
+      operationId: getAttempt
+      responses:
+        '200':
+          description: Durable attempt phase, immutable request, and any published result
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Attempt' }
+        default: { $ref: '#/components/responses/Problem' }
   /api/media/{id}:
     parameters:
       - $ref: '#/components/parameters/ResourceId'
@@ -196,7 +227,7 @@ components:
         inputPolicy: { $ref: '#/components/schemas/InputPolicy' }
     Recording:
       type: object
-      required: [id, explorationId, kind, title, fileName, contentType, byteSize, durationMs, sampleRate, channels, codec, sha256, mediaUrl, provenance, kept, createdAt]
+      required: [id, explorationId, kind, title, fileName, contentType, byteSize, durationMs, sampleRate, channels, codec, sha256, mediaUrl, provenance, kept, direction, requestId, attemptId, createdAt]
       properties:
         id: { type: string }
         explorationId: { type: string }
@@ -213,6 +244,9 @@ components:
         mediaUrl: { type: string }
         provenance: { type: string, enum: [ORIGINAL, FIXTURE, LIVE] }
         kept: { type: boolean }
+        direction: { type: [string, 'null'] }
+        requestId: { type: [string, 'null'] }
+        attemptId: { type: [string, 'null'] }
         createdAt: { type: string, format: date-time }
     Draft:
       type: object
@@ -230,7 +264,7 @@ components:
         expectedDraftRevision: { type: integer, format: int64, minimum: 1 }
     Exploration:
       type: object
-      required: [id, title, sourceRevision, original, renditions, draft, canReplaceSource, createdAt, updatedAt]
+      required: [id, title, sourceRevision, original, renditions, draft, canReplaceSource, latestAttempt, createdAt, updatedAt]
       properties:
         id: { type: string }
         title: { type: string }
@@ -241,6 +275,10 @@ components:
           items: { $ref: '#/components/schemas/Recording' }
         draft: { $ref: '#/components/schemas/Draft' }
         canReplaceSource: { type: boolean }
+        latestAttempt:
+          oneOf:
+            - $ref: '#/components/schemas/Attempt'
+            - type: 'null'
         createdAt: { type: string, format: date-time }
         updatedAt: { type: string, format: date-time }
     ExplorationSummary:
@@ -265,3 +303,65 @@ components:
         draftRevision: { type: integer, format: int64 }
         location: { type: string }
         replayed: { type: boolean }
+    CreateRequestCommand:
+      type: object
+      required: [text, basisRecordingId, expectedSourceRevision, expectedDraftRevision]
+      properties:
+        text: { type: string, minLength: 1, maxLength: 4000 }
+        basisRecordingId: { type: [string, 'null'] }
+        expectedSourceRevision: { type: integer, format: int64, minimum: 1 }
+        expectedDraftRevision: { type: integer, format: int64, minimum: 1 }
+    CreationReceipt:
+      type: object
+      required: [requestId, attemptId, statusUrl, consumedDraftRevision, nextDraftRevision, replayed]
+      properties:
+        requestId: { type: string }
+        attemptId: { type: string }
+        statusUrl: { type: string }
+        consumedDraftRevision: { type: integer, format: int64 }
+        nextDraftRevision: { type: integer, format: int64 }
+        replayed: { type: boolean }
+    GenerationRequest:
+      type: object
+      required: [id, explorationId, sourceRecordingId, sourceRevision, basisRecordingId, text, inheritedDirection, direction, assembledInstructions, assemblerVersion, adapterConfigurationId, provenance, createdAt]
+      properties:
+        id: { type: string }
+        explorationId: { type: string }
+        sourceRecordingId: { type: string }
+        sourceRevision: { type: integer, format: int64 }
+        basisRecordingId: { type: [string, 'null'] }
+        text: { type: string }
+        inheritedDirection: { type: string }
+        direction: { type: string }
+        assembledInstructions: { type: string }
+        assemblerVersion: { type: string }
+        adapterConfigurationId: { type: string }
+        provenance: { type: string, enum: [FIXTURE, LIVE] }
+        createdAt: { type: string, format: date-time }
+    Attempt:
+      type: object
+      required: [id, explorationId, requestId, state, version, request, outcome, resultRecordingId, canRetry, permittedActions, createdAt, updatedAt]
+      properties:
+        id: { type: string }
+        explorationId: { type: string }
+        requestId: { type: string }
+        state: { type: string, enum: [ACCEPTED, SUBMITTING, RUNNING, SAVING, RECONCILING, SUCCEEDED, FAILED] }
+        version: { type: integer, format: int64 }
+        request: { $ref: '#/components/schemas/GenerationRequest' }
+        outcome:
+          oneOf:
+            - $ref: '#/components/schemas/AttemptOutcome'
+            - type: 'null'
+        resultRecordingId: { type: [string, 'null'] }
+        canRetry: { type: boolean }
+        permittedActions:
+          type: array
+          items: { type: string }
+        createdAt: { type: string, format: date-time }
+        updatedAt: { type: string, format: date-time }
+    AttemptOutcome:
+      type: object
+      required: [code, detail]
+      properties:
+        code: { type: string }
+        detail: { type: string }

@@ -3,6 +3,10 @@ package com.djound;
 import java.util.List;
 
 public class ApiProblem extends RuntimeException {
+    public String code() {
+        return code;
+    }
+
     final int status;
     final String code;
     final List<String> actions;
