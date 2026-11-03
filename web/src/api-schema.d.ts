@@ -54,6 +54,42 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/explorations/{id}/draft": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: components["parameters"]["ResourceId"];
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put: operations["updateDraft"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/explorations/{id}/source": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: components["parameters"]["ResourceId"];
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put: operations["replaceSource"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/media/{id}": {
         parameters: {
             query?: never;
@@ -138,6 +174,12 @@ export interface components {
             /** Format: int64 */
             revision: number;
         };
+        DraftUpdate: {
+            text: string;
+            basisRecordingId: string | null;
+            /** Format: int64 */
+            expectedDraftRevision: number;
+        };
         Exploration: {
             id: string;
             title: string;
@@ -146,6 +188,7 @@ export interface components {
             original: components["schemas"]["Recording"];
             renditions: components["schemas"]["Recording"][];
             draft: components["schemas"]["Draft"];
+            canReplaceSource: boolean;
             /** Format: date-time */
             createdAt: string;
             /** Format: date-time */
@@ -283,6 +326,67 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["Exploration"];
+                };
+            };
+            default: components["responses"]["Problem"];
+        };
+    };
+    updateDraft: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: components["parameters"]["ResourceId"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["DraftUpdate"];
+            };
+        };
+        responses: {
+            /** @description Saved draft and its advanced revision */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Draft"];
+                };
+            };
+            default: components["responses"]["Problem"];
+        };
+    };
+    replaceSource: {
+        parameters: {
+            query?: never;
+            header: {
+                "Idempotency-Key": components["parameters"]["IdempotencyKey"];
+            };
+            path: {
+                id: components["parameters"]["ResourceId"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "multipart/form-data": {
+                    /** Format: binary */
+                    file: string;
+                    /** Format: int64 */
+                    expectedSourceRevision: number;
+                };
+            };
+        };
+        responses: {
+            /** @description Accepted replacement or identical receipt replay; fetch current draft after replay */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["UploadReceipt"];
                 };
             };
             default: components["responses"]["Problem"];

@@ -28,18 +28,8 @@ public class Explorations {
     }
 
     public Receipt create(MultipartFile file, String text, String key) throws IOException {
-        if (key == null || !key.matches("[A-Za-z0-9._:-]{8,128}"))
-            throw new ApiProblem(
-                    400,
-                    "INVALID_IDEMPOTENCY_KEY",
-                    "Provide a unique Idempotency-Key of 8–128 letters, digits or . _ : -.",
-                    "RETRY_UPLOAD");
-        if (text.codePointCount(0, text.length()) > 4000)
-            throw new ApiProblem(
-                    422,
-                    "TEXT_TOO_LONG",
-                    "Direction must be at most 4,000 characters.",
-                    "EDIT_TEXT");
+        validateKey(key);
+        validateText(text);
         try (var upload = media.ingest(file)) {
             // Length-prefixed fields prevent ambiguous command fingerprints; original name is part
             // of the accepted command.
@@ -62,7 +52,7 @@ public class Explorations {
                         var workspace =
                                 jdbc.sql(
                                                 "SELECT active_attempt_id FROM workspace WHERE id=1"
-                                                    + " FOR UPDATE")
+                                                        + " FOR UPDATE")
                                         .query()
                                         .singleRow();
                         var previous =
@@ -95,38 +85,13 @@ public class Explorations {
                                     409,
                                     "CREATION_ACTIVE",
                                     "Wait for the current creation to finish before adding another"
-                                        + " source.",
+                                            + " source.",
                                     "WAIT");
                         String exp = "exp_" + UUID.randomUUID(), rec = "rec_" + UUID.randomUUID();
                         Instant now = Instant.now();
                         String title = upload.fileName().replaceFirst("(?i)\\.(wav|mp3)$", "");
                         if (title.isBlank()) title = "Recording";
-                        String storage;
-                        try {
-                            storage = media.publish(upload);
-                        } catch (IOException e) {
-                            throw new ApiProblem(
-                                    500,
-                                    "MEDIA_STORAGE_FAILED",
-                                    "The recording could not be saved. Your direction is"
-                                        + " unchanged.",
-                                    "RETRY_UPLOAD");
-                        }
-                        final String publishedKey = storage;
-                        org.springframework.transaction.support.TransactionSynchronizationManager
-                                .registerSynchronization(
-                                        new org.springframework.transaction.support
-                                                .TransactionSynchronization() {
-                                            public void afterCompletion(int completion) {
-                                                if (completion == STATUS_ROLLED_BACK)
-                                                    try {
-                                                        java.nio.file.Files.deleteIfExists(
-                                                                media.path(publishedKey));
-                                                    } catch (IOException ignored) {
-                                                        /* Startup orphan reconciliation can reclaim this unreferenced file. */
-                                                    }
-                                            }
-                                        });
+                        String storage = publish(upload);
                         jdbc.sql(
                                         "INSERT INTO"
                                             + " exploration(id,title,original_id,draft_text,draft_basis_id,created_at,updated_at)"
@@ -140,25 +105,7 @@ public class Explorations {
                                         java.sql.Timestamp.from(now),
                                         java.sql.Timestamp.from(now))
                                 .update();
-                        jdbc.sql(
-                                        "INSERT INTO"
-                                            + " recording(id,exploration_id,title,kind,file_name,storage_key,content_type,byte_size,duration_ms,sample_rate,channels,codec,sha256,provenance,created_at)"
-                                            + " VALUES(?,?,?,'ORIGINAL',?,?,?,?,?,?,?,?,?,'ORIGINAL',?)")
-                                .params(
-                                        rec,
-                                        exp,
-                                        title,
-                                        upload.fileName(),
-                                        storage,
-                                        upload.contentType(),
-                                        upload.bytes(),
-                                        upload.durationMs(),
-                                        upload.sampleRate(),
-                                        upload.channels(),
-                                        upload.codec(),
-                                        upload.hash(),
-                                        java.sql.Timestamp.from(now))
-                                .update();
+                        insertOriginal(rec, exp, title, upload, storage, now);
                         jdbc.sql(
                                         "INSERT INTO"
                                             + " command_receipt(command_key,operation,fingerprint,exploration_id,recording_id,source_revision,draft_revision,created_at)"
@@ -170,35 +117,336 @@ public class Explorations {
         }
     }
 
+    public Draft saveDraft(String id, DraftUpdate command) {
+        if (command == null
+                || command.text() == null
+                || command.expectedDraftRevision() == null
+                || command.expectedDraftRevision() < 1) {
+            throw new ApiProblem(
+                    400,
+                    "INVALID_REQUEST",
+                    "Provide text and the current draft revision.",
+                    "EDIT_TEXT");
+        }
+        validateText(command.text());
+        return transactions.execute(
+                status -> {
+                    var row =
+                            jdbc
+                                    .sql("SELECT * FROM exploration WHERE id=? FOR UPDATE")
+                                    .param(id)
+                                    .query()
+                                    .listOfRows()
+                                    .stream()
+                                    .findFirst()
+                                    .orElseThrow(Explorations::missing);
+                    long revision = ((Number) row.get("draft_revision")).longValue();
+                    if (revision != command.expectedDraftRevision()) {
+                        throw new ApiProblem(
+                                409,
+                                "STALE_DRAFT",
+                                "This direction changed elsewhere. Review the saved version before"
+                                        + " saving your words.",
+                                "REFRESH_DRAFT");
+                    }
+                    String basis =
+                            command.basisRecordingId() == null
+                                    ? (String) row.get("original_id")
+                                    : command.basisRecordingId();
+                    boolean validBasis =
+                            jdbc.sql(
+                                            "SELECT EXISTS(SELECT 1 FROM recording WHERE id=? AND"
+                                                    + " exploration_id=? AND (id=? OR"
+                                                    + " kind='RENDITION'))")
+                                    .params(basis, id, row.get("original_id"))
+                                    .query(Boolean.class)
+                                    .single();
+                    if (!validBasis) {
+                        throw new ApiProblem(
+                                409,
+                                "SOURCE_CHANGED",
+                                "This direction refers to an unavailable or replaced recording.",
+                                "REFRESH_DRAFT");
+                    }
+                    int changed =
+                            jdbc.sql(
+                                            "UPDATE exploration SET"
+                                                + " draft_text=?,draft_basis_id=?,draft_revision=draft_revision+1,updated_at=?"
+                                                + " WHERE id=? AND draft_revision=?")
+                                    .params(
+                                            command.text(),
+                                            basis,
+                                            java.sql.Timestamp.from(Instant.now()),
+                                            id,
+                                            revision)
+                                    .update();
+                    if (changed != 1)
+                        throw new IllegalStateException(
+                                "Locked draft revision changed unexpectedly");
+                    return new Draft(command.text(), basis, revision + 1);
+                });
+    }
+
+    public Receipt replaceSource(String id, MultipartFile file, long expectedRevision, String key)
+            throws IOException {
+        validateKey(key);
+        if (expectedRevision < 1)
+            throw new ApiProblem(
+                    400, "INVALID_REQUEST", "Provide the current source revision.", "RETRY_UPLOAD");
+        try (var upload = media.ingest(file)) {
+            String operation = "REPLACE_SOURCE:" + id;
+            String body =
+                    operation
+                            + "|"
+                            + expectedRevision
+                            + "|"
+                            + upload.hash()
+                            + "|"
+                            + upload.fileName().length()
+                            + ":"
+                            + upload.fileName();
+            String fingerprint =
+                    HexFormat.of()
+                            .formatHex(
+                                    MediaStore.sha().digest(body.getBytes(StandardCharsets.UTF_8)));
+            return transactions.execute(
+                    status -> {
+                        var workspace =
+                                jdbc.sql(
+                                                "SELECT active_attempt_id FROM workspace WHERE id=1"
+                                                        + " FOR UPDATE")
+                                        .query()
+                                        .singleRow();
+                        Receipt accepted = replay(key, operation, fingerprint);
+                        if (accepted != null) return accepted;
+                        var row =
+                                jdbc
+                                        .sql("SELECT * FROM exploration WHERE id=? FOR UPDATE")
+                                        .param(id)
+                                        .query()
+                                        .listOfRows()
+                                        .stream()
+                                        .findFirst()
+                                        .orElseThrow(Explorations::missing);
+                        if (workspace.get("active_attempt_id") != null) {
+                            throw new ApiProblem(
+                                    409,
+                                    "CREATION_ACTIVE",
+                                    "Wait for the current creation to finish before replacing the"
+                                            + " source.",
+                                    "WAIT");
+                        }
+                        if (jdbc.sql(
+                                        "SELECT EXISTS(SELECT 1 FROM recording WHERE"
+                                                + " exploration_id=? AND kind='RENDITION')")
+                                .param(id)
+                                .query(Boolean.class)
+                                .single()) {
+                            throw new ApiProblem(
+                                    409,
+                                    "SOURCE_REPLACEMENT_UNAVAILABLE",
+                                    "This exploration already has renditions. Start a new remix to"
+                                            + " use another source.",
+                                    "NEW_REMIX");
+                        }
+                        long revision = ((Number) row.get("source_revision")).longValue();
+                        if (revision != expectedRevision) {
+                            throw new ApiProblem(
+                                    409,
+                                    "SOURCE_CHANGED",
+                                    "The source has changed. Review the current recording before"
+                                            + " replacing it.",
+                                    "REFRESH_EXPLORATION");
+                        }
+                        long draftRevision = ((Number) row.get("draft_revision")).longValue() + 1;
+                        String rec = "rec_" + UUID.randomUUID();
+                        Instant now = Instant.now();
+                        String title = upload.fileName().replaceFirst("(?i)\\.(wav|mp3)$", "");
+                        if (title.isBlank()) title = "Recording";
+                        String storage = publish(upload);
+                        insertOriginal(rec, id, title, upload, storage, now);
+                        // Deliberately do not write draft_text: the latest saved words survive
+                        // replacement.
+                        jdbc.sql(
+                                        "UPDATE exploration SET"
+                                            + " title=?,original_id=?,source_revision=source_revision+1,draft_basis_id=?,draft_revision=draft_revision+1,updated_at=?"
+                                            + " WHERE id=?")
+                                .params(title, rec, rec, java.sql.Timestamp.from(now), id)
+                                .update();
+                        jdbc.sql(
+                                        "INSERT INTO"
+                                            + " command_receipt(command_key,operation,fingerprint,exploration_id,recording_id,source_revision,draft_revision,created_at)"
+                                            + " VALUES(?,?,?,?,?,?,?,?)")
+                                .params(
+                                        key,
+                                        operation,
+                                        fingerprint,
+                                        id,
+                                        rec,
+                                        revision + 1,
+                                        draftRevision,
+                                        java.sql.Timestamp.from(now))
+                                .update();
+                        return new Receipt(
+                                id,
+                                rec,
+                                revision + 1,
+                                draftRevision,
+                                "/api/explorations/" + id,
+                                false);
+                    });
+        }
+    }
+
+    private Receipt replay(String key, String operation, String fingerprint) {
+        var previous =
+                jdbc
+                        .sql("SELECT * FROM command_receipt WHERE command_key=?")
+                        .param(key)
+                        .query()
+                        .listOfRows()
+                        .stream()
+                        .findFirst();
+        if (previous.isEmpty()) return null;
+        var row = previous.get();
+        if (!operation.equals(row.get("operation"))
+                || !fingerprint.equals(row.get("fingerprint"))) {
+            throw new ApiProblem(
+                    409,
+                    "IDEMPOTENCY_CONFLICT",
+                    "This key already belongs to a different command.",
+                    "CHOOSE_FILE");
+        }
+        return new Receipt(
+                (String) row.get("exploration_id"),
+                (String) row.get("recording_id"),
+                ((Number) row.get("source_revision")).longValue(),
+                ((Number) row.get("draft_revision")).longValue(),
+                "/api/explorations/" + row.get("exploration_id"),
+                true);
+    }
+
+    private String publish(MediaStore.Upload upload) {
+        final String storage;
+        try {
+            storage = media.publish(upload);
+        } catch (IOException error) {
+            throw new ApiProblem(
+                    500,
+                    "MEDIA_STORAGE_FAILED",
+                    "The recording could not be saved. Your direction is unchanged.",
+                    "RETRY_UPLOAD");
+        }
+        org.springframework.transaction.support.TransactionSynchronizationManager
+                .registerSynchronization(
+                        new org.springframework.transaction.support.TransactionSynchronization() {
+                            public void afterCompletion(int completion) {
+                                if (completion == STATUS_ROLLED_BACK) {
+                                    try {
+                                        java.nio.file.Files.deleteIfExists(media.path(storage));
+                                    } catch (IOException ignored) {
+                                        /* Unreferenced files can be reclaimed during startup reconciliation. */
+                                    }
+                                }
+                            }
+                        });
+        return storage;
+    }
+
+    private void insertOriginal(
+            String rec,
+            String exp,
+            String title,
+            MediaStore.Upload upload,
+            String storage,
+            Instant now) {
+        jdbc.sql(
+                        "INSERT INTO"
+                            + " recording(id,exploration_id,title,kind,file_name,storage_key,content_type,byte_size,duration_ms,sample_rate,channels,codec,sha256,provenance,created_at)"
+                            + " VALUES(?,?,?,'ORIGINAL',?,?,?,?,?,?,?,?,?,'ORIGINAL',?)")
+                .params(
+                        rec,
+                        exp,
+                        title,
+                        upload.fileName(),
+                        storage,
+                        upload.contentType(),
+                        upload.bytes(),
+                        upload.durationMs(),
+                        upload.sampleRate(),
+                        upload.channels(),
+                        upload.codec(),
+                        upload.hash(),
+                        java.sql.Timestamp.from(now))
+                .update();
+    }
+
+    private static void validateKey(String key) {
+        if (key == null || !key.matches("[A-Za-z0-9._:-]{8,128}")) {
+            throw new ApiProblem(
+                    400,
+                    "INVALID_IDEMPOTENCY_KEY",
+                    "Provide a unique Idempotency-Key of 8–128 letters, digits or . _ : -.",
+                    "RETRY_UPLOAD");
+        }
+    }
+
+    private static void validateText(String text) {
+        if (text.codePointCount(0, text.length()) > 4000) {
+            throw new ApiProblem(
+                    422,
+                    "TEXT_TOO_LONG",
+                    "Direction must be at most 4,000 characters.",
+                    "EDIT_TEXT");
+        }
+    }
+
     public Exploration get(String id) {
-        return jdbc.sql("SELECT * FROM exploration WHERE id=?")
+        return jdbc.sql(
+                        """
+                        SELECT e.id AS exploration_key, e.title AS exploration_title,
+                               e.source_revision, e.draft_text, e.draft_basis_id, e.draft_revision,
+                               e.created_at AS exploration_created_at, e.updated_at,
+                               ((SELECT active_attempt_id IS NULL FROM workspace WHERE id=1)
+                                AND NOT EXISTS(SELECT 1 FROM recording rendition
+                                               WHERE rendition.exploration_id=e.id AND rendition.kind='RENDITION'))
+                                AS can_replace_source, original.*
+                        FROM exploration e JOIN recording original ON original.id=e.original_id
+                        WHERE e.id=?
+                        """)
                 .param(id)
                 .query(
                         (rs, n) ->
                                 new Exploration(
-                                        rs.getString("id"),
-                                        rs.getString("title"),
+                                        rs.getString("exploration_key"),
+                                        rs.getString("exploration_title"),
                                         rs.getLong("source_revision"),
-                                        recording(rs.getString("original_id")),
+                                        rs.getBoolean("can_replace_source"),
+                                        mapRecording(rs, n),
                                         List.of(),
                                         new Draft(
                                                 rs.getString("draft_text"),
                                                 rs.getString("draft_basis_id"),
                                                 rs.getLong("draft_revision")),
-                                        rs.getTimestamp("created_at").toInstant(),
+                                        rs.getTimestamp("exploration_created_at").toInstant(),
                                         rs.getTimestamp("updated_at").toInstant()))
                 .optional()
-                .orElseThrow(() -> missing());
+                .orElseThrow(Explorations::missing);
     }
 
     public List<Summary> list() {
-        return jdbc.sql("SELECT * FROM exploration ORDER BY updated_at DESC,id")
+        return jdbc.sql(
+                        """
+                        SELECT e.id AS exploration_key, e.title AS exploration_title, e.updated_at, original.*
+                        FROM exploration e JOIN recording original ON original.id=e.original_id
+                        ORDER BY e.updated_at DESC,e.id
+                        """)
                 .query(
                         (rs, n) ->
                                 new Summary(
-                                        rs.getString("id"),
-                                        rs.getString("title"),
-                                        recording(rs.getString("original_id")),
+                                        rs.getString("exploration_key"),
+                                        rs.getString("exploration_title"),
+                                        mapRecording(rs, n),
                                         0,
                                         List.of(),
                                         rs.getTimestamp("updated_at").toInstant()))

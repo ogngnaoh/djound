@@ -54,7 +54,7 @@ public class Installation implements AutoCloseable {
             JdbcClient jdbc = JdbcClient.create(ds);
             jdbc.sql(
                             "INSERT INTO workspace(id,installation_id,canonical_directory)"
-                                + " VALUES(1,?,?) ON CONFLICT DO NOTHING")
+                                    + " VALUES(1,?,?) ON CONFLICT DO NOTHING")
                     .params(id, root.toString())
                     .update();
             var row =

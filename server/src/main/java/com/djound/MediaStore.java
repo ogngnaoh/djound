@@ -90,7 +90,7 @@ public class MediaStore {
                 if (!stream.path("codec_type").asString().equals("audio") || audio != null)
                     throw invalid(
                             "The file must contain exactly one audio stream and no playable"
-                                + " video.");
+                                    + " video.");
                 audio = stream;
             }
             if (audio == null) throw invalid("The file contains no audio stream.");

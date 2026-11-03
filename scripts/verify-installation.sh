@@ -48,6 +48,7 @@ start_app() {
 start_app
 if [[ "${1:-all}" != api ]]; then
   node scripts/browser-smoke.mjs | tee "$run_dir/browser-result.json"
+  node scripts/editor-smoke.mjs | tee "$run_dir/editor-result.json"
 fi
 python3 tests/api_acceptance.py | tee "$run_dir/api-result.json"
 expect_startup_failure() {

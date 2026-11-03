@@ -6,6 +6,8 @@ mode="${1:-all}"
 case "$mode" in
   fast)
     docker compose up -d --pull never --wait db
+    pnpm --dir web run format:check
+    pnpm --dir web test
     pnpm --dir web run build
     server/mvnw -o -f server/pom.xml test
     ;;

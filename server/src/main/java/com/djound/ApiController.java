@@ -71,6 +71,23 @@ public class ApiController {
         return ResponseEntity.status(201).header("Location", receipt.location()).body(receipt);
     }
 
+    @PutMapping(value = "/explorations/{id}/draft", consumes = MediaType.APPLICATION_JSON_VALUE)
+    public Models.Draft saveDraft(
+            @PathVariable String id, @RequestBody Models.DraftUpdate command) {
+        return explorations.saveDraft(id, command);
+    }
+
+    @PutMapping(value = "/explorations/{id}/source", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
+    public ResponseEntity<Models.Receipt> replaceSource(
+            @PathVariable String id,
+            @RequestPart MultipartFile file,
+            @RequestParam long expectedSourceRevision,
+            @RequestHeader("Idempotency-Key") String key)
+            throws IOException {
+        var receipt = explorations.replaceSource(id, file, expectedSourceRevision, key);
+        return ResponseEntity.ok().header("Location", receipt.location()).body(receipt);
+    }
+
     @RequestMapping(
             value = "/media/{id}",
             method = {RequestMethod.GET, RequestMethod.HEAD})

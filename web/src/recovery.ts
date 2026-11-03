@@ -25,9 +25,25 @@ function database(): Promise<IDBDatabase> {
     r.onerror = () => reject(r.error);
   });
 }
-export async function pendingUpload(
-  value?: PendingUpload | null,
-): Promise<PendingUpload | undefined> {
+export class PendingCommandConflict extends Error {
+  command: unknown;
+  constructor(command: unknown) {
+    super(
+      "Another tab has a pending upload. Recover that command before starting another.",
+    );
+    this.name = "PendingCommandConflict";
+    this.command = command;
+  }
+}
+// Read/claim/clear all run in a single IndexedDB transaction. Readwrite
+// transactions on this store are serialized even across separate browser tabs.
+export async function pendingCommand<T extends { key: string }>(
+  slot: string,
+  value?: T | null,
+  expectedKey?: string,
+): Promise<T | undefined> {
+  if (value === null && !expectedKey)
+    throw new Error("Clearing a command requires its owner key.");
   const db = await database();
   return new Promise((resolve, reject) => {
     const tx = db.transaction(
@@ -35,19 +51,45 @@ export async function pendingUpload(
       value === undefined ? "readonly" : "readwrite",
     );
     const store = tx.objectStore("pending");
-    const req =
-      value === undefined
-        ? store.get("new")
-        : value === null
-          ? store.delete("new")
-          : store.put(value, "new");
+    const read = store.get(slot);
+    let result: T | undefined;
+    let conflict: PendingCommandConflict | undefined;
+    read.onsuccess = () => {
+      const existing = read.result as T | undefined;
+      if (value === undefined) {
+        result = existing;
+        return;
+      }
+      if (value === null) {
+        if (existing?.key === expectedKey) store.delete(slot);
+        return;
+      }
+      if (existing) {
+        if (existing.key !== value.key)
+          conflict = new PendingCommandConflict(existing);
+        // An identical key retains its originally persisted body byte-for-byte.
+        return;
+      }
+      store.put(value, slot);
+    };
     tx.oncomplete = () => {
       db.close();
-      resolve(value === undefined ? req.result : undefined);
+      if (conflict) reject(conflict);
+      else resolve(result);
     };
     tx.onerror = () => {
       db.close();
       reject(tx.error);
     };
+    tx.onabort = () => {
+      db.close();
+      reject(tx.error || new Error("Upload recovery transaction aborted."));
+    };
   });
+}
+export function pendingUpload(
+  value?: PendingUpload | null,
+  expectedKey?: string,
+) {
+  return pendingCommand<PendingUpload>("new", value, expectedKey);
 }

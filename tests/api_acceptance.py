@@ -48,6 +48,21 @@ def upload(audio, key, draft='Gentle keys and a warm bass.', extra_headers=None)
     return request('/api/explorations', 'POST', body, headers)
 
 
+def save_draft(exploration_id, text, basis, revision):
+    return request('/api/explorations/' + exploration_id + '/draft', 'PUT',
+                   json.dumps({'text': text, 'basisRecordingId': basis, 'expectedDraftRevision': revision}).encode(),
+                   {'Content-Type': 'application/json'})
+
+
+def replace_source(exploration_id, audio, revision, key):
+    boundary = 'djound-' + uuid.uuid4().hex
+    body = (f'--{boundary}\r\nContent-Disposition: form-data; name="expectedSourceRevision"\r\n\r\n{revision}\r\n'
+            f'--{boundary}\r\nContent-Disposition: form-data; name="file"; filename="replacement.wav"\r\n'
+            'Content-Type: application/octet-stream\r\n\r\n').encode() + audio + f'\r\n--{boundary}--\r\n'.encode()
+    return request('/api/explorations/' + exploration_id + '/source', 'PUT', body,
+                   {'Content-Type': 'multipart/form-data; boundary=' + boundary, 'Idempotency-Key': key})
+
+
 def problem(status, body, allowed):
     assert status in allowed, (status, body[:500])
     result = json.loads(body)
@@ -124,6 +139,51 @@ problem(status, body, {403})
 status, _, body = upload(AUDIO, 'origin-' + uuid.uuid4().hex, extra_headers={'Origin': 'null'})
 problem(status, body, {403})
 
+# S02: compare-and-set editing and immutable idempotent source replacement.
+assert detail['canReplaceSource'] is True
+saved_text = 'Keep these words when the source changes.'
+status, _, body = save_draft(exploration_id, saved_text, media_id, detail['draft']['revision'])
+expect(200, status, 'save draft')
+saved_draft = json.loads(body)
+assert saved_draft['text'] == saved_text and saved_draft['revision'] == detail['draft']['revision'] + 1
+status, _, body = save_draft(exploration_id, 'Stale tab words', media_id, detail['draft']['revision'])
+assert problem(status, body, {409})['code'] == 'STALE_DRAFT'
+status, _, body = replace_source(exploration_id, b'not audio', 1, 'replace-invalid-' + uuid.uuid4().hex)
+problem(status, body, {415, 422})
+status, _, body = request('/api/explorations/' + exploration_id)
+unchanged = json.loads(body)
+assert unchanged['draft']['text'] == saved_text and unchanged['original']['id'] == media_id
+replacement = (ROOT / 'fixtures/audio/sample-warm.wav').read_bytes()
+replacement_key = 'replace-' + uuid.uuid4().hex
+status, _, body = replace_source(exploration_id, replacement, 1, replacement_key)
+expect(200, status, 'replace source')
+replacement_receipt = json.loads(body)
+assert replacement_receipt['sourceRevision'] == 2 and replacement_receipt['draftRevision'] == saved_draft['revision'] + 1
+assert not replacement_receipt['replayed']
+status, _, body = request('/api/explorations/' + exploration_id)
+replaced = json.loads(body)
+assert replaced['draft']['text'] == saved_text
+assert replaced['draft']['basisRecordingId'] == replaced['original']['id']
+assert replaced['original']['sha256'] == hashlib.sha256(replacement).hexdigest()
+status, _, body = request(media)
+expect(200, status, 'retained old original')
+assert body == AUDIO
+newer_text = 'Newer words must survive an old replacement receipt.'
+status, _, body = save_draft(exploration_id, newer_text, replaced['original']['id'], replaced['draft']['revision'])
+expect(200, status, 'save after replacement')
+newer_draft = json.loads(body)
+status, _, body = replace_source(exploration_id, replacement, 1, replacement_key)
+expect(200, status, 'replace replay after newer draft')
+replaced_replay = json.loads(body)
+assert replaced_replay['replayed'] and replaced_replay['draftRevision'] == replacement_receipt['draftRevision']
+status, _, body = request('/api/explorations/' + exploration_id)
+current = json.loads(body)
+assert current['draft'] == newer_draft and current['draft']['text'] == newer_text
+status, _, body = replace_source(exploration_id, replacement, 2, replacement_key)
+assert problem(status, body, {409})['code'] == 'IDEMPOTENCY_CONFLICT'
+status, _, body = replace_source(exploration_id, replacement, 1, 'stale-replace-' + uuid.uuid4().hex)
+assert problem(status, body, {409})['code'] == 'SOURCE_CHANGED'
+
 status, _, body = request('/api/explorations')
 expect(200, status, 'library after failed uploads')
 assert len(json.loads(body)['items']) == before + 2, 'Rejected uploads created library entries or replay duplicated one'
@@ -137,4 +197,5 @@ problem(status, body, {404})
 print(json.dumps({'result': 'PASS', 'explorationId': exploration_id, 'recordingId': media_id,
                   'checks': ['real upload', 'receipt replay', 'concurrent replay', 'conflict', 'metadata/hash identity', 'HEAD', '206/416',
                              'corrupt/empty/rate/text rejection', 'origin policy', 'no failed library entries',
-                             'packaged deep route', 'typed API 404']}, indent=2))
+                             'packaged deep route', 'typed API 404', 'draft CAS conflict', 'source replacement/rebind',
+                             'old original retained', 'replacement replay preserves newer words', 'stale source rejection']}, indent=2))

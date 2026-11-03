@@ -63,6 +63,47 @@ paths:
             application/json:
               schema: { $ref: '#/components/schemas/Exploration' }
         default: { $ref: '#/components/responses/Problem' }
+  /api/explorations/{id}/draft:
+    parameters:
+      - $ref: '#/components/parameters/ResourceId'
+    put:
+      operationId: updateDraft
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/DraftUpdate' }
+      responses:
+        '200':
+          description: Saved draft and its advanced revision
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Draft' }
+        default: { $ref: '#/components/responses/Problem' }
+  /api/explorations/{id}/source:
+    parameters:
+      - $ref: '#/components/parameters/ResourceId'
+    put:
+      operationId: replaceSource
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              required: [file, expectedSourceRevision]
+              properties:
+                file: { type: string, format: binary }
+                expectedSourceRevision: { type: integer, format: int64, minimum: 1 }
+      responses:
+        '200':
+          description: Accepted replacement or identical receipt replay; fetch current draft after replay
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/UploadReceipt' }
+        default: { $ref: '#/components/responses/Problem' }
   /api/media/{id}:
     parameters:
       - $ref: '#/components/parameters/ResourceId'
@@ -101,7 +142,7 @@ components:
       name: Idempotency-Key
       in: header
       required: true
-      schema: { type: string, minLength: 8, maxLength: 128 }
+      schema: { type: string, minLength: 8, maxLength: 128, pattern: '^[A-Za-z0-9._:-]{8,128}$' }
   responses:
     Problem:
       description: Typed recoverable application error
@@ -180,9 +221,16 @@ components:
         text: { type: string }
         basisRecordingId: { type: [string, 'null'] }
         revision: { type: integer, format: int64 }
+    DraftUpdate:
+      type: object
+      required: [text, basisRecordingId, expectedDraftRevision]
+      properties:
+        text: { type: string, maxLength: 4000 }
+        basisRecordingId: { type: [string, 'null'] }
+        expectedDraftRevision: { type: integer, format: int64, minimum: 1 }
     Exploration:
       type: object
-      required: [id, title, sourceRevision, original, renditions, draft, createdAt, updatedAt]
+      required: [id, title, sourceRevision, original, renditions, draft, canReplaceSource, createdAt, updatedAt]
       properties:
         id: { type: string }
         title: { type: string }
@@ -192,6 +240,7 @@ components:
           type: array
           items: { $ref: '#/components/schemas/Recording' }
         draft: { $ref: '#/components/schemas/Draft' }
+        canReplaceSource: { type: boolean }
         createdAt: { type: string, format: date-time }
         updatedAt: { type: string, format: date-time }
     ExplorationSummary:

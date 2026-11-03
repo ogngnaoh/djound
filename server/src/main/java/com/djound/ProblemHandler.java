@@ -31,6 +31,7 @@ public class ProblemHandler {
     }
 
     @ExceptionHandler({
+        org.springframework.http.converter.HttpMessageNotReadableException.class,
         MissingRequestValueException.class,
         MultipartException.class,
         IllegalArgumentException.class

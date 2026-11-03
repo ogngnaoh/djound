@@ -300,6 +300,302 @@ class BackendIntegrationTest {
     }
 
     @Test
+    void draftsRejectStaleAndForeignBasisAndSurviveRestart() throws Exception {
+        var service = app.getBean(Explorations.class);
+        var first = service.create(wav("first.wav", 44100, 1, 16, 1), "initial", "draft-first-key");
+        var foreign = service.create(wav("other.wav", 44100, 1, 16, 1), "", "draft-other-key");
+        var saved =
+                service.saveDraft(
+                        first.explorationId(), new Models.DraftUpdate("exact words 🎵", null, 1L));
+        assertEquals(2, saved.revision());
+        assertEquals(first.originalRecordingId(), saved.basisRecordingId());
+        assertEquals(
+                "STALE_DRAFT",
+                assertThrows(
+                                ApiProblem.class,
+                                () ->
+                                        service.saveDraft(
+                                                first.explorationId(),
+                                                new Models.DraftUpdate("stale", null, 1L)))
+                        .code);
+        assertEquals(
+                "SOURCE_CHANGED",
+                assertThrows(
+                                ApiProblem.class,
+                                () ->
+                                        service.saveDraft(
+                                                first.explorationId(),
+                                                new Models.DraftUpdate(
+                                                        "foreign",
+                                                        foreign.originalRecordingId(),
+                                                        2L)))
+                        .code);
+        assertEquals(
+                422,
+                assertThrows(
+                                ApiProblem.class,
+                                () ->
+                                        service.saveDraft(
+                                                first.explorationId(),
+                                                new Models.DraftUpdate("a".repeat(4001), null, 2L)))
+                        .status);
+        app.close();
+        app = launch(root);
+        assertEquals(saved, app.getBean(Explorations.class).get(first.explorationId()).draft());
+    }
+
+    @Test
+    void replacementPreservesWordsAndOldMediaAndReplayNeverRestoresOlderDraft() throws Exception {
+        var service = app.getBean(Explorations.class);
+        var original = wav("first.wav", 44100, 1, 16, 1);
+        var first = service.create(original, "initial", "replace-first-key");
+        service.saveDraft(
+                first.explorationId(), new Models.DraftUpdate("latest before replace", null, 1L));
+        var replacement = wav("new source.wav", 48000, 2, 16, 2);
+        var accepted =
+                service.replaceSource(first.explorationId(), replacement, 1, "replace-source-key");
+        var detail = service.get(first.explorationId());
+        assertEquals(2, detail.sourceRevision());
+        assertEquals(3, detail.draft().revision());
+        assertEquals("new source", detail.title());
+        assertEquals("latest before replace", detail.draft().text());
+        assertEquals(accepted.originalRecordingId(), detail.draft().basisRecordingId());
+        assertTrue(detail.canReplaceSource());
+        assertArrayEquals(
+                original.getBytes(),
+                Files.readAllBytes(
+                        app.getBean(MediaStore.class)
+                                .path(service.storageKey(first.originalRecordingId()))));
+        assertEquals(
+                "SOURCE_CHANGED",
+                assertThrows(
+                                ApiProblem.class,
+                                () ->
+                                        service.saveDraft(
+                                                first.explorationId(),
+                                                new Models.DraftUpdate(
+                                                        "old basis",
+                                                        first.originalRecordingId(),
+                                                        3L)))
+                        .code);
+        var newer =
+                service.saveDraft(
+                        first.explorationId(),
+                        new Models.DraftUpdate("newer after replacement", null, 3L));
+        app.getBean(JdbcClient.class)
+                .sql("UPDATE workspace SET active_attempt_id='busy' WHERE id=1")
+                .update();
+        var replayed =
+                service.replaceSource(first.explorationId(), replacement, 1, "replace-source-key");
+        assertTrue(replayed.replayed());
+        assertEquals(accepted.originalRecordingId(), replayed.originalRecordingId());
+        assertEquals(3, replayed.draftRevision());
+        assertEquals(newer, service.get(first.explorationId()).draft());
+        assertFalse(service.get(first.explorationId()).canReplaceSource());
+        assertEquals(
+                "IDEMPOTENCY_CONFLICT",
+                assertThrows(
+                                ApiProblem.class,
+                                () ->
+                                        service.replaceSource(
+                                                first.explorationId(),
+                                                replacement,
+                                                2,
+                                                "replace-source-key"))
+                        .code);
+        assertEquals(
+                "CREATION_ACTIVE",
+                assertThrows(
+                                ApiProblem.class,
+                                () ->
+                                        service.replaceSource(
+                                                first.explorationId(),
+                                                replacement,
+                                                2,
+                                                "replace-busy-key"))
+                        .code);
+    }
+
+    @Test
+    void invalidAndConcurrentReplacementsCannotLoseDraftOrSource() throws Exception {
+        var service = app.getBean(Explorations.class);
+        var first = service.create(wav("first.wav", 44100, 1, 16, 1), "preserve", "race-first-key");
+        assertThrows(
+                ApiProblem.class,
+                () ->
+                        service.replaceSource(
+                                first.explorationId(),
+                                new MockMultipartFile(
+                                        "file", "bad.wav", "audio/wav", new byte[] {1, 2}),
+                                1,
+                                "invalid-replace"));
+        assertEquals(
+                first.originalRecordingId(), service.get(first.explorationId()).original().id());
+        assertEquals("preserve", service.get(first.explorationId()).draft().text());
+        try (var executor = Executors.newVirtualThreadPerTaskExecutor()) {
+            Callable<String> replace =
+                    () -> {
+                        try {
+                            service.replaceSource(
+                                    first.explorationId(),
+                                    wav("next.wav", 44100, 1, 16, 1),
+                                    1,
+                                    "race-" + UUID.randomUUID());
+                            return "ACCEPTED";
+                        } catch (ApiProblem error) {
+                            return error.code;
+                        }
+                    };
+            var a = executor.submit(replace);
+            var b = executor.submit(replace);
+            assertEquals(Set.of("ACCEPTED", "SOURCE_CHANGED"), Set.of(a.get(), b.get()));
+        }
+        var current = service.get(first.explorationId());
+        assertEquals(2, current.sourceRevision());
+        assertEquals("preserve", current.draft().text());
+        assertEquals(
+                "STALE_DRAFT",
+                assertThrows(
+                                ApiProblem.class,
+                                () ->
+                                        service.saveDraft(
+                                                first.explorationId(),
+                                                new Models.DraftUpdate(
+                                                        "delayed save",
+                                                        first.originalRecordingId(),
+                                                        1L)))
+                        .code);
+        var jdbc = app.getBean(JdbcClient.class);
+        jdbc.sql(
+                        "INSERT INTO recording SELECT"
+                            + " 'rendition_test',exploration_id,title,'RENDITION',file_name,'unique-test-storage',content_type,byte_size,duration_ms,sample_rate,channels,codec,sha256,'FIXTURE',false,created_at"
+                            + " FROM recording WHERE id=?")
+                .param(current.original().id())
+                .update();
+        assertFalse(service.get(first.explorationId()).canReplaceSource());
+        assertEquals(
+                "SOURCE_REPLACEMENT_UNAVAILABLE",
+                assertThrows(
+                                ApiProblem.class,
+                                () ->
+                                        service.replaceSource(
+                                                first.explorationId(),
+                                                wav("blocked.wav", 44100, 1, 16, 1),
+                                                2,
+                                                "rendition-blocked"))
+                        .code);
+    }
+
+    @Test
+    void replacementWaitsForAdmissionGuardAndRechecksActiveWork() throws Exception {
+        var service = app.getBean(Explorations.class);
+        var first =
+                service.create(wav("guard.wav", 44100, 1, 16, 1), "saved words", "guard-first-key");
+        try (var connection = app.getBean(javax.sql.DataSource.class).getConnection();
+                var executor = Executors.newVirtualThreadPerTaskExecutor()) {
+            connection.setAutoCommit(false);
+            try (var statement = connection.createStatement()) {
+                statement.executeQuery("SELECT id FROM workspace WHERE id=1 FOR UPDATE").close();
+                var waiting =
+                        executor.submit(
+                                () ->
+                                        service.replaceSource(
+                                                first.explorationId(),
+                                                wav("replacement.wav", 44100, 1, 16, 1),
+                                                1,
+                                                "guard-replace-key"));
+                assertThrows(TimeoutException.class, () -> waiting.get(300, TimeUnit.MILLISECONDS));
+                statement.executeUpdate(
+                        "UPDATE workspace SET active_attempt_id='newly_admitted' WHERE id=1");
+                connection.commit();
+                var failure =
+                        assertThrows(
+                                ExecutionException.class, () -> waiting.get(5, TimeUnit.SECONDS));
+                assertEquals("CREATION_ACTIVE", ((ApiProblem) failure.getCause()).code);
+            } finally {
+                connection.rollback();
+            }
+        }
+        assertEquals(
+                first.originalRecordingId(), service.get(first.explorationId()).original().id());
+        assertEquals("saved words", service.get(first.explorationId()).draft().text());
+    }
+
+    @Test
+    void draftHttpContractReportsTypedConflictsAndMalformedRequests() throws Exception {
+        var first =
+                app.getBean(Explorations.class)
+                        .create(wav("http.wav", 44100, 1, 16, 1), "before", "http-first-key");
+        String endpoint =
+                "http://127.0.0.1:"
+                        + app.getEnvironment().getProperty("local.server.port")
+                        + "/api/explorations/"
+                        + first.explorationId()
+                        + "/draft";
+        try (var client = java.net.http.HttpClient.newHttpClient()) {
+            var request =
+                    java.net.http.HttpRequest.newBuilder(java.net.URI.create(endpoint))
+                            .header("Content-Type", "application/json")
+                            .PUT(
+                                    java.net.http.HttpRequest.BodyPublishers.ofString(
+                                            "{\"text\":\"saved through"
+                                                + " HTTP\",\"basisRecordingId\":null,\"expectedDraftRevision\":1}"))
+                            .build();
+            var saved = client.send(request, java.net.http.HttpResponse.BodyHandlers.ofString());
+            assertEquals(200, saved.statusCode());
+            assertTrue(saved.body().contains("saved through HTTP"));
+            var stale = client.send(request, java.net.http.HttpResponse.BodyHandlers.ofString());
+            assertEquals(409, stale.statusCode());
+            assertTrue(stale.body().contains("STALE_DRAFT"));
+            assertTrue(
+                    stale.headers()
+                            .firstValue("content-type")
+                            .orElseThrow()
+                            .contains("application/problem+json"));
+            var malformed =
+                    java.net.http.HttpRequest.newBuilder(java.net.URI.create(endpoint))
+                            .header("Content-Type", "application/json")
+                            .PUT(java.net.http.HttpRequest.BodyPublishers.ofString("{"))
+                            .build();
+            assertEquals(
+                    400,
+                    client.send(malformed, java.net.http.HttpResponse.BodyHandlers.ofString())
+                            .statusCode());
+        }
+    }
+
+    @Test
+    void detailAndLibraryReadsNeedOnlyOneDatabaseConnection() throws Exception {
+        try (var single = new com.zaxxer.hikari.HikariDataSource()) {
+            single.setJdbcUrl(BASE + (BASE.contains("?") ? "&" : "?") + "currentSchema=" + schema);
+            single.setUsername(USER);
+            single.setPassword(PASSWORD);
+            single.setMaximumPoolSize(1);
+            single.setMinimumIdle(1);
+            var service =
+                    new Explorations(
+                            JdbcClient.create(single),
+                            app.getBean(MediaStore.class),
+                            new org.springframework.jdbc.datasource.DataSourceTransactionManager(
+                                    single));
+            var first =
+                    service.create(
+                            wav("one connection.wav", 44100, 1, 16, 1), "notes", "single-pool-key");
+            assertTimeoutPreemptively(
+                    java.time.Duration.ofSeconds(3),
+                    () -> {
+                        var detail = service.get(first.explorationId());
+                        assertEquals(first.originalRecordingId(), detail.original().id());
+                        assertEquals("one connection", detail.title());
+                        assertEquals(first.explorationId(), detail.id());
+                        var summaries = service.list();
+                        assertEquals(1, summaries.size());
+                        assertEquals(detail.original(), summaries.getFirst().original());
+                    });
+        }
+    }
+
+    @Test
     void refusesAnotherProcessDirectoryAndDatabaseRebinding() throws Exception {
         var ds = app.getBean(javax.sql.DataSource.class);
         assertThrows(IllegalStateException.class, () -> new Installation(ds, root.toString()));
