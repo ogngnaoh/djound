@@ -1,0 +1,48 @@
+{
+  "schemaVersion": 1,
+  "notice": "Fixture demo \u2014 sample audio, no music generation. Outputs are predefined and unrelated to uploaded files or submitted directions.",
+  "recordings": [
+    {
+      "file": "audio/source-study.wav",
+      "title": "Evening study",
+      "sha256": "795d7bd60a3f16c41b3c87f6d360958c095c007a8db6760f1d41eb2d1eccd198",
+      "durationMs": 12000,
+      "sampleRate": 44100,
+      "channels": 1,
+      "codec": "pcm_s16le",
+      "byteSize": 1058444,
+      "provenance": "ORIGINAL_SYNTHETIC_FIXTURE",
+      "license": "CC0-1.0",
+      "attribution": "Original composition and synthesis authored for Djound.",
+      "role": "upload-example"
+    },
+    {
+      "file": "audio/sample-warm.wav",
+      "title": "Warm sample",
+      "sha256": "90ad8f914e506d9ea2a76b006e950dacfa255785ecf6ff165a024d90b65e5fbc",
+      "durationMs": 12000,
+      "sampleRate": 44100,
+      "channels": 1,
+      "codec": "pcm_s16le",
+      "byteSize": 1058444,
+      "provenance": "ORIGINAL_SYNTHETIC_FIXTURE",
+      "license": "CC0-1.0",
+      "attribution": "Original composition and synthesis authored for Djound.",
+      "role": "predefined-output"
+    },
+    {
+      "file": "audio/sample-pulse.wav",
+      "title": "Pulse sample",
+      "sha256": "c98118d80a0e98da65019b0bd0aa5fa0fbca186d37a61389c945ed63dd1b0793",
+      "durationMs": 12000,
+      "sampleRate": 44100,
+      "channels": 1,
+      "codec": "pcm_s16le",
+      "byteSize": 1058444,
+      "provenance": "ORIGINAL_SYNTHETIC_FIXTURE",
+      "license": "CC0-1.0",
+      "attribution": "Original composition and synthesis authored for Djound.",
+      "role": "predefined-output"
+    }
+  ]
+}

@@ -1,0 +1,218 @@
+openapi: 3.1.0
+info:
+  title: Djound local application API
+  version: 0.1.0
+  description: Local single-person audio workspace. Live inference is paused and unconfigured.
+servers:
+  - url: /
+paths:
+  /api/workspace:
+    get:
+      operationId: getWorkspace
+      responses:
+        '200':
+          description: Installation and local input policy
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Workspace' }
+  /api/explorations:
+    get:
+      operationId: listExplorations
+      responses:
+        '200':
+          description: Library, newest first
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items:
+                    type: array
+                    items: { $ref: '#/components/schemas/ExplorationSummary' }
+    post:
+      operationId: createExploration
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              required: [file, initialDraft]
+              properties:
+                file: { type: string, format: binary }
+                initialDraft: { type: string, maxLength: 4000 }
+      responses:
+        '201':
+          description: Accepted upload, or identical accepted receipt replay
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/UploadReceipt' }
+        default: { $ref: '#/components/responses/Problem' }
+  /api/explorations/{id}:
+    parameters:
+      - $ref: '#/components/parameters/ResourceId'
+    get:
+      operationId: getExploration
+      responses:
+        '200':
+          description: Current durable exploration state
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Exploration' }
+        default: { $ref: '#/components/responses/Problem' }
+  /api/media/{id}:
+    parameters:
+      - $ref: '#/components/parameters/ResourceId'
+    get:
+      operationId: getMedia
+      parameters:
+        - name: Range
+          in: header
+          schema: { type: string }
+      responses:
+        '200':
+          description: Exact stored audio bytes
+          content:
+            audio/wav: { schema: { type: string, format: binary } }
+            audio/mpeg: { schema: { type: string, format: binary } }
+        '206':
+          description: Requested audio byte range
+          content:
+            audio/wav: { schema: { type: string, format: binary } }
+            audio/mpeg: { schema: { type: string, format: binary } }
+        '416': { description: Requested range is unsatisfiable }
+        default: { $ref: '#/components/responses/Problem' }
+    head:
+      operationId: headMedia
+      responses:
+        '200': { description: Audio metadata headers without a body }
+        default: { $ref: '#/components/responses/Problem' }
+components:
+  parameters:
+    ResourceId:
+      name: id
+      in: path
+      required: true
+      schema: { type: string }
+    IdempotencyKey:
+      name: Idempotency-Key
+      in: header
+      required: true
+      schema: { type: string, minLength: 8, maxLength: 128 }
+  responses:
+    Problem:
+      description: Typed recoverable application error
+      content:
+        application/problem+json:
+          schema: { $ref: '#/components/schemas/Problem' }
+  schemas:
+    Problem:
+      type: object
+      required: [type, title, status, detail, code, permittedActions]
+      properties:
+        type: { type: string }
+        title: { type: string }
+        status: { type: integer }
+        detail: { type: string }
+        code: { type: string }
+        permittedActions:
+          type: array
+          items: { type: string }
+        fieldErrors:
+          type: object
+          additionalProperties: { type: string }
+    InputPolicy:
+      type: object
+      required: [formats, maxBytes, minDurationMs, maxDurationMs, sampleRates, channels, maxTextCodePoints, providerCompatibilityKnown]
+      properties:
+        formats:
+          type: array
+          items: { type: string, enum: [WAV_PCM16, MP3] }
+        maxBytes: { type: integer, format: int64 }
+        minDurationMs: { type: integer }
+        maxDurationMs: { type: integer }
+        sampleRates:
+          type: array
+          items: { type: integer }
+        channels:
+          type: array
+          items: { type: integer }
+        maxTextCodePoints: { type: integer }
+        providerCompatibilityKnown: { type: boolean }
+    Workspace:
+      type: object
+      required: [mode, configuration, eligibility, canSubmit, canCreateExploration, activeAttemptId, inputPolicy]
+      properties:
+        mode: { type: string, enum: [UNCONFIGURED, FIXTURE] }
+        configuration: { type: string, enum: [UNCONFIGURED, CONFIGURED] }
+        eligibility: { type: string, enum: [ELIGIBLE, BLOCKED, UNKNOWN] }
+        canSubmit: { type: boolean }
+        canCreateExploration: { type: boolean }
+        activeAttemptId: { type: [string, 'null'] }
+        inputPolicy: { $ref: '#/components/schemas/InputPolicy' }
+    Recording:
+      type: object
+      required: [id, explorationId, kind, title, fileName, contentType, byteSize, durationMs, sampleRate, channels, codec, sha256, mediaUrl, provenance, kept, createdAt]
+      properties:
+        id: { type: string }
+        explorationId: { type: string }
+        kind: { type: string, enum: [ORIGINAL, RENDITION] }
+        title: { type: string }
+        fileName: { type: string }
+        contentType: { type: string }
+        byteSize: { type: integer, format: int64 }
+        durationMs: { type: integer }
+        sampleRate: { type: integer }
+        channels: { type: integer }
+        codec: { type: string }
+        sha256: { type: string }
+        mediaUrl: { type: string }
+        provenance: { type: string, enum: [ORIGINAL, FIXTURE, LIVE] }
+        kept: { type: boolean }
+        createdAt: { type: string, format: date-time }
+    Draft:
+      type: object
+      required: [text, basisRecordingId, revision]
+      properties:
+        text: { type: string }
+        basisRecordingId: { type: [string, 'null'] }
+        revision: { type: integer, format: int64 }
+    Exploration:
+      type: object
+      required: [id, title, sourceRevision, original, renditions, draft, createdAt, updatedAt]
+      properties:
+        id: { type: string }
+        title: { type: string }
+        sourceRevision: { type: integer, format: int64 }
+        original: { $ref: '#/components/schemas/Recording' }
+        renditions:
+          type: array
+          items: { $ref: '#/components/schemas/Recording' }
+        draft: { $ref: '#/components/schemas/Draft' }
+        createdAt: { type: string, format: date-time }
+        updatedAt: { type: string, format: date-time }
+    ExplorationSummary:
+      type: object
+      required: [id, title, original, renditionCount, keptRecordings, updatedAt]
+      properties:
+        id: { type: string }
+        title: { type: string }
+        original: { $ref: '#/components/schemas/Recording' }
+        renditionCount: { type: integer }
+        keptRecordings:
+          type: array
+          items: { $ref: '#/components/schemas/Recording' }
+        updatedAt: { type: string, format: date-time }
+    UploadReceipt:
+      type: object
+      required: [explorationId, originalRecordingId, sourceRevision, draftRevision, location, replayed]
+      properties:
+        explorationId: { type: string }
+        originalRecordingId: { type: string }
+        sourceRevision: { type: integer, format: int64 }
+        draftRevision: { type: integer, format: int64 }
+        location: { type: string }
+        replayed: { type: boolean }
