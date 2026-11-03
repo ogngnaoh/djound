@@ -4,7 +4,7 @@ set -euo pipefail
 source "$(dirname "$0")/env.sh"
 cd "$DJOUND_ROOT"
 check_mode="${1:-all}"
-case "$check_mode" in all|api|fixture) ;; *) echo 'Usage: verify-installation.sh [all|api|fixture]' >&2; exit 2 ;; esac
+case "$check_mode" in all|api|fixture|listening) ;; *) echo 'Usage: verify-installation.sh [all|api|fixture|listening]' >&2; exit 2 ;; esac
 mkdir -p .runtime/checks
 run_dir="$(mktemp -d "$DJOUND_ROOT/.runtime/checks/run.XXXXXX")"
 test_db="djound_check_$$_${RANDOM}"
@@ -32,7 +32,7 @@ export DJOUND_ALLOWED_ORIGINS="http://127.0.0.1:$test_port"
 export DJOUND_TEST_BASE_URL="http://127.0.0.1:$test_port"
 export DJOUND_TEST_ALLOW_WRITE=1
 export DJOUND_MODE=UNCONFIGURED
-if [[ "$check_mode" == fixture ]]; then
+if [[ "$check_mode" == fixture || "$check_mode" == listening ]]; then
   export DJOUND_MODE=FIXTURE
   export DJOUND_FIXTURE_DELAY_MS=8000
 fi
@@ -54,9 +54,12 @@ start_app() {
   exit 1
 }
 start_app
-if [[ "$check_mode" == fixture ]]; then
+if [[ "$check_mode" == listening ]]; then
+  node scripts/listening-smoke.mjs | tee "$run_dir/api-result.json"
+elif [[ "$check_mode" == fixture ]]; then
   python3 tests/fixture_acceptance.py | tee "$run_dir/api-result.json"
   node scripts/creation-smoke.mjs | tee "$run_dir/creation-result.json"
+  node scripts/listening-smoke.mjs | tee "$run_dir/listening-result.json"
 else
   if [[ "$check_mode" == all ]]; then
     node scripts/browser-smoke.mjs | tee "$run_dir/browser-result.json"

@@ -380,6 +380,83 @@ class GenerationIntegrationTest {
     }
 
     @Test
+    void keepIsExplicitIdempotentAndReplaysTheSameStoredAudioWithoutExecution() throws Exception {
+        var source = original("keep-original-key");
+        var accepted =
+                generations()
+                        .create(
+                                source.explorationId(),
+                                command("warm direction", 1),
+                                "keep-request-key");
+        var completed = finished(accepted.attemptId());
+        var originalResult = explorations().recording(completed.resultRecordingId());
+        String base = "http://127.0.0.1:" + app.getEnvironment().getProperty("local.server.port");
+        try (var client = java.net.http.HttpClient.newHttpClient()) {
+            for (String invalid : List.of("{}", "{\"kept\":null}")) {
+                var response = patch(client, base, originalResult.id(), invalid);
+                assertEquals(400, response.statusCode());
+                assertTrue(response.body().contains("INVALID_REQUEST"));
+            }
+            var originalRejected =
+                    patch(client, base, source.originalRecordingId(), "{\"kept\":true}");
+            assertEquals(422, originalRejected.statusCode());
+            assertTrue(originalRejected.body().contains("ORIGINAL_NOT_KEEPABLE"));
+            var kept = patch(client, base, originalResult.id(), "{\"kept\":true}");
+            assertEquals(200, kept.statusCode());
+            var repeated = patch(client, base, originalResult.id(), "{\"kept\":true}");
+            assertEquals(kept.body(), repeated.body());
+            var saved = explorations().recording(originalResult.id());
+            assertTrue(saved.kept());
+            var summary = explorations().list().getFirst();
+            assertEquals(1, summary.renditionCount());
+            assertEquals(List.of(saved), summary.keptRecordings());
+            var bytes =
+                    client.send(
+                            java.net.http.HttpRequest.newBuilder(
+                                            java.net.URI.create(base + saved.mediaUrl()))
+                                    .GET()
+                                    .build(),
+                            java.net.http.HttpResponse.BodyHandlers.ofByteArray());
+            assertEquals(200, bytes.statusCode());
+            assertEquals(
+                    originalResult.sha256(),
+                    HexFormat.of()
+                            .formatHex(
+                                    java.security.MessageDigest.getInstance("SHA-256")
+                                            .digest(bytes.body())));
+            assertArrayEquals(
+                    Files.readAllBytes(
+                            app.getBean(MediaStore.class)
+                                    .path(explorations().storageKey(originalResult.id()))),
+                    bytes.body());
+            assertTrue(
+                    generations()
+                            .create(
+                                    source.explorationId(),
+                                    command("warm direction", 1),
+                                    "keep-request-key")
+                            .replayed());
+            assertEquals(
+                    200, patch(client, base, originalResult.id(), "{\"kept\":false}").statusCode());
+            assertEquals(originalResult, explorations().recording(originalResult.id()));
+            assertTrue(explorations().list().getFirst().keptRecordings().isEmpty());
+            assertEquals(1, explorations().get(source.explorationId()).renditions().size());
+            assertEquals(1, app.getBean(ScriptedAdapter.class).executionCount());
+        }
+    }
+
+    private java.net.http.HttpResponse<String> patch(
+            java.net.http.HttpClient client, String base, String id, String body) throws Exception {
+        return client.send(
+                java.net.http.HttpRequest.newBuilder(
+                                java.net.URI.create(base + "/api/recordings/" + id))
+                        .header("Content-Type", "application/json")
+                        .method("PATCH", java.net.http.HttpRequest.BodyPublishers.ofString(body))
+                        .build(),
+                java.net.http.HttpResponse.BodyHandlers.ofString());
+    }
+
+    @Test
     void refinementSnapshotStillUsesOriginalAndSelectsSecondPredefinedFile() throws Exception {
         var source = original("basis-original-key");
         var first =
@@ -389,14 +466,29 @@ class GenerationIntegrationTest {
                                 command("first exact direction", 1),
                                 "basis-request-one");
         var result = finished(first.attemptId());
+        explorations()
+                .saveDraft(
+                        source.explorationId(),
+                        new Models.DraftUpdate(
+                                "working refinement", result.resultRecordingId(), 2L));
         var second =
                 generations()
                         .create(
                                 source.explorationId(),
                                 new Models.CreateRequestCommand(
-                                        "then quieter", result.resultRecordingId(), 1L, 2L),
+                                        "then quieter", result.resultRecordingId(), 1L, 3L),
                                 "basis-request-two");
+        var pinned =
+                explorations()
+                        .saveDraft(
+                                source.explorationId(),
+                                new Models.DraftUpdate(
+                                        "notes pinned to the first version",
+                                        result.resultRecordingId(),
+                                        4L));
         var completed = finished(second.attemptId());
+        assertEquals(pinned, explorations().get(source.explorationId()).draft());
+        assertFalse(explorations().get(source.explorationId()).canReplaceSource());
         assertEquals(source.originalRecordingId(), completed.request().sourceRecordingId());
         assertEquals("first exact direction", completed.request().inheritedDirection());
         assertEquals(

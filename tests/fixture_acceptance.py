@@ -164,11 +164,85 @@ expect(202, status, 'deliberate resubmission after temporary active-slot rejecti
 assert not later_receipt['replayed']
 await_terminal(later_receipt['attemptId'])
 assert len(detail(sources[loser]['id'])['renditions']) == 1
+# S04: Keep acts on exact retained bytes and refinements always anchor the original.
+keep_path = '/api/recordings/' + result['id']
+status, kept = json_request(keep_path, 'PATCH', {'kept': True})
+expect(200, status, 'Keep rendition')
+assert kept['kept'] is True and kept['sha256'] == result['sha256']
+status, kept_again = json_request(keep_path, 'PATCH', {'kept': True})
+expect(200, status, 'idempotent Keep')
+assert kept_again == kept
+status, library = json_request('/api/explorations')
+summary = next(item for item in library['items'] if item['id'] == source['id'])
+assert [recording['id'] for recording in summary['keptRecordings']] == [result['id']]
+assert summary['renditionCount'] == 1
+status, original_problem = json_request('/api/recordings/' + source['original']['id'], 'PATCH', {'kept': True})
+expect(422, status, 'original cannot be kept')
+assert original_problem['code'] == 'ORIGINAL_NOT_KEEPABLE'
+for invalid_body in ({}, {'kept': None}):
+    status, _ = json_request(keep_path, 'PATCH', invalid_body)
+    expect(400, status, 'kept flag must be explicit')
+status, _, played_kept = request(kept['mediaUrl'])
+assert played_kept == output
+assert detail(source['id'])['latestAttempt']['id'] == receipt['attemptId']
+
+before_refine = detail(source['id'])
+refinement_text = 'Less busy keys, warmer bass, and softer accents.'
+refinement_command = {
+    'text': refinement_text,
+    'basisRecordingId': result['id'],
+    'expectedSourceRevision': before_refine['sourceRevision'],
+    'expectedDraftRevision': before_refine['draft']['revision'],
+}
+status, refinement_receipt = json_request(path, 'POST', refinement_command, 'refine-' + uuid.uuid4().hex)
+expect(202, status, 'refinement acceptance')
+status, refinement_attempt = json_request('/api/attempts/' + refinement_receipt['attemptId'])
+assert refinement_attempt['request']['basisRecordingId'] == result['id']
+assert refinement_attempt['request']['sourceRecordingId'] == source['original']['id']
+assert refinement_attempt['request']['inheritedDirection'] == result['direction']
+assert refinement_attempt['request']['text'] == refinement_text
+assert refinement_text in refinement_attempt['request']['direction']
+pinned_words = 'Keep this separate idea pinned to the earlier version.'
+status, pinned_draft = json_request('/api/explorations/' + source['id'] + '/draft', 'PUT', {
+    'text': pinned_words,
+    'basisRecordingId': result['id'],
+    'expectedDraftRevision': refinement_receipt['nextDraftRevision'],
+})
+expect(200, status, 'next refinement draft')
+refinement_done = await_terminal(refinement_receipt['attemptId'])
+after_refine = detail(source['id'])
+assert len(after_refine['renditions']) == 2
+assert after_refine['draft'] == pinned_draft
+assert after_refine['draft']['basisRecordingId'] == result['id']
+assert after_refine['original']['id'] == source['original']['id']
+assert not after_refine['canReplaceSource']
+new_result = next(recording for recording in after_refine['renditions'] if recording['id'] == refinement_done['resultRecordingId'])
+assert new_result['id'] != result['id'] and new_result['provenance'] == 'FIXTURE'
+assert new_result['sha256'] in OUTPUT_HASHES
+assert new_result['direction'] == refinement_done['request']['direction']
+status, _, still_exact = request(result['mediaUrl'])
+assert still_exact == output
+status, unkept = json_request(keep_path, 'PATCH', {'kept': False})
+expect(200, status, 'unkeep rendition')
+assert unkept['kept'] is False
+status, _, retained = request(result['mediaUrl'])
+assert retained == output, 'Unkeep must not delete or regenerate the recording'
+status, kept = json_request(keep_path, 'PATCH', {'kept': True})
+expect(200, status, 'keep exact version again')
+status, library = json_request('/api/explorations')
+summary = next(item for item in library['items'] if item['id'] == source['id'])
+assert summary['renditionCount'] == 2
+assert [recording['id'] for recording in summary['keptRecordings']] == [result['id']]
+assert detail(source['id'])['latestAttempt']['id'] == refinement_receipt['attemptId']
+
 print(json.dumps({
     'result': 'PASS', 'explorationId': source['id'], 'attemptId': receipt['attemptId'],
     'recordingId': result['id'], 'acceptedKey': keys[winner], 'acceptedCommand': commands[winner],
     'checks': ['real concurrent admission', 'immutable literal request', 'one active across explorations',
                'next draft remains separate', 'receipt replay preserves later words', 'changed payload conflict',
                'active upload/source guards', 'normal publication of predefined sample', 'durable fixture provenance',
-               'original bytes unchanged', 'one output after replay', 'temporary rejection not cached'],
+               'original bytes unchanged', 'one output after replay', 'temporary rejection not cached',
+               'explicit idempotent Keep', 'exact Library kept references', 'original Keep rejection',
+               'refinement ancestry with original source', 'next draft stays pinned',
+               'unkeep retains exact bytes without generation'],
 }, indent=2))

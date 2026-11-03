@@ -109,6 +109,12 @@ public class ApiController {
         return generations.get(id);
     }
 
+    @PatchMapping(value = "/recordings/{id}", consumes = MediaType.APPLICATION_JSON_VALUE)
+    public Models.Recording updateRecording(
+            @PathVariable String id, @RequestBody Models.RecordingUpdate command) {
+        return explorations.setKept(id, command);
+    }
+
     @RequestMapping(
             value = "/media/{id}",
             method = {RequestMethod.GET, RequestMethod.HEAD})

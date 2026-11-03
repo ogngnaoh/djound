@@ -27,6 +27,8 @@ public final class Models {
             String attemptId,
             Instant createdAt) {}
 
+    public record RecordingUpdate(Boolean kept) {}
+
     public record Draft(String text, String basisRecordingId, long revision) {}
 
     public record DraftUpdate(String text, String basisRecordingId, Long expectedDraftRevision) {}

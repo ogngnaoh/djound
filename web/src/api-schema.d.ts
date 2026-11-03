@@ -126,6 +126,24 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/recordings/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: components["parameters"]["ResourceId"];
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch: operations["updateRecording"];
+        trace?: never;
+    };
     "/api/media/{id}": {
         parameters: {
             query?: never;
@@ -310,6 +328,9 @@ export interface components {
         AttemptOutcome: {
             code: string;
             detail: string;
+        };
+        RecordingUpdate: {
+            kept: boolean;
         };
     };
     responses: {
@@ -537,6 +558,33 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["Attempt"];
+                };
+            };
+            default: components["responses"]["Problem"];
+        };
+    };
+    updateRecording: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: components["parameters"]["ResourceId"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["RecordingUpdate"];
+            };
+        };
+        responses: {
+            /** @description Rendition with the explicitly requested kept state; never generates audio */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Recording"];
                 };
             };
             default: components["responses"]["Problem"];

@@ -462,23 +462,67 @@ public class Explorations {
     }
 
     public List<Summary> list() {
-        return jdbc.sql(
-                        """
-                        SELECT e.id AS exploration_key, e.title AS exploration_title, e.updated_at, original.*,
-                               (SELECT COUNT(*) FROM recording result WHERE result.exploration_id=e.id AND result.kind='RENDITION') AS rendition_count
-                        FROM exploration e JOIN recording original ON original.id=e.original_id
-                        ORDER BY e.updated_at DESC,e.id
-                        """)
-                .query(
-                        (rs, n) ->
+        var summaries =
+                jdbc.sql(
+                                """
+                                SELECT e.id AS exploration_key, e.title AS exploration_title, e.updated_at, original.*,
+                                       (SELECT COUNT(*) FROM recording result WHERE result.exploration_id=e.id AND result.kind='RENDITION') AS rendition_count
+                                FROM exploration e JOIN recording original ON original.id=e.original_id
+                                ORDER BY e.updated_at DESC,e.id
+                                """)
+                        .query(
+                                (rs, n) ->
+                                        new Summary(
+                                                rs.getString("exploration_key"),
+                                                rs.getString("exploration_title"),
+                                                mapRecording(rs, n),
+                                                rs.getInt("rendition_count"),
+                                                List.of(),
+                                                rs.getTimestamp("updated_at").toInstant()))
+                        .list();
+        // Complete both reads before mapping; no extra connection is acquired inside a RowMapper.
+        var kept =
+                jdbc
+                        .sql(
+                                "SELECT * FROM recording WHERE kind='RENDITION' AND kept=true ORDER"
+                                    + " BY created_at,id")
+                        .query(Explorations::mapRecording)
+                        .list()
+                        .stream()
+                        .collect(java.util.stream.Collectors.groupingBy(Recording::explorationId));
+        return summaries.stream()
+                .map(
+                        summary ->
                                 new Summary(
-                                        rs.getString("exploration_key"),
-                                        rs.getString("exploration_title"),
-                                        mapRecording(rs, n),
-                                        rs.getInt("rendition_count"),
-                                        List.of(),
-                                        rs.getTimestamp("updated_at").toInstant()))
-                .list();
+                                        summary.id(),
+                                        summary.title(),
+                                        summary.original(),
+                                        summary.renditionCount(),
+                                        kept.getOrDefault(summary.id(), List.of()),
+                                        summary.updatedAt()))
+                .toList();
+    }
+
+    public Recording setKept(String id, RecordingUpdate command) {
+        if (command == null || command.kept() == null) {
+            throw new ApiProblem(
+                    400,
+                    "INVALID_REQUEST",
+                    "Provide an explicit kept value of true or false.",
+                    "RETRY");
+        }
+        var changed =
+                jdbc.sql("UPDATE recording SET kept=? WHERE id=? AND kind='RENDITION' RETURNING *")
+                        .params(command.kept(), id)
+                        .query(Explorations::mapRecording)
+                        .optional();
+        if (changed.isPresent()) return changed.get();
+        recording(id); // Distinguish a missing recording from an original.
+        throw new ApiProblem(
+                422,
+                "ORIGINAL_NOT_KEEPABLE",
+                "The original is always retained. Keep is available for renditions.",
+                "OPEN_RENDITION");
     }
 
     public Recording recording(String id) {

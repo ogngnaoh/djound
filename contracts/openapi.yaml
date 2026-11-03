@@ -135,6 +135,23 @@ paths:
             application/json:
               schema: { $ref: '#/components/schemas/Attempt' }
         default: { $ref: '#/components/responses/Problem' }
+  /api/recordings/{id}:
+    parameters:
+      - $ref: '#/components/parameters/ResourceId'
+    patch:
+      operationId: updateRecording
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/RecordingUpdate' }
+      responses:
+        '200':
+          description: Rendition with the explicitly requested kept state; never generates audio
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Recording' }
+        default: { $ref: '#/components/responses/Problem' }
   /api/media/{id}:
     parameters:
       - $ref: '#/components/parameters/ResourceId'
@@ -365,3 +382,8 @@ components:
       properties:
         code: { type: string }
         detail: { type: string }
+    RecordingUpdate:
+      type: object
+      required: [kept]
+      properties:
+        kept: { type: boolean }
