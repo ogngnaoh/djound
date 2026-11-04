@@ -6,6 +6,7 @@ export function isDefiniteRejection(status: number, code?: string) {
     (status === 503 &&
       (code === "PROVIDER_NOT_CONFIGURED" ||
         code === "CAPACITY_UNAVAILABLE" ||
+        code === "SOURCE_UNAVAILABLE" ||
         code === "LIVE_ALLOWANCE_UNPROVISIONED" ||
         code === "LIVE_ALLOWANCE_EXHAUSTED"))
   );
