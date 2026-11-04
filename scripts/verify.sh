@@ -31,6 +31,8 @@ case "$mode" in
     bash scripts/verify-installation.sh fixture
     bash scripts/verify-installation.sh interaction
     bash scripts/verify-installation.sh live-policy
+    bash scripts/verify-installation.sh upload
+    bash scripts/verify-installation.sh upload-local
     ;;
   *) echo 'Usage: scripts/verify.sh [all|fast|api|browser|fixture]' >&2; exit 2 ;;
 esac
