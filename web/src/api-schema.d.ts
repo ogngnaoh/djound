@@ -287,6 +287,8 @@ export interface components {
             maxTextCodePoints: number;
             /** @description Limit on literal assembled instructions, including inherited context. Saved drafts are never truncated to fit it. */
             maxAssembledCodePoints: number;
+            /** @description Fixed literal assembler instruction length. Total assembled length is this overhead plus inherited direction and submitted text, measured in Unicode code points. */
+            instructionOverheadCodePoints: number;
             /** @description Concrete provider source/output duration ceiling, enforced using precise or conservative duration evidence rather than rounded display metadata. */
             providerMaxDurationMs: number | null;
             providerCompatibilityKnown: boolean;
@@ -318,6 +320,8 @@ export interface components {
             canSubmitWithAcknowledgement: boolean;
             canCreateExploration: boolean;
             activeAttemptId: string | null;
+            /** @description Exploration owning activeAttemptId; both fields are null when no attempt is active. */
+            activeExplorationId: string | null;
             unknownOutcome: components["schemas"]["UnknownOutcome"] | null;
             submissionAllowance: components["schemas"]["SubmissionAllowance"] | null;
             fixtureControlsEnabled: boolean;
@@ -331,10 +335,13 @@ export interface components {
             /** @enum {string} */
             provenance: "FIXTURE" | "LIVE";
         };
-        /** @description Installation-bound authorization for live submissions, separate from unknown provider quota. Reservation consumes a slot before transmission, with no refund or application replenishment. */
+        /** @description Installation-bound authorization for live submissions, separate from unknown provider quota. Limit sums optional legacy authorization and explicit append-only operator grants. Reservation consumes a slot before transmission, with no refund or automatic replenishment. */
         SubmissionAllowance: {
+            /** Format: int64 */
             limit: number;
+            /** Format: int64 */
             used: number;
+            /** Format: int64 */
             remaining: number;
             provisioned: boolean;
         };

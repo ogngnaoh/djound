@@ -34,7 +34,8 @@ public class ApiController {
     @GetMapping("/workspace")
     public Map<String, Object> workspace() {
         Map<String, Object> result = new LinkedHashMap<>();
-        String active = generations.activeAttemptId();
+        var activeAttempt = generations.active();
+        String active = activeAttempt == null ? null : activeAttempt.id();
         boolean configured = generations.configuration().configured();
         boolean live = generations.configuration().live();
         boolean allowed = generations.allowanceAvailable();
@@ -67,6 +68,9 @@ public class ApiController {
                         && capacity.allowsSubmission());
         result.put("canCreateExploration", active == null);
         result.put("activeAttemptId", active);
+        result.put(
+                "activeExplorationId",
+                activeAttempt == null ? null : activeAttempt.explorationId());
         result.put("fixtureControlsEnabled", controls.enabled());
         Map<String, Object> inputPolicy =
                 new LinkedHashMap<>(
@@ -88,6 +92,10 @@ public class ApiController {
                                 "providerCompatibilityKnown",
                                 live));
         inputPolicy.put("maxAssembledCodePoints", live ? 500 : 16000);
+        String example =
+                new com.djound.generation.PromptAssembler().assemble("", "x").instructions();
+        inputPolicy.put(
+                "instructionOverheadCodePoints", example.codePointCount(0, example.length()) - 1);
         inputPolicy.put("providerMaxDurationMs", live ? 30000 : null);
         result.put("inputPolicy", inputPolicy);
         return result;

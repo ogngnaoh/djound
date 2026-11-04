@@ -95,8 +95,9 @@ public class GenerationService {
         } catch (java.io.IOException error) {
             throw new ApiProblem(
                     503,
-                    "MEDIA_STORAGE_FAILED",
-                    "The original source could not be validated.",
+                    "SOURCE_UNAVAILABLE",
+                    "The original recording could not be read. No creation was submitted. Restore"
+                        + " the recording or choose another source; your direction is preserved.",
                     "EDIT_TEXT");
         }
         return (String) row.get("id");

@@ -300,7 +300,7 @@ components:
           additionalProperties: { type: string }
     InputPolicy:
       type: object
-      required: [formats, maxBytes, minDurationMs, maxDurationMs, sampleRates, channels, maxTextCodePoints, maxAssembledCodePoints, providerMaxDurationMs, providerCompatibilityKnown]
+      required: [formats, maxBytes, minDurationMs, maxDurationMs, sampleRates, channels, maxTextCodePoints, maxAssembledCodePoints, instructionOverheadCodePoints, providerMaxDurationMs, providerCompatibilityKnown]
       properties:
         formats:
           type: array
@@ -318,13 +318,17 @@ components:
         maxAssembledCodePoints:
           type: integer
           description: Limit on literal assembled instructions, including inherited context. Saved drafts are never truncated to fit it.
+        instructionOverheadCodePoints:
+          type: integer
+          minimum: 0
+          description: Fixed literal assembler instruction length. Total assembled length is this overhead plus inherited direction and submitted text, measured in Unicode code points.
         providerMaxDurationMs:
           type: [integer, 'null']
           description: Concrete provider source/output duration ceiling, enforced using precise or conservative duration evidence rather than rounded display metadata.
         providerCompatibilityKnown: { type: boolean }
     Workspace:
       type: object
-      required: [mode, configuration, eligibility, reasonCode, observedAt, providerResetAt, nextProbeAt, supportsStatusCheck, canRecheck, canSubmit, canSubmitWithAcknowledgement, canCreateExploration, activeAttemptId, unknownOutcome, submissionAllowance, fixtureControlsEnabled, inputPolicy]
+      required: [mode, configuration, eligibility, reasonCode, observedAt, providerResetAt, nextProbeAt, supportsStatusCheck, canRecheck, canSubmit, canSubmitWithAcknowledgement, canCreateExploration, activeAttemptId, activeExplorationId, unknownOutcome, submissionAllowance, fixtureControlsEnabled, inputPolicy]
       properties:
         mode: { type: string, enum: [UNCONFIGURED, FIXTURE, LIVE] }
         configuration: { type: string, enum: [UNCONFIGURED, CONFIGURED] }
@@ -347,6 +351,9 @@ components:
           description: True only when acknowledgement of the unresolved outcome is the sole remaining submission blocker.
         canCreateExploration: { type: boolean }
         activeAttemptId: { type: [string, 'null'] }
+        activeExplorationId:
+          type: [string, 'null']
+          description: Exploration owning activeAttemptId; both fields are null when no attempt is active.
         unknownOutcome:
           oneOf:
             - $ref: '#/components/schemas/UnknownOutcome'
@@ -367,12 +374,12 @@ components:
         provenance: { type: string, enum: [FIXTURE, LIVE] }
     SubmissionAllowance:
       type: object
-      description: Installation-bound authorization for live submissions, separate from unknown provider quota. Reservation consumes a slot before transmission, with no refund or application replenishment.
+      description: Installation-bound authorization for live submissions, separate from unknown provider quota. Limit sums optional legacy authorization and explicit append-only operator grants. Reservation consumes a slot before transmission, with no refund or automatic replenishment.
       required: [limit, used, remaining, provisioned]
       properties:
-        limit: { type: integer, minimum: 0, maximum: 2 }
-        used: { type: integer, minimum: 0, maximum: 2 }
-        remaining: { type: integer, minimum: 0, maximum: 2 }
+        limit: { type: integer, format: int64, minimum: 0 }
+        used: { type: integer, format: int64, minimum: 0 }
+        remaining: { type: integer, format: int64, minimum: 0 }
         provisioned: { type: boolean }
     Recording:
       type: object

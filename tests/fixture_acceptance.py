@@ -73,6 +73,7 @@ status, workspace = json_request('/api/workspace')
 expect(200, status, 'workspace')
 assert workspace['mode'] == 'FIXTURE' and workspace['configuration'] == 'CONFIGURED'
 assert workspace['canSubmit'] and workspace['activeAttemptId'] is None
+assert workspace['activeExplorationId'] is None
 assert workspace['canSubmitWithAcknowledgement'] is False and workspace['unknownOutcome'] is None
 assert workspace['submissionAllowance'] is None
 assert workspace['inputPolicy']['providerMaxDurationMs'] is None
@@ -116,6 +117,7 @@ assert commands[winner]['text'] in active['request']['assembledInstructions']
 assert active['request']['assemblerVersion']
 status, workspace = json_request('/api/workspace')
 assert workspace['activeAttemptId'] == receipt['attemptId']
+assert workspace['activeExplorationId'] == source['id']
 assert not workspace['canSubmit'] and not workspace['canCreateExploration']
 assert workspace['canSubmitWithAcknowledgement'] is False
 assert not detail(sources[loser]['id'])['canReplaceSource']
@@ -162,6 +164,7 @@ assert replay['attemptId'] == receipt['attemptId'] and replay['replayed']
 assert len(detail(source['id'])['renditions']) == 1
 status, workspace = json_request('/api/workspace')
 assert workspace['activeAttemptId'] is None and workspace['canSubmit']
+assert workspace['activeExplorationId'] is None
 
 # A temporary rejection must not be cached as an accepted receipt.
 status, later_receipt = submit(loser)

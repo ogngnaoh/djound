@@ -11,6 +11,7 @@ import org.springframework.mock.web.MockMultipartFile;
 
 import java.nio.ByteBuffer;
 import java.nio.ByteOrder;
+import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.*;
 
@@ -53,6 +54,128 @@ class LivePolicyIntegrationTest {
                 .putInt(4, data.length - 8)
                 .putInt(40, samples * 2);
         return new MockMultipartFile("file", "source.wav", "audio/wav", data);
+    }
+
+    @Test
+    void unavailableSourceRejectsCreateAndRetryBeforeAdmissionWithoutConsumingAllowance()
+            throws Exception {
+        mode("LIVE");
+        provision();
+        var controller = h.app.getBean(ApiController.class);
+        assertNull(controller.workspace().get("activeAttemptId"));
+        assertNull(controller.workspace().get("activeExplorationId"));
+        var policy = (Map<?, ?>) controller.workspace().get("inputPolicy");
+        int overhead = ((Number) policy.get("instructionOverheadCodePoints")).intValue();
+        String example = new PromptAssembler().assemble("warm", "🎵").instructions();
+        assertEquals(example.codePointCount(0, example.length()), overhead + 4 + 1);
+        for (boolean unreadable : List.of(false, true)) {
+            var source = h.source("unavailable-source-" + unreadable);
+            var command = new Models.CreateRequestCommand("strings", null, 1L, 1L);
+            String acceptedKey = "prior-source-request-" + unreadable;
+            var accepted = h.service().create(source.explorationId(), command, acceptedKey);
+            var active = controller.workspace();
+            assertEquals(accepted.attemptId(), active.get("activeAttemptId"));
+            assertEquals(source.explorationId(), active.get("activeExplorationId"));
+            var owner = h.service().claimNext();
+            h.service().fail(owner, "GENERATION_FAILED", "Local failure before any dispatch");
+            assertNull(controller.workspace().get("activeAttemptId"));
+            assertNull(controller.workspace().get("activeExplorationId"));
+            h.explorations()
+                    .saveDraft(
+                            source.explorationId(),
+                            new Models.DraftUpdate(
+                                    "Keep these newer notes",
+                                    source.originalRecordingId(),
+                                    accepted.nextDraftRevision()));
+            var before = h.explorations().get(source.explorationId());
+            var allowance = h.app.getBean(LiveAllowance.class).view();
+            long receiptCount =
+                    h.jdbc().sql("SELECT count(*) FROM command_receipt").query(Long.class).single();
+            long attemptCount =
+                    h.jdbc()
+                            .sql("SELECT count(*) FROM generation_attempt")
+                            .query(Long.class)
+                            .single();
+            long requestCount =
+                    h.jdbc()
+                            .sql("SELECT count(*) FROM generation_request")
+                            .query(Long.class)
+                            .single();
+            String storage =
+                    h.jdbc()
+                            .sql("SELECT storage_key FROM recording WHERE id=?")
+                            .param(before.original().id())
+                            .query(String.class)
+                            .single();
+            Path media = h.app.getBean(MediaStore.class).path(storage);
+            byte[] bytes = Files.readAllBytes(media);
+            Files.delete(media);
+            // A directory at the expected immutable file path is deterministically unreadable
+            // as audio, even on test hosts where chmod cannot remove the process's access.
+            if (unreadable) Files.createDirectory(media);
+            try {
+                var createError =
+                        assertThrows(
+                                ApiProblem.class,
+                                () ->
+                                        h.service()
+                                                .create(
+                                                        source.explorationId(),
+                                                        new Models.CreateRequestCommand(
+                                                                "new words",
+                                                                before.original().id(),
+                                                                1L,
+                                                                before.draft().revision()),
+                                                        "missing-source-create-" + unreadable));
+                var retryError =
+                        assertThrows(
+                                ApiProblem.class,
+                                () ->
+                                        h.service()
+                                                .retry(
+                                                        accepted.requestId(),
+                                                        new Models.RetryCommand(owner.id()),
+                                                        "missing-source-retry-" + unreadable));
+                assertEquals("SOURCE_UNAVAILABLE", createError.code());
+                assertEquals("SOURCE_UNAVAILABLE", retryError.code());
+                assertEquals(503, createError.status);
+                assertEquals(503, retryError.status);
+                assertTrue(
+                        h.service().create(source.explorationId(), command, acceptedKey).replayed(),
+                        "An accepted receipt still replays before source availability checks");
+                assertEquals(before, h.explorations().get(source.explorationId()));
+                assertEquals(allowance, h.app.getBean(LiveAllowance.class).view());
+                assertEquals(
+                        receiptCount,
+                        h.jdbc()
+                                .sql("SELECT count(*) FROM command_receipt")
+                                .query(Long.class)
+                                .single());
+                assertEquals(
+                        attemptCount,
+                        h.jdbc()
+                                .sql("SELECT count(*) FROM generation_attempt")
+                                .query(Long.class)
+                                .single());
+                assertEquals(
+                        requestCount,
+                        h.jdbc()
+                                .sql("SELECT count(*) FROM generation_request")
+                                .query(Long.class)
+                                .single());
+                assertEquals(
+                        0L,
+                        h.jdbc()
+                                .sql("SELECT count(*) FROM generation_operation")
+                                .query(Long.class)
+                                .single());
+                assertNull(h.service().activeAttemptId());
+                assertNull(h.service().claimNext(), "Rejected work cannot be dispatched");
+            } finally {
+                Files.deleteIfExists(media);
+                Files.write(media, bytes);
+            }
+        }
     }
 
     @Test

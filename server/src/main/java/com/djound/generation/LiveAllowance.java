@@ -22,22 +22,31 @@ public class LiveAllowance {
     public Map<String, Object> view() {
         var row =
                 jdbc.sql(
-                                "SELECT a.submission_limit,(SELECT count(*) FROM"
-                                    + " live_submission_reservation r WHERE"
+                                "SELECT a.submission_limit,(SELECT sum(g.additional_submissions)"
+                                    + " FROM live_submission_grant g WHERE"
+                                    + " g.installation_id=w.installation_id) AS granted,(SELECT"
+                                    + " count(*) FROM live_submission_reservation r WHERE"
                                     + " r.installation_id=w.installation_id) AS used FROM workspace"
                                     + " w LEFT JOIN live_submission_allowance a ON"
                                     + " a.installation_id=w.installation_id WHERE w.id=1")
                         .query()
                         .singleRow();
-        boolean provisioned = row.get("submission_limit") != null;
+        boolean provisioned = row.get("submission_limit") != null || row.get("granted") != null;
+        long limit =
+                (row.get("submission_limit") == null
+                                ? 0
+                                : ((Number) row.get("submission_limit")).longValue())
+                        + (row.get("granted") == null
+                                ? 0
+                                : ((Number) row.get("granted")).longValue());
         long used = ((Number) row.get("used")).longValue();
         return Map.of(
                 "limit",
-                2,
+                limit,
                 "used",
                 used,
                 "remaining",
-                provisioned ? Math.max(0, 2 - used) : 0,
+                provisioned ? Math.max(0, limit - used) : 0,
                 "provisioned",
                 provisioned);
     }
@@ -54,7 +63,7 @@ public class LiveAllowance {
             throw new ApiProblem(
                     503,
                     "LIVE_ALLOWANCE_EXHAUSTED",
-                    "The two approved live submissions have been consumed. Saved recordings remain"
+                    "The approved live submissions have been consumed. Saved recordings remain"
                             + " available.",
                     "EDIT_TEXT");
     }

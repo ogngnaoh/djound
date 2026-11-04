@@ -81,6 +81,8 @@ assert workspace['providerResetAt'] is None and workspace['nextProbeAt'] is None
 assert workspace['submissionAllowance'] is None
 assert workspace['inputPolicy']['providerMaxDurationMs'] is None
 assert workspace['inputPolicy']['maxAssembledCodePoints'] == 16000
+assert workspace['activeAttemptId'] is None and workspace['activeExplorationId'] is None
+assert workspace['inputPolicy']['instructionOverheadCodePoints'] > 0
 assert workspace['fixtureControlsEnabled'] is False
 status, _, body = request('/api/fixture/controls')
 problem(status, body, {404})
