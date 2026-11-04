@@ -62,20 +62,22 @@ class LiveOperationsIntegrationTest {
                     else if (path.equals("/gradio_api/call/predict")) {
                         posts.incrementAndGet();
                         response = "{\"event_id\":\"test-event\"}".getBytes();
-                    } else if (path.equals("/gradio_api/call/predict/test-event")) {
+                    } else if (path.equals("/gradio_api/queue/data")) {
+                        assertEquals(
+                                "session_hash=test-event", exchange.getRequestURI().getRawQuery());
                         observations.incrementAndGet();
                         String item =
                                 "{\"url\":\""
                                         + origin
                                         + "/gradio_api/file=/tmp/gradio/result.wav\",\"meta\":{\"_type\":\"gradio.FileData\"}}";
                         response =
-                                ("event: complete\ndata: ["
+                                ("data: {\"msg\":\"process_completed\",\"event_id\":\"test-event\",\"success\":true,\"output\":{\"data\":["
                                                 + item
                                                 + ","
                                                 + item
                                                 + ","
                                                 + item
-                                                + "]\n\n")
+                                                + "]}}\n\n")
                                         .getBytes(StandardCharsets.UTF_8);
                         exchange.getResponseHeaders().add("Content-Type", "text/event-stream");
                     } else {

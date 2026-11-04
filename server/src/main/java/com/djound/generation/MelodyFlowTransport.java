@@ -23,6 +23,9 @@ import java.util.concurrent.*;
 public final class MelodyFlowTransport {
     private static final Logger log = LoggerFactory.getLogger(MelodyFlowTransport.class);
     private static final int ERROR_DIAGNOSTIC_LIMIT = 2048;
+    private static final java.util.regex.Pattern QUOTA_EXHAUSTED =
+            java.util.regex.Pattern.compile(
+                    "^You have exceeded your ZeroGPU quota \\([0-9]+s requested vs\\. 0s left\\)\\.");
     public static final URI ORIGIN = URI.create("https://facebook-melodyflow.hf.space");
     private final URI origin;
     private final Duration observationDeadline;
@@ -244,6 +247,14 @@ public final class MelodyFlowTransport {
                                 diagnostic.isTextual()
                                         ? diagnostic.asString()
                                         : diagnostic.toString());
+                        if (diagnostic.isTextual()
+                                && QUOTA_EXHAUSTED.matcher(diagnostic.asString()).find())
+                            throw new ApiProblem(
+                                    503,
+                                    "CAPACITY_UNAVAILABLE",
+                                    "MelodyFlow's anonymous GPU quota is exhausted. Your recordings"
+                                            + " and draft remain saved. No reliable reset time was supplied.",
+                                    "WAIT");
                         throw unknown(
                                 "The provider reported an error without reliable execution evidence.");
                     }

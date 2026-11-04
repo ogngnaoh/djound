@@ -1,0 +1,2 @@
+data: {"msg":"process_completed","event_id":"fixture-event-one","success":false,"output":{"error":"You have exceeded your ZeroGPU quota (30s requested vs. 0s left). Try again in 0:00:00. Authenticate with a Hugging Face token for more quota - https://huggingface.co/settings/tokens"}}
+

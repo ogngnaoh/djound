@@ -254,6 +254,44 @@ class MelodyFlowTransportTest {
     }
 
     @Test
+    void confirmedZeroGpuExhaustionIsCapacityWithoutInventingAResetOrRetry() throws Exception {
+        try (var endpoint =
+                new LocalServer(
+                        (exchange, body) ->
+                                reply(exchange, 200, fixture("queue-quota-exhausted.sse")))) {
+            var transport = new MelodyFlowTransport(endpoint.origin, Duration.ofSeconds(1));
+            ApiProblem problem =
+                    assertThrows(ApiProblem.class, () -> transport.observe("fixture-event-one"));
+            assertEquals("CAPACITY_UNAVAILABLE", problem.code());
+            assertTrue(problem.getMessage().contains("anonymous GPU quota is exhausted"));
+            assertFalse(problem.getMessage().contains("0:00:00"));
+            assertFalse(problem.getMessage().contains("token"));
+            assertEquals(1, endpoint.requests.size());
+            assertEquals("GET", endpoint.requests.getFirst().method());
+        }
+        // A vaguely quota-related model failure is still uncertain.
+        try (var endpoint =
+                new LocalServer(
+                        (exchange, body) ->
+                                reply(
+                                        exchange,
+                                        200,
+                                        fixture("queue-quota-exhausted.sse")
+                                                .replace(
+                                                        "You have exceeded your ZeroGPU quota",
+                                                        "Model failed while checking quota")))) {
+            ApiProblem problem =
+                    assertThrows(
+                            ApiProblem.class,
+                            () ->
+                                    new MelodyFlowTransport(endpoint.origin, Duration.ofSeconds(1))
+                                            .observe("fixture-event-one"));
+            assertEquals("OUTCOME_UNKNOWN", problem.code());
+            assertEquals(1, endpoint.requests.size());
+        }
+    }
+
+    @Test
     void errorMalformedAndDrainedStreamsCannotInventResultEvidence() throws Exception {
         for (String frame :
                 List.of(
