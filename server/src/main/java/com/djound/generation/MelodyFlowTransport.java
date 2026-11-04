@@ -175,7 +175,12 @@ public final class MelodyFlowTransport {
         }
     }
 
-    /** Event streams are consumed once; caller persists observation-start before entering. */
+    /**
+     * Read the full queue once. Gradio 5.49.1 uses event_id as session_hash when the
+     * simple POST omits a session. Its simplified GET discards output.error; the full
+     * queue preserves it. Neither endpoint is replayable. The caller persists the
+     * observation-start before entering, and never falls back to a second GET.
+     */
     public String observe(String eventId) throws Exception {
         if (!eventId.matches("[A-Za-z0-9_-]{1,128}")) throw unknown("Invalid saved event handle.");
         long started = System.nanoTime();
@@ -183,7 +188,7 @@ public final class MelodyFlowTransport {
             var response =
                     client.send(
                             HttpRequest.newBuilder(
-                                            origin.resolve("/gradio_api/call/predict/" + eventId))
+                                            origin.resolve("/gradio_api/queue/data?session_hash=" + eventId))
                                     .timeout(observationDeadline)
                                     .header("Accept", "text/event-stream")
                                     .GET()
@@ -201,7 +206,6 @@ public final class MelodyFlowTransport {
     }
 
     private String readEvent(InputStream in, String eventId) throws Exception {
-        String event = "";
         StringBuilder data = new StringBuilder();
         ByteArrayOutputStream line = new ByteArrayOutputStream();
         int count = 0;
@@ -216,26 +220,46 @@ public final class MelodyFlowTransport {
             String value = line.toString(StandardCharsets.UTF_8);
             line.reset();
             if (value.isEmpty()) {
-                if (event.equals("error")) {
-                    logProviderError(eventId, data.toString());
+                if (data.isEmpty()) continue;
+                JsonNode message = json.readTree(data.toString());
+                data.setLength(0);
+                String kind = message.path("msg").asString("");
+                if (kind.equals("unexpected_error")) {
+                    logProviderError(
+                            eventId, message.path("message").asString("No diagnostic supplied"));
                     throw unknown(
                             "The provider reported an error without reliable execution evidence.");
                 }
-                if (event.equals("complete")) {
-                    JsonNode result = json.readTree(data.toString());
-                    if (!result.isArray() || result.size() != 3)
-                        throw unknown("The completed event did not contain three variations.");
-                    JsonNode first = result.get(0);
-                    if (!first.path("meta").path("_type").asString().equals("gradio.FileData"))
-                        throw unknown("The first variation was not FileData.");
-                    String url = first.path("url").asString("");
-                    validateResult(url, origin);
-                    return url;
+                if (kind.equals("close_stream"))
+                    throw unknown("The event stream closed without durable result evidence.");
+                if (kind.equals("process_completed") || kind.equals("process_generating")) {
+                    if (!eventId.equals(message.path("event_id").asString("")))
+                        throw unknown("The observed event did not match its saved handle.");
+                    if (!message.path("success").isBoolean())
+                        throw unknown("The event omitted its completion status.");
+                    if (!message.path("success").asBoolean()) {
+                        JsonNode diagnostic = message.path("output").path("error");
+                        logProviderError(
+                                eventId,
+                                diagnostic.isTextual()
+                                        ? diagnostic.asString()
+                                        : diagnostic.toString());
+                        throw unknown(
+                                "The provider reported an error without reliable execution evidence.");
+                    }
+                    if (kind.equals("process_completed")) {
+                        JsonNode result = message.path("output").path("data");
+                        if (!result.isArray() || result.size() != 3)
+                            throw unknown("The completed event did not contain three variations.");
+                        JsonNode first = result.get(0);
+                        if (!first.path("meta").path("_type").asString().equals("gradio.FileData"))
+                            throw unknown("The first variation was not FileData.");
+                        String url = first.path("url").asString("");
+                        validateResult(url, origin);
+                        return url;
+                    }
                 }
-                event = "";
-                data.setLength(0);
-            } else if (value.startsWith("event:")) event = value.substring(6).strip();
-            else if (value.startsWith("data:")) {
+            } else if (value.startsWith("data:")) {
                 if (!data.isEmpty()) data.append('\n');
                 data.append(value.substring(5).stripLeading());
             }

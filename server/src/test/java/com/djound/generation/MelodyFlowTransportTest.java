@@ -113,7 +113,10 @@ class MelodyFlowTransportTest {
                                         reply(exchange, 200, fixture("upload-response.json"));
                                 case "/gradio_api/call/predict" ->
                                         reply(exchange, 200, fixture("predict-response.json"));
-                                case "/gradio_api/call/predict/fixture-event-one" -> {
+                                case "/gradio_api/queue/data" -> {
+                                    assertEquals(
+                                            "session_hash=fixture-event-one",
+                                            exchange.getRequestURI().getRawQuery());
                                     assertEquals(
                                             "text/event-stream",
                                             exchange.getRequestHeaders().getFirst("Accept"));
@@ -123,8 +126,8 @@ class MelodyFlowTransportTest {
                                                     "text/event-stream; charset=utf-8");
                                     exchange.sendResponseHeaders(200, 0);
                                     String frames =
-                                            fixture("heartbeat.sse")
-                                                    + fixture("complete.sse")
+                                            fixture("queue-heartbeat.sse")
+                                                    + fixture("queue-complete.sse")
                                                             .replace(
                                                                     "{{origin}}",
                                                                     origin.get().toString())
@@ -195,7 +198,15 @@ class MelodyFlowTransportTest {
                     List.of(
                             "null",
                             "Provider failure\nline\t\u001b\u202e\u2028" + "🎵".repeat(2200))) {
-                String frame = "event: error\ndata: " + data.replace("\n", "\ndata: ") + "\n\n";
+                String frame =
+                        "data: "
+                                + json.writeValueAsString(
+                                        Map.of(
+                                                "msg", "process_completed",
+                                                "event_id", "diagnostic-error-event",
+                                                "success", false,
+                                                "output", Map.of("error", data)))
+                                + "\n\n";
                 try (var endpoint =
                         new LocalServer((exchange, body) -> reply(exchange, 200, frame))) {
                     var transport = new MelodyFlowTransport(endpoint.origin, Duration.ofSeconds(1));
@@ -210,7 +221,7 @@ class MelodyFlowTransportTest {
                     assertEquals(1, endpoint.requests.size());
                     assertEquals("GET", endpoint.requests.getFirst().method());
                     assertEquals(
-                            "/gradio_api/call/predict/diagnostic-error-event",
+                            "/gradio_api/queue/data",
                             endpoint.requests.getFirst().path());
                 }
             }
@@ -246,10 +257,15 @@ class MelodyFlowTransportTest {
     void errorMalformedAndDrainedStreamsCannotInventResultEvidence() throws Exception {
         for (String frame :
                 List.of(
-                        fixture("error-null.sse"),
-                        "event: complete\ndata: []\n\n",
-                        "event: complete\ndata: not-json\n\n",
-                        fixture("heartbeat.sse"))) {
+                        fixture("queue-error.sse"),
+                        fixture("queue-complete.sse").replace("fixture-event-one", "wrong-event"),
+                        fixture("queue-complete.sse").replace("\"success\":true,", ""),
+                        fixture("queue-complete.sse").replace("\"success\":true", "\"success\":false"),
+                        "data: {\"msg\":\"close_stream\"}\n\n",
+                        "data: {\"msg\":\"unexpected_error\",\"message\":\"Queue stopped\"}\n\n",
+                        "data: {\"msg\":\"process_completed\",\"event_id\":\"fixture-event-one\",\"success\":true,\"output\":{\"data\":[]}}\n\n",
+                        "data: not-json\n\n",
+                        fixture("queue-heartbeat.sse"))) {
             try (var endpoint = new LocalServer((exchange, body) -> reply(exchange, 200, frame))) {
                 var transport = new MelodyFlowTransport(endpoint.origin, Duration.ofMillis(300));
                 assertThrows(Exception.class, () -> transport.observe("fixture-event-one"));
@@ -264,7 +280,7 @@ class MelodyFlowTransportTest {
                             exchange.sendResponseHeaders(200, 0);
                             exchange.getResponseBody()
                                     .write(
-                                            fixture("heartbeat.sse")
+                                            fixture("queue-heartbeat.sse")
                                                     .getBytes(StandardCharsets.UTF_8));
                             exchange.getResponseBody().flush();
                             Thread.sleep(5000);
@@ -355,7 +371,8 @@ class MelodyFlowTransportTest {
                                 reply(
                                         exchange,
                                         200,
-                                        fixture("complete.sse")
+                                        fixture("queue-complete.sse")
+                                                .replace("fixture-event-one", "foreign-result")
                                                 .replace(
                                                         "{{origin}}",
                                                         "https://example.invalid")))) {
