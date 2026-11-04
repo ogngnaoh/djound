@@ -2,6 +2,9 @@ package com.djound.generation;
 
 import com.djound.ApiProblem;
 
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
 import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.ObjectMapper;
 
@@ -18,6 +21,8 @@ import java.util.concurrent.*;
  * Concrete anonymous Gradio 5.49.1 protocol. No retry, authentication, or alternate destination.
  */
 public final class MelodyFlowTransport {
+    private static final Logger log = LoggerFactory.getLogger(MelodyFlowTransport.class);
+    private static final int ERROR_DIAGNOSTIC_LIMIT = 2048;
     public static final URI ORIGIN = URI.create("https://facebook-melodyflow.hf.space");
     private final URI origin;
     private final Duration observationDeadline;
@@ -187,14 +192,15 @@ public final class MelodyFlowTransport {
             try (var in = response.body()) {
                 if (response.statusCode() != 200)
                     throw unknown("The saved event could not be observed.");
-                return bounded(in, remaining(started, observationDeadline), () -> readEvent(in));
+                return bounded(
+                        in, remaining(started, observationDeadline), () -> readEvent(in, eventId));
             } finally {
                 client.shutdownNow();
             }
         }
     }
 
-    private String readEvent(InputStream in) throws Exception {
+    private String readEvent(InputStream in, String eventId) throws Exception {
         String event = "";
         StringBuilder data = new StringBuilder();
         ByteArrayOutputStream line = new ByteArrayOutputStream();
@@ -210,9 +216,11 @@ public final class MelodyFlowTransport {
             String value = line.toString(StandardCharsets.UTF_8);
             line.reset();
             if (value.isEmpty()) {
-                if (event.equals("error"))
+                if (event.equals("error")) {
+                    logProviderError(eventId, data.toString());
                     throw unknown(
                             "The provider reported an error without reliable execution evidence.");
+                }
                 if (event.equals("complete")) {
                     JsonNode result = json.readTree(data.toString());
                     if (!result.isArray() || result.size() != 3)
@@ -232,6 +240,31 @@ public final class MelodyFlowTransport {
                 data.append(value.substring(5).stripLeading());
             }
         }
+    }
+
+    /**
+     * Local diagnostics only: never attach upstream data to public errors or log request bodies.
+     */
+    private static void logProviderError(String eventId, String data) {
+        StringBuilder diagnostic = new StringBuilder();
+        data.codePoints()
+                .limit(ERROR_DIAGNOSTIC_LIMIT)
+                .forEach(
+                        codePoint -> {
+                            int type = Character.getType(codePoint);
+                            diagnostic.appendCodePoint(
+                                    Character.isISOControl(codePoint)
+                                                    || type == Character.FORMAT
+                                                    || type == Character.LINE_SEPARATOR
+                                                    || type == Character.PARAGRAPH_SEPARATOR
+                                            ? ' '
+                                            : codePoint);
+                        });
+        log.warn(
+                "MelodyFlow event error: eventId={} payload={} truncated={}",
+                eventId,
+                diagnostic.toString(),
+                data.codePointCount(0, data.length()) > ERROR_DIAGNOSTIC_LIMIT);
     }
 
     public static URI validateResult(String value) {

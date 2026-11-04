@@ -2,12 +2,17 @@ package com.djound.generation;
 
 import static org.junit.jupiter.api.Assertions.*;
 
+import ch.qos.logback.classic.Logger;
+import ch.qos.logback.classic.spi.ILoggingEvent;
+import ch.qos.logback.core.read.ListAppender;
+
 import com.djound.ApiProblem;
 import com.sun.net.httpserver.HttpExchange;
 import com.sun.net.httpserver.HttpServer;
 
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
+import org.slf4j.LoggerFactory;
 
 import tools.jackson.databind.ObjectMapper;
 
@@ -180,6 +185,64 @@ class MelodyFlowTransportTest {
     }
 
     @Test
+    void providerErrorDiagnosticIsBoundedSanitizedAndPrivateWithoutRetrying() throws Exception {
+        Logger logger = (Logger) LoggerFactory.getLogger(MelodyFlowTransport.class);
+        ListAppender<ILoggingEvent> capture = new ListAppender<>();
+        capture.start();
+        logger.addAppender(capture);
+        try {
+            for (String data :
+                    List.of(
+                            "null",
+                            "Provider failure\nline\t\u001b\u202e\u2028" + "🎵".repeat(2200))) {
+                String frame = "event: error\ndata: " + data.replace("\n", "\ndata: ") + "\n\n";
+                try (var endpoint =
+                        new LocalServer((exchange, body) -> reply(exchange, 200, frame))) {
+                    var transport = new MelodyFlowTransport(endpoint.origin, Duration.ofSeconds(1));
+                    ApiProblem problem =
+                            assertThrows(
+                                    ApiProblem.class,
+                                    () -> transport.observe("diagnostic-error-event"));
+                    assertEquals("OUTCOME_UNKNOWN", problem.code());
+                    assertEquals(
+                            "The provider reported an error without reliable execution evidence.",
+                            problem.getMessage());
+                    assertEquals(1, endpoint.requests.size());
+                    assertEquals("GET", endpoint.requests.getFirst().method());
+                    assertEquals(
+                            "/gradio_api/call/predict/diagnostic-error-event",
+                            endpoint.requests.getFirst().path());
+                }
+            }
+            assertEquals(2, capture.list.size());
+            assertEquals("diagnostic-error-event", capture.list.getFirst().getArgumentArray()[0]);
+            assertEquals("null", capture.list.getFirst().getArgumentArray()[1]);
+            assertEquals(false, capture.list.getFirst().getArgumentArray()[2]);
+            Object[] arguments = capture.list.getLast().getArgumentArray();
+            assertEquals("diagnostic-error-event", arguments[0]);
+            String diagnostic = (String) arguments[1];
+            assertTrue(diagnostic.startsWith("Provider failure line    "));
+            assertEquals(2048, diagnostic.codePointCount(0, diagnostic.length()));
+            assertFalse(
+                    diagnostic
+                            .codePoints()
+                            .anyMatch(
+                                    codePoint ->
+                                            Character.isISOControl(codePoint)
+                                                    || Character.getType(codePoint)
+                                                            == Character.FORMAT
+                                                    || Character.getType(codePoint)
+                                                            == Character.LINE_SEPARATOR
+                                                    || Character.getType(codePoint)
+                                                            == Character.PARAGRAPH_SEPARATOR));
+            assertEquals(true, arguments[2]);
+        } finally {
+            logger.detachAppender(capture);
+            capture.stop();
+        }
+    }
+
+    @Test
     void errorMalformedAndDrainedStreamsCannotInventResultEvidence() throws Exception {
         for (String frame :
                 List.of(
@@ -348,7 +411,7 @@ class MelodyFlowTransportTest {
                                                     assertTrue(
                                                             text.startsWith(
                                                                     "POST /gradio_api/call/predict"
-                                                                        + " HTTP/1.1"));
+                                                                            + " HTTP/1.1"));
                                                     int length =
                                                             Arrays.stream(text.split("\r\n"))
                                                                     .filter(
