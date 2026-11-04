@@ -76,12 +76,19 @@ expect(200, status, 'workspace')
 workspace = json.loads(body)
 assert workspace['configuration'] == 'UNCONFIGURED' and not workspace['canSubmit']
 assert workspace['canSubmitWithAcknowledgement'] is False and workspace['unknownOutcome'] is None
+assert workspace['eligibility'] == 'UNKNOWN' and not workspace['supportsStatusCheck'] and not workspace['canRecheck']
+assert workspace['providerResetAt'] is None and workspace['nextProbeAt'] is None
 assert workspace['fixtureControlsEnabled'] is False
 status, _, body = request('/api/fixture/controls')
 problem(status, body, {404})
 status, _, body = request('/api/fixture/controls/next-attempt', 'PUT', json.dumps({'outcome': 'FAILURE'}).encode(),
                          {'Content-Type': 'application/json'})
 problem(status, body, {404})
+status, _, body = request('/api/fixture/controls/availability', 'PUT', json.dumps({'scenario': 'READY'}).encode(),
+                         {'Content-Type': 'application/json'})
+problem(status, body, {404})
+status, _, body = request('/api/workspace/availability/recheck', 'POST')
+assert problem(status, body, {503})['code'] == 'PROVIDER_NOT_CONFIGURED'
 assert workspace['inputPolicy']['maxBytes'] == 64 * 1024 * 1024
 status, _, body = request('/api/explorations')
 expect(200, status, 'library')

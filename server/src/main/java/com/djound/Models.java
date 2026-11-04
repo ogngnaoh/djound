@@ -133,4 +133,6 @@ public final class Models {
     public record FixturePlaybackControl(String recordingId, Boolean unavailable) {}
 
     public record UnknownOutcome(String attemptId, String detail, Instant occurredAt) {}
+
+    public record FixtureAvailabilityControl(String scenario) {}
 }

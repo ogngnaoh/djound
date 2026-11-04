@@ -95,6 +95,14 @@ public class GenerationRunner {
                 return;
             }
             if (remaining > 0) Thread.sleep(remaining);
+            if (operation.outcome().equals("CAPACITY_UNAVAILABLE")) {
+                service.fail(
+                        owner,
+                        "CAPACITY_UNAVAILABLE",
+                        "Free sample capacity is temporarily unavailable. Your source, notes, and"
+                                + " earlier versions remain available.");
+                return;
+            }
             if (operation.outcome().equals("FAILURE")) {
                 service.fail(
                         owner,

@@ -153,7 +153,7 @@ class RestartIntegrationTest {
                 .update();
         jdbc().sql(
                         "CREATE TRIGGER refuse_ack_consumption BEFORE UPDATE ON exploration FOR"
-                            + " EACH ROW EXECUTE FUNCTION refuse_ack_consumption()")
+                                + " EACH ROW EXECUTE FUNCTION refuse_ack_consumption()")
                 .update();
         assertEquals(
                 "STALE_DRAFT",
@@ -171,7 +171,7 @@ class RestartIntegrationTest {
                 0,
                 jdbc().sql(
                                 "SELECT COUNT(*) FROM command_receipt WHERE"
-                                    + " command_key='acknowledged-create'")
+                                        + " command_key='acknowledged-create'")
                         .query(Integer.class)
                         .single());
         jdbc().sql("DROP TRIGGER refuse_ack_consumption ON exploration").update();
@@ -205,7 +205,7 @@ class RestartIntegrationTest {
                 hash,
                 jdbc().sql(
                                 "SELECT fingerprint FROM command_receipt WHERE"
-                                    + " command_key='unknown-create-key'")
+                                        + " command_key='unknown-create-key'")
                         .query(String.class)
                         .single());
     }

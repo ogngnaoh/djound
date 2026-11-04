@@ -20,6 +20,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/workspace/availability/recheck": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** @description Explicit bounded non-generating observation. Unsupported checks never clear a current block; no request is submitted. */
+        post: operations["recheckAvailability"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/explorations": {
         parameters: {
             query?: never;
@@ -192,6 +209,22 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/fixture/controls/availability": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put: operations["setFixtureAvailability"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/recordings/{id}": {
         parameters: {
             query?: never;
@@ -261,6 +294,21 @@ export interface components {
             configuration: "UNCONFIGURED" | "CONFIGURED";
             /** @enum {string} */
             eligibility: "ELIGIBLE" | "BLOCKED" | "UNKNOWN";
+            reasonCode: string | null;
+            /** Format: date-time */
+            observedAt: string | null;
+            /**
+             * Format: date-time
+             * @description Provider-reported reset only when reliable; never inferred from local backoff.
+             */
+            providerResetAt: string | null;
+            /**
+             * Format: date-time
+             * @description Local retry or availability-check cooldown boundary, not a quota reset.
+             */
+            nextProbeAt: string | null;
+            supportsStatusCheck: boolean;
+            canRecheck: boolean;
             canSubmit: boolean;
             /** @description True only when acknowledgement of the unresolved outcome is the sole remaining submission blocker. */
             canSubmitWithAcknowledgement: boolean;
@@ -424,12 +472,16 @@ export interface components {
         };
         FixtureControls: {
             /** @enum {string} */
-            nextOutcome: "SUCCESS" | "FAILURE" | "UNKNOWN";
+            nextOutcome: "SUCCESS" | "FAILURE" | "UNKNOWN" | "CAPACITY_UNAVAILABLE";
             unavailableRecordingId: string | null;
         };
         FixtureOutcomeControl: {
             /** @enum {string} */
-            outcome: "SUCCESS" | "FAILURE" | "UNKNOWN";
+            outcome: "SUCCESS" | "FAILURE" | "UNKNOWN" | "CAPACITY_UNAVAILABLE";
+        };
+        FixtureAvailabilityControl: {
+            /** @enum {string} */
+            scenario: "READY" | "BLOCKED_NO_STATUS" | "STATUS_SUCCESS" | "STATUS_MALFORMED" | "STATUS_TIMEOUT";
         };
         FixturePlaybackControl: {
             recordingId: string;
@@ -475,6 +527,27 @@ export interface operations {
                     "application/json": components["schemas"]["Workspace"];
                 };
             };
+        };
+    };
+    recheckAvailability: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Current workspace after the observation or unsupported-check policy */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Workspace"];
+                };
+            };
+            default: components["responses"]["Problem"];
         };
     };
     listExplorations: {
@@ -761,6 +834,31 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["FixtureControls"];
+                };
+            };
+            default: components["responses"]["Problem"];
+        };
+    };
+    setFixtureAvailability: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["FixtureAvailabilityControl"];
+            };
+        };
+        responses: {
+            /** @description Explicit sample availability scenario; only in enabled fixture review mode, with no generation */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Workspace"];
                 };
             };
             default: components["responses"]["Problem"];

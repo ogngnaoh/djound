@@ -21,6 +21,7 @@ public class GenerationService {
     private final GenerationConfiguration configuration;
     private final MediaStore media;
     private final FixtureReviewControls controls;
+    private final com.djound.availability.AvailabilityService availability;
     private final PromptAssembler assembler = new PromptAssembler();
 
     public GenerationService(
@@ -28,7 +29,9 @@ public class GenerationService {
             PlatformTransactionManager manager,
             GenerationConfiguration configuration,
             MediaStore media,
-            FixtureReviewControls controls) {
+            FixtureReviewControls controls,
+            com.djound.availability.AvailabilityService availability) {
+        this.availability = availability;
         this.jdbc = jdbc;
         this.transactions = new TransactionTemplate(manager);
         this.configuration = configuration;
@@ -120,6 +123,7 @@ public class GenerationService {
                                 ((Number) receipt.get("draft_revision")).longValue(),
                                 true);
                     }
+                    if (configuration.fixture()) availability.requireAvailable();
                     validateAcknowledgement(workspace, command.acknowledgedUnknownAttemptId());
                     if (!configuration.fixture())
                         throw new ApiProblem(
@@ -314,6 +318,7 @@ public class GenerationService {
                                     "RETRY");
                         return retryReceipt(requestId, (String) row.get("attempt_id"), true);
                     }
+                    if (configuration.fixture()) availability.requireAvailable();
                     validateAcknowledgement(workspace, command.acknowledgedUnknownAttemptId());
                     if (!configuration.fixture())
                         throw new ApiProblem(
@@ -349,7 +354,8 @@ public class GenerationService {
                                             "OUTPUT_INVALID",
                                             "MEDIA_STORAGE_FAILED",
                                             "PROCESS_INTERRUPTED",
-                                            "OUTCOME_UNKNOWN")
+                                            "OUTCOME_UNKNOWN",
+                                            "CAPACITY_UNAVAILABLE")
                                     .contains(previous.outcome().code())) {
                         throw new ApiProblem(
                                 409,
@@ -459,7 +465,7 @@ public class GenerationService {
                         """
                         SELECT a.id AS attempt_key,a.state,a.version,a.outcome_code,a.outcome_detail,a.result_recording_id,a.previous_attempt_id,
                                a.created_at AS attempt_created_at,a.updated_at,r.*,
-                               (? AND a.state='FAILED' AND a.outcome_code IN ('GENERATION_FAILED','OUTPUT_INVALID','MEDIA_STORAGE_FAILED','PROCESS_INTERRUPTED','OUTCOME_UNKNOWN')
+                               (? AND a.state='FAILED' AND a.outcome_code IN ('GENERATION_FAILED','OUTPUT_INVALID','MEDIA_STORAGE_FAILED','PROCESS_INTERRUPTED','OUTCOME_UNKNOWN','CAPACITY_UNAVAILABLE')
                                 AND e.latest_attempt_id=a.id AND e.original_id=r.source_recording_id AND e.source_revision=r.source_revision
                                 AND r.adapter_configuration_id=? AND r.provenance='FIXTURE'
                                 AND w.active_attempt_id IS NULL) AS can_retry
@@ -676,6 +682,7 @@ public class GenerationService {
                                             owner.state())
                                     .update();
                     if (changed != 1) return false;
+                    if (code.equals("CAPACITY_UNAVAILABLE")) availability.observeCapacityFailure();
                     jdbc.sql(
                                     "UPDATE workspace SET active_attempt_id=NULL WHERE id=1 AND"
                                             + " active_attempt_id=?")

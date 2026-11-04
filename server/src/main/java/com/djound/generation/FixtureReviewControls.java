@@ -60,11 +60,13 @@ public class FixtureReviewControls {
         if (command == null
                 || !("SUCCESS".equals(command.outcome())
                         || "FAILURE".equals(command.outcome())
-                        || "UNKNOWN".equals(command.outcome())))
+                        || "UNKNOWN".equals(command.outcome())
+                        || "CAPACITY_UNAVAILABLE".equals(command.outcome())))
             throw new ApiProblem(
                     400,
                     "INVALID_REQUEST",
-                    "Choose SUCCESS, FAILURE or UNKNOWN for the next sample attempt.",
+                    "Choose SUCCESS, FAILURE, UNKNOWN or CAPACITY_UNAVAILABLE for the next sample"
+                            + " attempt.",
                     "RETRY");
         return transactions.execute(
                 status -> {

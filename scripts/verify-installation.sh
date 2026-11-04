@@ -4,7 +4,7 @@ set -euo pipefail
 source "$(dirname "$0")/env.sh"
 cd "$DJOUND_ROOT"
 check_mode="${1:-all}"
-case "$check_mode" in all|api|fixture|listening|recovery|unknown) ;; *) echo 'Usage: verify-installation.sh [all|api|fixture|listening|recovery|unknown]' >&2; exit 2 ;; esac
+case "$check_mode" in all|api|fixture|listening|recovery|unknown|capacity) ;; *) echo 'Usage: verify-installation.sh [all|api|fixture|listening|recovery|unknown|capacity]' >&2; exit 2 ;; esac
 mkdir -p .runtime/checks
 run_dir="$(mktemp -d "$DJOUND_ROOT/.runtime/checks/run.XXXXXX")"
 test_db="djound_check_$$_${RANDOM}"
@@ -33,9 +33,11 @@ export DJOUND_TEST_BASE_URL="http://127.0.0.1:$test_port"
 export DJOUND_TEST_ALLOW_WRITE=1
 export DJOUND_MODE=UNCONFIGURED
 export DJOUND_FIXTURE_REVIEW_CONTROLS=false
-if [[ "$check_mode" == fixture || "$check_mode" == listening || "$check_mode" == recovery || "$check_mode" == unknown ]]; then
+unset DJOUND_FIXTURE_COOLDOWN_MS
+if [[ "$check_mode" == fixture || "$check_mode" == listening || "$check_mode" == recovery || "$check_mode" == unknown || "$check_mode" == capacity ]]; then
   export DJOUND_MODE=FIXTURE
   export DJOUND_FIXTURE_DELAY_MS=8000
+  export DJOUND_FIXTURE_COOLDOWN_MS=6000
   export DJOUND_FIXTURE_REVIEW_CONTROLS=true
 fi
 export DJOUND_SCREENSHOT_DIR="$(mktemp -d /tmp/djound-qa.XXXXXX)"
@@ -56,7 +58,10 @@ start_app() {
   exit 1
 }
 start_app
-if [[ "$check_mode" == unknown ]]; then
+if [[ "$check_mode" == capacity ]]; then
+  python3 tests/availability_acceptance.py | tee "$run_dir/api-result.json"
+  node scripts/capacity-smoke.mjs | tee "$run_dir/capacity-result.json"
+elif [[ "$check_mode" == unknown ]]; then
   node scripts/unknown-smoke.mjs | tee "$run_dir/api-result.json"
 elif [[ "$check_mode" == recovery ]]; then
   python3 tests/recovery_acceptance.py | tee "$run_dir/api-result.json"
@@ -70,6 +75,8 @@ elif [[ "$check_mode" == fixture ]]; then
   python3 tests/recovery_acceptance.py | tee "$run_dir/recovery-api-result.json"
   node scripts/recovery-smoke.mjs | tee "$run_dir/recovery-result.json"
   node scripts/unknown-smoke.mjs | tee "$run_dir/unknown-result.json"
+  python3 tests/availability_acceptance.py | tee "$run_dir/availability-api-result.json"
+  node scripts/capacity-smoke.mjs | tee "$run_dir/capacity-result.json"
 else
   if [[ "$check_mode" == all ]]; then
     node scripts/browser-smoke.mjs | tee "$run_dir/browser-result.json"
@@ -103,6 +110,7 @@ kill "$app_pid"
 wait "$app_pid" || true
 app_pid=''
 export DJOUND_MODE=UNCONFIGURED
+unset DJOUND_FIXTURE_COOLDOWN_MS
 start_app
 python3 - "$run_dir/api-result.json" "$run_dir/before-restart.json" <<'PY'
 import hashlib, json, os, sys, urllib.request

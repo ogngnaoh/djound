@@ -2,7 +2,7 @@ openapi: 3.1.0
 info:
   title: Djound local application API
   version: 0.1.0
-  description: Local single-person audio workspace. Live inference is paused and unconfigured.
+  description: Local single-person audio workspace with explicit sample mode. A live music provider is not configured.
 servers:
   - url: /
 paths:
@@ -15,6 +15,17 @@ paths:
           content:
             application/json:
               schema: { $ref: '#/components/schemas/Workspace' }
+  /api/workspace/availability/recheck:
+    post:
+      operationId: recheckAvailability
+      description: Explicit bounded non-generating observation. Unsupported checks never clear a current block; no request is submitted.
+      responses:
+        '200':
+          description: Current workspace after the observation or unsupported-check policy
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Workspace' }
+        default: { $ref: '#/components/responses/Problem' }
   /api/explorations:
     get:
       operationId: listExplorations
@@ -194,6 +205,21 @@ paths:
             application/json:
               schema: { $ref: '#/components/schemas/FixtureControls' }
         default: { $ref: '#/components/responses/Problem' }
+  /api/fixture/controls/availability:
+    put:
+      operationId: setFixtureAvailability
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/FixtureAvailabilityControl' }
+      responses:
+        '200':
+          description: Explicit sample availability scenario; only in enabled fixture review mode, with no generation
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Workspace' }
+        default: { $ref: '#/components/responses/Problem' }
   /api/recordings/{id}:
     parameters:
       - $ref: '#/components/parameters/ResourceId'
@@ -292,11 +318,23 @@ components:
         providerCompatibilityKnown: { type: boolean }
     Workspace:
       type: object
-      required: [mode, configuration, eligibility, canSubmit, canSubmitWithAcknowledgement, canCreateExploration, activeAttemptId, unknownOutcome, fixtureControlsEnabled, inputPolicy]
+      required: [mode, configuration, eligibility, reasonCode, observedAt, providerResetAt, nextProbeAt, supportsStatusCheck, canRecheck, canSubmit, canSubmitWithAcknowledgement, canCreateExploration, activeAttemptId, unknownOutcome, fixtureControlsEnabled, inputPolicy]
       properties:
         mode: { type: string, enum: [UNCONFIGURED, FIXTURE] }
         configuration: { type: string, enum: [UNCONFIGURED, CONFIGURED] }
         eligibility: { type: string, enum: [ELIGIBLE, BLOCKED, UNKNOWN] }
+        reasonCode: { type: [string, 'null'] }
+        observedAt: { type: [string, 'null'], format: date-time }
+        providerResetAt:
+          type: [string, 'null']
+          format: date-time
+          description: Provider-reported reset only when reliable; never inferred from local backoff.
+        nextProbeAt:
+          type: [string, 'null']
+          format: date-time
+          description: Local retry or availability-check cooldown boundary, not a quota reset.
+        supportsStatusCheck: { type: boolean }
+        canRecheck: { type: boolean }
         canSubmit: { type: boolean }
         canSubmitWithAcknowledgement:
           type: boolean
@@ -487,13 +525,20 @@ components:
       type: object
       required: [nextOutcome, unavailableRecordingId]
       properties:
-        nextOutcome: { type: string, enum: [SUCCESS, FAILURE, UNKNOWN] }
+        nextOutcome: { type: string, enum: [SUCCESS, FAILURE, UNKNOWN, CAPACITY_UNAVAILABLE] }
         unavailableRecordingId: { type: [string, 'null'] }
     FixtureOutcomeControl:
       type: object
       required: [outcome]
       properties:
-        outcome: { type: string, enum: [SUCCESS, FAILURE, UNKNOWN] }
+        outcome: { type: string, enum: [SUCCESS, FAILURE, UNKNOWN, CAPACITY_UNAVAILABLE] }
+    FixtureAvailabilityControl:
+      type: object
+      required: [scenario]
+      properties:
+        scenario:
+          type: string
+          enum: [READY, BLOCKED_NO_STATUS, STATUS_SUCCESS, STATUS_MALFORMED, STATUS_TIMEOUT]
     FixturePlaybackControl:
       type: object
       required: [recordingId, unavailable]

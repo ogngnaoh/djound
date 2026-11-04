@@ -1,0 +1,14 @@
+ALTER TABLE workspace ADD COLUMN availability_state text NOT NULL DEFAULT 'ELIGIBLE' CHECK(availability_state IN ('ELIGIBLE','BLOCKED','UNKNOWN'));
+ALTER TABLE workspace ADD COLUMN availability_reason_code text DEFAULT 'FIXTURE_READY';
+ALTER TABLE workspace ADD COLUMN availability_observed_at timestamptz;
+ALTER TABLE workspace ADD COLUMN availability_provider_reset_at timestamptz;
+ALTER TABLE workspace ADD COLUMN availability_next_probe_at timestamptz;
+ALTER TABLE workspace ADD COLUMN availability_supports_status_check boolean NOT NULL DEFAULT false;
+ALTER TABLE workspace ADD COLUMN availability_version bigint NOT NULL DEFAULT 0;
+ALTER TABLE workspace ADD COLUMN fixture_status_scenario text NOT NULL DEFAULT 'READY' CHECK(fixture_status_scenario IN ('READY','BLOCKED_NO_STATUS','STATUS_SUCCESS','STATUS_MALFORMED','STATUS_TIMEOUT'));
+ALTER TABLE generation_attempt DROP CONSTRAINT generation_attempt_fixture_outcome_check;
+ALTER TABLE generation_attempt ADD CONSTRAINT generation_attempt_fixture_outcome_check CHECK(fixture_outcome IN ('SUCCESS','FAILURE','UNKNOWN','CAPACITY_UNAVAILABLE'));
+ALTER TABLE workspace DROP CONSTRAINT workspace_fixture_next_outcome_check;
+ALTER TABLE workspace ADD CONSTRAINT workspace_fixture_next_outcome_check CHECK(fixture_next_outcome IN ('SUCCESS','FAILURE','UNKNOWN','CAPACITY_UNAVAILABLE'));
+ALTER TABLE fixture_operation DROP CONSTRAINT fixture_operation_fixture_outcome_check;
+ALTER TABLE fixture_operation ADD CONSTRAINT fixture_operation_fixture_outcome_check CHECK(fixture_outcome IN ('SUCCESS','FAILURE','UNKNOWN','CAPACITY_UNAVAILABLE'));

@@ -16,12 +16,15 @@ public class ApiController {
     private final MediaStore media;
     private final com.djound.generation.GenerationService generations;
     private final com.djound.generation.FixtureReviewControls controls;
+    private final com.djound.availability.AvailabilityService availability;
 
     public ApiController(
             Explorations explorations,
             MediaStore media,
             com.djound.generation.GenerationService generations,
-            com.djound.generation.FixtureReviewControls controls) {
+            com.djound.generation.FixtureReviewControls controls,
+            com.djound.availability.AvailabilityService availability) {
+        this.availability = availability;
         this.controls = controls;
         this.generations = generations;
         this.explorations = explorations;
@@ -35,11 +38,22 @@ public class ApiController {
         boolean fixture = generations.configuration().fixture();
         result.put("mode", generations.configuration().mode());
         result.put("configuration", fixture ? "CONFIGURED" : "UNCONFIGURED");
-        result.put("eligibility", fixture ? "ELIGIBLE" : "UNKNOWN");
+        var capacity = availability.view();
+        result.put("eligibility", capacity.eligibility());
+        result.put("reasonCode", capacity.reasonCode());
+        result.put("observedAt", capacity.observedAt());
+        result.put("providerResetAt", capacity.providerResetAt());
+        result.put("nextProbeAt", capacity.nextProbeAt());
+        result.put("supportsStatusCheck", capacity.supportsStatusCheck());
+        result.put("canRecheck", capacity.canRecheck());
         var unknown = generations.unknownOutcome();
         result.put("unknownOutcome", unknown);
-        result.put("canSubmit", fixture && active == null && unknown == null);
-        result.put("canSubmitWithAcknowledgement", fixture && active == null && unknown != null);
+        result.put(
+                "canSubmit",
+                fixture && active == null && unknown == null && capacity.allowsSubmission());
+        result.put(
+                "canSubmitWithAcknowledgement",
+                fixture && active == null && unknown != null && capacity.allowsSubmission());
         result.put("canCreateExploration", active == null);
         result.put("activeAttemptId", active);
         result.put("fixtureControlsEnabled", controls.enabled());
@@ -148,6 +162,21 @@ public class ApiController {
     public Models.FixtureControls fixturePlayback(
             @RequestBody Models.FixturePlaybackControl command) {
         return controls.setPlayback(command);
+    }
+
+    @PostMapping("/workspace/availability/recheck")
+    public Map<String, Object> recheckAvailability() {
+        availability.recheck();
+        return workspace();
+    }
+
+    @PutMapping(
+            value = "/fixture/controls/availability",
+            consumes = MediaType.APPLICATION_JSON_VALUE)
+    public Map<String, Object> fixtureAvailability(
+            @RequestBody Models.FixtureAvailabilityControl command) {
+        availability.setScenario(command == null ? null : command.scenario());
+        return workspace();
     }
 
     @RequestMapping(
