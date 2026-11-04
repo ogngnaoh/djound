@@ -109,6 +109,10 @@ public class PublicationStore {
                     || !validated.hash().equals(journal.get("sha256")))
                 throw invalid("The surviving result does not match its validated hash and size.");
         }
+        if (owner.request().provenance().equals("LIVE") && validated.preciseSeconds() > 30.0)
+            throw invalid(
+                    "The live result exceeds the supported 30-second bound. Audio is never"
+                            + " cropped.");
         requireOwned(owner);
         if (Files.exists(destination)) {
             var existing = media.validateFile(destination, validated.fileName());
@@ -147,12 +151,15 @@ public class PublicationStore {
                     jdbc.sql(
                                     """
                                     INSERT INTO recording(id,exploration_id,title,kind,file_name,storage_key,content_type,byte_size,duration_ms,sample_rate,channels,codec,sha256,provenance,created_at,direction,request_id,attempt_id)
-                                    VALUES(?,?,?,'RENDITION',?,?,?,?,?,?,?,?,?,'FIXTURE',?,?,?,?)
+                                    VALUES(?,?,?,'RENDITION',?,?,?,?,?,?,?,?,?,?,?,?,?,?)
                                     """)
                             .params(
                                     recording,
                                     owner.explorationId(),
-                                    "Sample version " + (ordinal + 1),
+                                    (owner.request().provenance().equals("LIVE")
+                                                    ? "Version "
+                                                    : "Sample version ")
+                                            + (ordinal + 1),
                                     metadata.fileName(),
                                     storage,
                                     metadata.contentType(),
@@ -162,6 +169,7 @@ public class PublicationStore {
                                     metadata.channels(),
                                     metadata.codec(),
                                     metadata.hash(),
+                                    owner.request().provenance(),
                                     now,
                                     owner.request().direction(),
                                     owner.requestId(),

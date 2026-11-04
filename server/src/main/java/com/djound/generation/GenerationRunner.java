@@ -19,6 +19,7 @@ public class GenerationRunner {
     private final GenerationService service;
     private final FixtureOperations operations;
     private final PublicationStore publications;
+    private final LiveOperations live;
     private final FixtureCheckpoints checkpoints;
     private final AtomicBoolean running = new AtomicBoolean();
 
@@ -26,14 +27,62 @@ public class GenerationRunner {
             GenerationService service,
             FixtureOperations operations,
             PublicationStore publications,
-            FixtureCheckpoints checkpoints)
+            FixtureCheckpoints checkpoints,
+            LiveOperations live)
             throws java.io.IOException {
+        this.live = live;
         this.service = service;
         this.operations = operations;
         this.publications = publications;
         this.checkpoints = checkpoints;
         service.recoverInterrupted();
         publications.cleanup();
+    }
+
+    private void runLive(Models.Attempt owner) {
+        try {
+            if (owner.state().equals("ACCEPTED")) {
+                owner = service.claimNext();
+                if (owner == null) return;
+                live.submit(owner);
+                owner = service.get(owner.id());
+            }
+            String handle = service.savedHandle(owner.id());
+            if (handle == null)
+                throw new ApiProblem(
+                        503,
+                        "OUTCOME_UNKNOWN",
+                        "The live submission has no saved acknowledgement.",
+                        "ACKNOWLEDGE_UNKNOWN_OUTCOME");
+            var operation = live.observe(handle);
+            owner = service.beginSaving(owner);
+            publications.publish(owner, operation);
+        } catch (StaleAttemptOwner ignored) {
+        } catch (Exception error) {
+            String code =
+                    owner.state().equals("SAVING")
+                            ? (error instanceof java.io.IOException
+                                    ? "MEDIA_STORAGE_FAILED"
+                                    : "OUTPUT_INVALID")
+                            : error instanceof ApiProblem problem
+                                    ? problem.code()
+                                    : "OUTCOME_UNKNOWN";
+            if (service.fail(
+                    owner,
+                    code,
+                    "Live creation could not finish: "
+                            + (error instanceof ApiProblem
+                                    ? error.getMessage()
+                                    : "the remote outcome or local result could not be"
+                                            + " confirmed."))) {
+                try {
+                    publications.discardFailed(owner);
+                } catch (java.io.IOException cleanup) {
+                    log.warn("Deferred live publication cleanup", cleanup);
+                }
+            }
+            if (error instanceof InterruptedException) Thread.currentThread().interrupt();
+        }
     }
 
     @Scheduled(fixedDelay = 250, initialDelay = 250)
@@ -43,6 +92,10 @@ public class GenerationRunner {
         try {
             owner = service.active();
             if (owner == null) return;
+            if (owner.request().provenance().equals("LIVE")) {
+                runLive(owner);
+                return;
+            }
             FixtureOperations.Operation operation;
             if (owner.state().equals("ACCEPTED")) {
                 checkpoints.reach("BEFORE_SUBMIT", owner);

@@ -2,7 +2,7 @@ openapi: 3.1.0
 info:
   title: Djound local application API
   version: 0.1.0
-  description: Local single-person audio workspace with explicit sample mode. A live music provider is not configured.
+  description: Local single-person audio workspace with explicit sample mode and an opt-in anonymous MelodyFlow adapter for short clips. Live submissions require a separately provisioned bounded allowance.
 servers:
   - url: /
 paths:
@@ -300,7 +300,7 @@ components:
           additionalProperties: { type: string }
     InputPolicy:
       type: object
-      required: [formats, maxBytes, minDurationMs, maxDurationMs, sampleRates, channels, maxTextCodePoints, providerCompatibilityKnown]
+      required: [formats, maxBytes, minDurationMs, maxDurationMs, sampleRates, channels, maxTextCodePoints, maxAssembledCodePoints, providerMaxDurationMs, providerCompatibilityKnown]
       properties:
         formats:
           type: array
@@ -315,12 +315,18 @@ components:
           type: array
           items: { type: integer }
         maxTextCodePoints: { type: integer }
+        maxAssembledCodePoints:
+          type: integer
+          description: Limit on literal assembled instructions, including inherited context. Saved drafts are never truncated to fit it.
+        providerMaxDurationMs:
+          type: [integer, 'null']
+          description: Concrete provider source/output duration ceiling, enforced using precise or conservative duration evidence rather than rounded display metadata.
         providerCompatibilityKnown: { type: boolean }
     Workspace:
       type: object
-      required: [mode, configuration, eligibility, reasonCode, observedAt, providerResetAt, nextProbeAt, supportsStatusCheck, canRecheck, canSubmit, canSubmitWithAcknowledgement, canCreateExploration, activeAttemptId, unknownOutcome, fixtureControlsEnabled, inputPolicy]
+      required: [mode, configuration, eligibility, reasonCode, observedAt, providerResetAt, nextProbeAt, supportsStatusCheck, canRecheck, canSubmit, canSubmitWithAcknowledgement, canCreateExploration, activeAttemptId, unknownOutcome, submissionAllowance, fixtureControlsEnabled, inputPolicy]
       properties:
-        mode: { type: string, enum: [UNCONFIGURED, FIXTURE] }
+        mode: { type: string, enum: [UNCONFIGURED, FIXTURE, LIVE] }
         configuration: { type: string, enum: [UNCONFIGURED, CONFIGURED] }
         eligibility: { type: string, enum: [ELIGIBLE, BLOCKED, UNKNOWN] }
         reasonCode: { type: [string, 'null'] }
@@ -345,15 +351,29 @@ components:
           oneOf:
             - $ref: '#/components/schemas/UnknownOutcome'
             - type: 'null'
+        submissionAllowance:
+          oneOf:
+            - $ref: '#/components/schemas/SubmissionAllowance'
+            - type: 'null'
         fixtureControlsEnabled: { type: boolean }
         inputPolicy: { $ref: '#/components/schemas/InputPolicy' }
     UnknownOutcome:
       type: object
-      required: [attemptId, detail, occurredAt]
+      required: [attemptId, detail, occurredAt, provenance]
       properties:
         attemptId: { type: string }
         detail: { type: string }
         occurredAt: { type: string, format: date-time }
+        provenance: { type: string, enum: [FIXTURE, LIVE] }
+    SubmissionAllowance:
+      type: object
+      description: Installation-bound authorization for live submissions, separate from unknown provider quota. Reservation consumes a slot before transmission, with no refund or application replenishment.
+      required: [limit, used, remaining, provisioned]
+      properties:
+        limit: { type: integer, minimum: 0, maximum: 2 }
+        used: { type: integer, minimum: 0, maximum: 2 }
+        remaining: { type: integer, minimum: 0, maximum: 2 }
+        provisioned: { type: boolean }
     Recording:
       type: object
       required: [id, explorationId, kind, title, fileName, contentType, byteSize, durationMs, sampleRate, channels, codec, sha256, mediaUrl, provenance, kept, direction, requestId, attemptId, createdAt]

@@ -35,7 +35,8 @@ public class MediaStore {
             int sampleRate,
             int channels,
             String codec,
-            String contentType)
+            String contentType,
+            double preciseSeconds)
             implements AutoCloseable {
         public void close() throws IOException {
             Files.deleteIfExists(path);
@@ -143,7 +144,8 @@ public class MediaStore {
                 rate,
                 channels,
                 codec,
-                wav ? "audio/wav" : "audio/mpeg");
+                wav ? "audio/wav" : "audio/mpeg",
+                seconds);
     }
 
     public Path temporaryPath(String name) {

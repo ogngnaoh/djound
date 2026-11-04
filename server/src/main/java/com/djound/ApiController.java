@@ -35,9 +35,12 @@ public class ApiController {
     public Map<String, Object> workspace() {
         Map<String, Object> result = new LinkedHashMap<>();
         String active = generations.activeAttemptId();
-        boolean fixture = generations.configuration().fixture();
+        boolean configured = generations.configuration().configured();
+        boolean live = generations.configuration().live();
+        boolean allowed = generations.allowanceAvailable();
+        result.put("submissionAllowance", generations.submissionAllowance());
         result.put("mode", generations.configuration().mode());
-        result.put("configuration", fixture ? "CONFIGURED" : "UNCONFIGURED");
+        result.put("configuration", configured ? "CONFIGURED" : "UNCONFIGURED");
         var capacity = availability.view();
         result.put("eligibility", capacity.eligibility());
         result.put("reasonCode", capacity.reasonCode());
@@ -50,32 +53,43 @@ public class ApiController {
         result.put("unknownOutcome", unknown);
         result.put(
                 "canSubmit",
-                fixture && active == null && unknown == null && capacity.allowsSubmission());
+                configured
+                        && allowed
+                        && active == null
+                        && unknown == null
+                        && capacity.allowsSubmission());
         result.put(
                 "canSubmitWithAcknowledgement",
-                fixture && active == null && unknown != null && capacity.allowsSubmission());
+                configured
+                        && allowed
+                        && active == null
+                        && unknown != null
+                        && capacity.allowsSubmission());
         result.put("canCreateExploration", active == null);
         result.put("activeAttemptId", active);
         result.put("fixtureControlsEnabled", controls.enabled());
-        result.put(
-                "inputPolicy",
-                Map.of(
-                        "formats",
-                        List.of("WAV_PCM16", "MP3"),
-                        "maxBytes",
-                        MediaStore.MAX_BYTES,
-                        "minDurationMs",
-                        1000,
-                        "maxDurationMs",
-                        300000,
-                        "sampleRates",
-                        List.of(44100, 48000),
-                        "channels",
-                        List.of(1, 2),
-                        "maxTextCodePoints",
-                        4000,
-                        "providerCompatibilityKnown",
-                        false));
+        Map<String, Object> inputPolicy =
+                new LinkedHashMap<>(
+                        Map.of(
+                                "formats",
+                                List.of("WAV_PCM16", "MP3"),
+                                "maxBytes",
+                                MediaStore.MAX_BYTES,
+                                "minDurationMs",
+                                1000,
+                                "maxDurationMs",
+                                300000,
+                                "sampleRates",
+                                List.of(44100, 48000),
+                                "channels",
+                                List.of(1, 2),
+                                "maxTextCodePoints",
+                                4000,
+                                "providerCompatibilityKnown",
+                                live));
+        inputPolicy.put("maxAssembledCodePoints", live ? 500 : 16000);
+        inputPolicy.put("providerMaxDurationMs", live ? 30000 : null);
+        result.put("inputPolicy", inputPolicy);
         return result;
     }
 

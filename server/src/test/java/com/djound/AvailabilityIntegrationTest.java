@@ -332,7 +332,7 @@ class AvailabilityIntegrationTest {
                 0,
                 jdbc().sql(
                                 "SELECT COUNT(*) FROM command_receipt WHERE"
-                                    + " command_key='ack-capacity-request'")
+                                        + " command_key='ack-capacity-request'")
                         .query(Integer.class)
                         .single());
         assertEquals(

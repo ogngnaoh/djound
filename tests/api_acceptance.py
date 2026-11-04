@@ -78,6 +78,9 @@ assert workspace['configuration'] == 'UNCONFIGURED' and not workspace['canSubmit
 assert workspace['canSubmitWithAcknowledgement'] is False and workspace['unknownOutcome'] is None
 assert workspace['eligibility'] == 'UNKNOWN' and not workspace['supportsStatusCheck'] and not workspace['canRecheck']
 assert workspace['providerResetAt'] is None and workspace['nextProbeAt'] is None
+assert workspace['submissionAllowance'] is None
+assert workspace['inputPolicy']['providerMaxDurationMs'] is None
+assert workspace['inputPolicy']['maxAssembledCodePoints'] == 16000
 assert workspace['fixtureControlsEnabled'] is False
 status, _, body = request('/api/fixture/controls')
 problem(status, body, {404})

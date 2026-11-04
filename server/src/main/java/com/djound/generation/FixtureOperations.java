@@ -53,6 +53,16 @@ public class FixtureOperations {
                         Timestamp.from(ready),
                         Timestamp.from(now))
                 .update();
+        jdbc.sql(
+                        "INSERT INTO"
+                            + " generation_operation(id,attempt_id,adapter_configuration_id,provenance,result_url)"
+                            + " VALUES(?,?,?,'FIXTURE',?)")
+                .params(
+                        id,
+                        attempt.id(),
+                        attempt.request().adapterConfigurationId(),
+                        settings.resultUrl())
+                .update();
         adapter.recordSubmission();
         return new Operation(id, outcome, name, settings.resultUrl(), ready);
     }

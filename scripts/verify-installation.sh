@@ -4,7 +4,7 @@ set -euo pipefail
 source "$(dirname "$0")/env.sh"
 cd "$DJOUND_ROOT"
 check_mode="${1:-all}"
-case "$check_mode" in all|api|fixture|listening|recovery|unknown|capacity|interaction) ;; *) echo 'Usage: verify-installation.sh [all|api|fixture|listening|recovery|unknown|capacity|interaction]' >&2; exit 2 ;; esac
+case "$check_mode" in all|api|fixture|listening|recovery|unknown|capacity|interaction|live-policy) ;; *) echo 'Usage: verify-installation.sh [all|api|fixture|listening|recovery|unknown|capacity|interaction|live-policy]' >&2; exit 2 ;; esac
 mkdir -p .runtime/checks
 run_dir="$(mktemp -d "$DJOUND_ROOT/.runtime/checks/run.XXXXXX")"
 test_db="djound_check_$$_${RANDOM}"
@@ -32,6 +32,10 @@ export DJOUND_ALLOWED_ORIGINS="http://127.0.0.1:$test_port"
 export DJOUND_TEST_BASE_URL="http://127.0.0.1:$test_port"
 export DJOUND_TEST_ALLOW_WRITE=1
 export DJOUND_MODE=UNCONFIGURED
+java_options=(-Djdk.httpclient.redirects.retrylimit=1 -Djdk.httpclient.disableRetryConnect=true -Djdk.httpclient.enableAllMethodRetry=false)
+if [[ "$check_mode" == live-policy ]]; then
+  export DJOUND_MODE=LIVE
+fi
 export DJOUND_FIXTURE_REVIEW_CONTROLS=false
 unset DJOUND_FIXTURE_COOLDOWN_MS
 if [[ "$check_mode" == fixture || "$check_mode" == listening || "$check_mode" == recovery || "$check_mode" == unknown || "$check_mode" == capacity || "$check_mode" == interaction ]]; then
@@ -47,7 +51,7 @@ jars=(server/target/djound-*.jar)
 cp "${jars[0]}" "$run_dir/application.jar"
 test_jar="$run_dir/application.jar"
 start_app() {
-  java -jar "$test_jar" >> "$run_dir/app.log" 2>&1 &
+  java "${java_options[@]}" -jar "$test_jar" >> "$run_dir/app.log" 2>&1 &
   app_pid=$!
   for ((i=0;i<60;i++)); do
     kill -0 "$app_pid" 2>/dev/null || { tail -60 "$run_dir/app.log"; exit 1; }
@@ -58,7 +62,9 @@ start_app() {
   exit 1
 }
 start_app
-if [[ "$check_mode" == interaction ]]; then
+if [[ "$check_mode" == live-policy ]]; then
+  node scripts/live-policy-smoke.mjs | tee "$run_dir/api-result.json"
+elif [[ "$check_mode" == interaction ]]; then
   node scripts/interaction-smoke.mjs | tee "$run_dir/api-result.json"
 elif [[ "$check_mode" == capacity ]]; then
   python3 tests/availability_acceptance.py | tee "$run_dir/api-result.json"
@@ -93,7 +99,8 @@ jar, log, directory, expected, port = sys.argv[1:]
 env = dict(os.environ, DJOUND_DATA_DIR=directory, DJOUND_PORT=port)
 with open(log, 'w') as output:
     try:
-        result = subprocess.run(['java', '-jar', jar], env=env, stdout=output, stderr=subprocess.STDOUT, timeout=30)
+        options = ['-Djdk.httpclient.redirects.retrylimit=1', '-Djdk.httpclient.disableRetryConnect=true', '-Djdk.httpclient.enableAllMethodRetry=false']
+        result = subprocess.run(['java', *options, '-jar', jar], env=env, stdout=output, stderr=subprocess.STDOUT, timeout=30)
     except subprocess.TimeoutExpired:
         raise SystemExit('Guard failed to refuse startup within 30 seconds: ' + log)
 assert result.returncode != 0 and expected in pathlib.Path(log).read_text(), log

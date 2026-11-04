@@ -22,6 +22,7 @@ public class GenerationService {
     private final MediaStore media;
     private final FixtureReviewControls controls;
     private final com.djound.availability.AvailabilityService availability;
+    private final LiveAllowance allowance;
     private final PromptAssembler assembler = new PromptAssembler();
 
     public GenerationService(
@@ -30,7 +31,9 @@ public class GenerationService {
             GenerationConfiguration configuration,
             MediaStore media,
             FixtureReviewControls controls,
-            com.djound.availability.AvailabilityService availability) {
+            com.djound.availability.AvailabilityService availability,
+            LiveAllowance allowance) {
+        this.allowance = allowance;
         this.availability = availability;
         this.jdbc = jdbc;
         this.transactions = new TransactionTemplate(manager);
@@ -41,6 +44,72 @@ public class GenerationService {
 
     public GenerationConfiguration configuration() {
         return configuration;
+    }
+
+    public Map<String, Object> submissionAllowance() {
+        return configuration.live() ? allowance.view() : null;
+    }
+
+    public boolean allowanceAvailable() {
+        return !configuration.live()
+                || ((Number) allowance.view().get("remaining")).longValue() > 0;
+    }
+
+    private void requireLiveText(String instructions) {
+        if (configuration.live() && instructions.codePointCount(0, instructions.length()) > 500)
+            throw new ApiProblem(
+                    422,
+                    "ASSEMBLED_DIRECTION_TOO_LONG",
+                    "The live adapter accepts at most 500 assembled Unicode code points. Shorten"
+                            + " the direction or choose the original basis.",
+                    "EDIT_TEXT");
+    }
+
+    // Probe immutable bytes outside database locks. A receipt always bypasses current compatibility
+    // checks.
+    private String preflightSource(String key, String id, boolean retry) {
+        if (!configuration.live()
+                || jdbc.sql("SELECT EXISTS(SELECT 1 FROM command_receipt WHERE command_key=?)")
+                        .param(key)
+                        .query(Boolean.class)
+                        .single()) return null;
+        var rows =
+                jdbc.sql(
+                                retry
+                                        ? "SELECT r.id,r.storage_key,r.file_name FROM"
+                                                + " generation_request q JOIN recording r ON"
+                                                + " r.id=q.source_recording_id WHERE q.id=?"
+                                        : "SELECT r.id,r.storage_key,r.file_name FROM exploration e"
+                                                + " JOIN recording r ON r.id=e.original_id WHERE"
+                                                + " e.id=?")
+                        .param(id)
+                        .query()
+                        .listOfRows();
+        if (rows.isEmpty()) throw missing();
+        var row = rows.getFirst();
+        try {
+            requireLiveDuration(
+                    media.validateFile(
+                            media.path((String) row.get("storage_key")),
+                            (String) row.get("file_name")));
+        } catch (java.io.IOException error) {
+            throw new ApiProblem(
+                    503,
+                    "MEDIA_STORAGE_FAILED",
+                    "The original source could not be validated.",
+                    "EDIT_TEXT");
+        }
+        return (String) row.get("id");
+    }
+
+    public void requireLiveDuration(MediaStore.Upload upload) {
+        if (configuration.live() && upload.preciseSeconds() > 30.0)
+            throw new ApiProblem(
+                    422,
+                    "PROVIDER_DURATION_UNSUPPORTED",
+                    "The live adapter supports sources from 1 through 30 seconds. Choose a"
+                            + " compatible source; audio is never cropped.",
+                    "CHOOSE_FILE");
     }
 
     public String activeAttemptId() {
@@ -91,6 +160,7 @@ public class GenerationService {
         } catch (java.security.NoSuchAlgorithmException impossible) {
             throw new IllegalStateException(impossible);
         }
+        String checkedSource = preflightSource(key, explorationId, false);
         return transactions.execute(
                 status -> {
                     var workspace =
@@ -123,9 +193,10 @@ public class GenerationService {
                                 ((Number) receipt.get("draft_revision")).longValue(),
                                 true);
                     }
-                    if (configuration.fixture()) availability.requireAvailable();
+                    if (configuration.configured()) availability.requireAvailable();
+                    if (configuration.live()) allowance.requireAvailable();
                     validateAcknowledgement(workspace, command.acknowledgedUnknownAttemptId());
-                    if (!configuration.fixture())
+                    if (!configuration.configured())
                         throw new ApiProblem(
                                 503,
                                 "PROVIDER_NOT_CONFIGURED",
@@ -191,13 +262,20 @@ public class GenerationService {
                     String inherited =
                             Optional.ofNullable((String) basisRow.get("direction")).orElse("");
                     var assembled = assembler.assemble(inherited, command.text());
+                    requireLiveText(assembled.instructions());
+                    if (configuration.live() && !original.equals(checkedSource))
+                        throw new ApiProblem(
+                                409,
+                                "SOURCE_CHANGED",
+                                "The source changed during validation.",
+                                "REFRESH_EXPLORATION");
                     String request = "req_" + UUID.randomUUID(),
                             attempt = "attempt_" + UUID.randomUUID();
                     Timestamp now = Timestamp.from(Instant.now());
                     jdbc.sql(
                                     """
                                     INSERT INTO generation_request(id,exploration_id,source_recording_id,source_revision,basis_recording_id,submitted_text,inherited_direction,direction,assembled_instructions,assembler_version,adapter_configuration_id,provenance,created_at)
-                                    VALUES(?,?,?,?,?,?,?,?,?,?,?,'FIXTURE',?)
+                                    VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)
                                     """)
                             .params(
                                     request,
@@ -211,6 +289,7 @@ public class GenerationService {
                                     assembled.instructions(),
                                     PromptAssembler.VERSION,
                                     configuration.adapterId(),
+                                    configuration.mode(),
                                     now)
                             .update();
                     jdbc.sql(
@@ -291,6 +370,7 @@ public class GenerationService {
         } catch (java.security.NoSuchAlgorithmException impossible) {
             throw new IllegalStateException(impossible);
         }
+        String checkedSource = preflightSource(key, requestId, true);
         return transactions.execute(
                 status -> {
                     var workspace =
@@ -318,9 +398,10 @@ public class GenerationService {
                                     "RETRY");
                         return retryReceipt(requestId, (String) row.get("attempt_id"), true);
                     }
-                    if (configuration.fixture()) availability.requireAvailable();
+                    if (configuration.configured()) availability.requireAvailable();
+                    if (configuration.live()) allowance.requireAvailable();
                     validateAcknowledgement(workspace, command.acknowledgedUnknownAttemptId());
-                    if (!configuration.fixture())
+                    if (!configuration.configured())
                         throw new ApiProblem(
                                 503,
                                 "PROVIDER_NOT_CONFIGURED",
@@ -374,7 +455,7 @@ public class GenerationService {
                                         + " from the current source.",
                                 "EDIT_TEXT");
                     if (!frozen.adapterConfigurationId().equals(configuration.adapterId())
-                            || !frozen.provenance().equals("FIXTURE"))
+                            || !frozen.provenance().equals(configuration.mode()))
                         throw new ApiProblem(
                                 409,
                                 "RETRY_CONTEXT_UNAVAILABLE",
@@ -386,6 +467,13 @@ public class GenerationService {
                                 "CREATION_ACTIVE",
                                 "Another creation is already in progress.",
                                 "WAIT");
+                    requireLiveText(frozen.assembledInstructions());
+                    if (configuration.live() && !frozen.sourceRecordingId().equals(checkedSource))
+                        throw new ApiProblem(
+                                409,
+                                "SOURCE_CHANGED",
+                                "The source changed during validation.",
+                                "REFRESH_EXPLORATION");
                     String attempt = "attempt_" + UUID.randomUUID();
                     Timestamp now = Timestamp.from(Instant.now());
                     jdbc.sql(
@@ -467,12 +555,16 @@ public class GenerationService {
                                a.created_at AS attempt_created_at,a.updated_at,r.*,
                                (? AND a.state='FAILED' AND a.outcome_code IN ('GENERATION_FAILED','OUTPUT_INVALID','MEDIA_STORAGE_FAILED','PROCESS_INTERRUPTED','OUTCOME_UNKNOWN','CAPACITY_UNAVAILABLE')
                                 AND e.latest_attempt_id=a.id AND e.original_id=r.source_recording_id AND e.source_revision=r.source_revision
-                                AND r.adapter_configuration_id=? AND r.provenance='FIXTURE'
+                                AND r.adapter_configuration_id=? AND r.provenance=?
                                 AND w.active_attempt_id IS NULL) AS can_retry
                         FROM generation_attempt a JOIN generation_request r ON r.id=a.request_id
                         JOIN exploration e ON e.id=a.exploration_id CROSS JOIN workspace w WHERE w.id=1 AND a.id=?
                         """)
-                .params(configuration.fixture(), configuration.adapterId(), id)
+                .params(
+                        configuration.configured(),
+                        configuration.adapterId(),
+                        configuration.mode(),
+                        id)
                 .query(
                         (r, n) -> {
                             var request =
@@ -523,6 +615,14 @@ public class GenerationService {
      * Called once before the scheduler is enabled. No fixture output is automatically resubmitted.
      */
     public void recoverInterrupted() {
+        // Fail before changing any recovery owner or evidence. Completed history needs no
+        // transport.
+        if (jdbc.sql(
+                        "SELECT EXISTS(SELECT 1 FROM generation_attempt a JOIN generation_request r"
+                            + " ON r.id=a.request_id WHERE r.provenance='LIVE' AND a.state NOT IN"
+                            + " ('SUCCEEDED','FAILED'))")
+                .query(Boolean.class)
+                .single()) MelodyFlowTransport.requireNoRetryLaunchProperties();
         transactions.executeWithoutResult(
                 status -> {
                     jdbc.sql("SELECT id FROM workspace WHERE id=1 FOR UPDATE")
@@ -539,12 +639,15 @@ public class GenerationService {
                         String id = (String) row.get("id"), state = (String) row.get("state");
                         long version = ((Number) row.get("version")).longValue();
                         if (state.equals("ACCEPTED")) {
-                            if (!configuration.fixture())
+                            if (!configuration.configured()
+                                    || !get(id).request()
+                                            .adapterConfigurationId()
+                                            .equals(configuration.adapterId()))
                                 fail(
                                         get(id),
                                         "RETRY_CONTEXT_UNAVAILABLE",
-                                        "Untouched work was not dispatched because fixture"
-                                                + " execution is disabled.");
+                                        "Untouched work was not dispatched because its adapter"
+                                                + " configuration is unavailable.");
                             continue;
                         }
                         if (row.get("operation_handle") == null) {
@@ -611,7 +714,7 @@ public class GenerationService {
     }
 
     public Attempt claimNext() {
-        if (!configuration.fixture()) return null;
+        if (!configuration.configured()) return null;
         return transactions.execute(
                 status -> {
                     var workspace =
@@ -682,7 +785,8 @@ public class GenerationService {
                                             owner.state())
                                     .update();
                     if (changed != 1) return false;
-                    if (code.equals("CAPACITY_UNAVAILABLE")) availability.observeCapacityFailure();
+                    if (code.equals("CAPACITY_UNAVAILABLE"))
+                        availability.observeCapacityFailure(owner.request().provenance());
                     jdbc.sql(
                                     "UPDATE workspace SET active_attempt_id=NULL WHERE id=1 AND"
                                             + " active_attempt_id=?")
@@ -698,15 +802,16 @@ public class GenerationService {
 
     public UnknownOutcome unknownOutcome() {
         return jdbc.sql(
-                        "SELECT a.id,a.outcome_detail,a.updated_at FROM workspace w JOIN"
-                                + " generation_attempt a ON a.id=w.unknown_outcome_attempt_id WHERE"
-                                + " w.id=1")
+                        "SELECT a.id,a.outcome_detail,a.updated_at,r.provenance FROM workspace w"
+                            + " JOIN generation_attempt a ON a.id=w.unknown_outcome_attempt_id JOIN"
+                            + " generation_request r ON r.id=a.request_id WHERE w.id=1")
                 .query(
                         (r, n) ->
                                 new UnknownOutcome(
                                         r.getString("id"),
                                         r.getString("outcome_detail"),
-                                        r.getTimestamp("updated_at").toInstant()))
+                                        r.getTimestamp("updated_at").toInstant(),
+                                        r.getString("provenance")))
                 .optional()
                 .orElse(null);
     }

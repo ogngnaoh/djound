@@ -10,11 +10,19 @@ public record GenerationConfiguration(String mode, long delayMs, boolean reviewC
             @Value("${djound.mode}") String mode,
             @Value("${djound.fixture-delay-ms}") long delayMs,
             @Value("${djound.fixture-review-controls}") boolean reviewControls) {
-        if (!mode.equals("UNCONFIGURED") && !mode.equals("FIXTURE"))
-            throw new IllegalArgumentException("DJOUND_MODE must be UNCONFIGURED or FIXTURE");
+        if (!mode.equals("UNCONFIGURED") && !mode.equals("FIXTURE") && !mode.equals("LIVE"))
+            throw new IllegalArgumentException(
+                    "DJOUND_MODE must be UNCONFIGURED, FIXTURE, or LIVE");
         if (delayMs < 0 || delayMs > 30000)
             throw new IllegalArgumentException(
                     "DJOUND_FIXTURE_DELAY_MS must be between 0 and 30000");
+        if (mode.equals("LIVE")) {
+            if (!"1".equals(System.getProperty("jdk.httpclient.redirects.retrylimit"))
+                    || !"true".equals(System.getProperty("jdk.httpclient.disableRetryConnect"))
+                    || !"false".equals(System.getProperty("jdk.httpclient.enableAllMethodRetry")))
+                throw new IllegalArgumentException(
+                        "LIVE requires explicit JVM no-retry launch properties");
+        }
         this.mode = mode;
         this.delayMs = delayMs;
         this.reviewControls = reviewControls;
@@ -32,7 +40,15 @@ public record GenerationConfiguration(String mode, long delayMs, boolean reviewC
         return mode.equals("FIXTURE");
     }
 
+    public boolean live() {
+        return mode.equals("LIVE");
+    }
+
+    public boolean configured() {
+        return fixture() || live();
+    }
+
     public String adapterId() {
-        return "scripted-samples-v1";
+        return live() ? "melodyflow-anonymous-v1" : "scripted-samples-v1";
     }
 }

@@ -38,7 +38,7 @@ jars=(server/target/djound-*.jar)
 [[ ${#jars[@]} -eq 1 ]] || { echo 'Package the app before verification.' >&2; exit 1; }
 cp "${jars[0]}" "$run_dir/current.jar"
 start_app() {
-  java -jar "$run_dir/$1.jar" > "$run_dir/$1.log" 2>&1 &
+  java -Djdk.httpclient.redirects.retrylimit=1 -Djdk.httpclient.disableRetryConnect=true -Djdk.httpclient.enableAllMethodRetry=false -jar "$run_dir/$1.jar" > "$run_dir/$1.log" 2>&1 &
   app_pid=$!
   for ((i=0;i<60;i++)); do
     kill -0 "$app_pid" 2>/dev/null || { tail -60 "$run_dir/$1.log"; exit 1; }

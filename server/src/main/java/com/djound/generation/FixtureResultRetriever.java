@@ -16,9 +16,16 @@ import java.util.concurrent.*;
 @Component
 public class FixtureResultRetriever {
     private final FixtureCheckpoints checkpoints;
+    private final URI liveOrigin;
 
+    @org.springframework.beans.factory.annotation.Autowired
     public FixtureResultRetriever(FixtureCheckpoints checkpoints) {
+        this(checkpoints, MelodyFlowTransport.ORIGIN);
+    }
+
+    FixtureResultRetriever(FixtureCheckpoints checkpoints, URI liveOrigin) {
         this.checkpoints = checkpoints;
+        this.liveOrigin = liveOrigin;
     }
 
     public void retrieve(
@@ -33,9 +40,13 @@ public class FixtureResultRetriever {
             }
             return;
         }
-        URI uri = FixtureExecutionSettings.validateUrl(operation.resultUrl());
+        URI uri =
+                attempt.request().provenance().equals("LIVE")
+                        ? MelodyFlowTransport.validateResult(operation.resultUrl(), liveOrigin)
+                        : FixtureExecutionSettings.validateUrl(operation.resultUrl());
         var client =
                 HttpClient.newBuilder()
+                        .version(HttpClient.Version.HTTP_1_1)
                         .connectTimeout(Duration.ofSeconds(2))
                         .followRedirects(HttpClient.Redirect.NEVER)
                         .proxy(

@@ -175,6 +175,7 @@ accepted_body = {'expectedPreviousAttemptId': unknown['id'], 'acknowledgedUnknow
 accepted_key = key()
 assert request(accepted_path, 'POST', accepted_body, accepted_key, 503)['code'] == 'CAPACITY_UNAVAILABLE'
 assert workspace()['unknownOutcome']['attemptId'] == unknown['id']
+assert workspace()['unknownOutcome']['provenance'] == 'FIXTURE'
 assert request(path)['draft'] == preserved
 scenario('READY')
 assert workspace()['canSubmitWithAcknowledgement'] and not workspace()['canSubmit']

@@ -364,7 +364,8 @@ class GenerationIntegrationTest {
                         generations(),
                         failing,
                         app.getBean(PublicationStore.class),
-                        app.getBean(FixtureCheckpoints.class))
+                        app.getBean(FixtureCheckpoints.class),
+                        app.getBean(LiveOperations.class))
                 .tick();
         var attempt = finished(accepted.attemptId());
         assertEquals("FAILED", attempt.state());
@@ -386,7 +387,8 @@ class GenerationIntegrationTest {
         assertThrows(ApiProblem.class, () -> assembler.assemble("", "a".repeat(4001)));
         assertThrows(ApiProblem.class, () -> assembler.assemble("b".repeat(15999), "new"));
         assertThrows(
-                IllegalArgumentException.class, () -> new GenerationConfiguration("LIVE", 2000));
+                IllegalArgumentException.class,
+                () -> new GenerationConfiguration("UNSUPPORTED", 2000));
     }
 
     @Test

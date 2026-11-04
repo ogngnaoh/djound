@@ -74,6 +74,9 @@ expect(200, status, 'workspace')
 assert workspace['mode'] == 'FIXTURE' and workspace['configuration'] == 'CONFIGURED'
 assert workspace['canSubmit'] and workspace['activeAttemptId'] is None
 assert workspace['canSubmitWithAcknowledgement'] is False and workspace['unknownOutcome'] is None
+assert workspace['submissionAllowance'] is None
+assert workspace['inputPolicy']['providerMaxDurationMs'] is None
+assert workspace['inputPolicy']['maxAssembledCodePoints'] == 16000
 sources = []
 for _ in range(2):
     status, receipt = upload('fixture-upload-' + uuid.uuid4().hex)

@@ -285,11 +285,15 @@ export interface components {
             sampleRates: number[];
             channels: number[];
             maxTextCodePoints: number;
+            /** @description Limit on literal assembled instructions, including inherited context. Saved drafts are never truncated to fit it. */
+            maxAssembledCodePoints: number;
+            /** @description Concrete provider source/output duration ceiling, enforced using precise or conservative duration evidence rather than rounded display metadata. */
+            providerMaxDurationMs: number | null;
             providerCompatibilityKnown: boolean;
         };
         Workspace: {
             /** @enum {string} */
-            mode: "UNCONFIGURED" | "FIXTURE";
+            mode: "UNCONFIGURED" | "FIXTURE" | "LIVE";
             /** @enum {string} */
             configuration: "UNCONFIGURED" | "CONFIGURED";
             /** @enum {string} */
@@ -315,6 +319,7 @@ export interface components {
             canCreateExploration: boolean;
             activeAttemptId: string | null;
             unknownOutcome: components["schemas"]["UnknownOutcome"] | null;
+            submissionAllowance: components["schemas"]["SubmissionAllowance"] | null;
             fixtureControlsEnabled: boolean;
             inputPolicy: components["schemas"]["InputPolicy"];
         };
@@ -323,6 +328,15 @@ export interface components {
             detail: string;
             /** Format: date-time */
             occurredAt: string;
+            /** @enum {string} */
+            provenance: "FIXTURE" | "LIVE";
+        };
+        /** @description Installation-bound authorization for live submissions, separate from unknown provider quota. Reservation consumes a slot before transmission, with no refund or application replenishment. */
+        SubmissionAllowance: {
+            limit: number;
+            used: number;
+            remaining: number;
+            provisioned: boolean;
         };
         Recording: {
             id: string;

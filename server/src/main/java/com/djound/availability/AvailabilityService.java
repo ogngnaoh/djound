@@ -51,11 +51,17 @@ public class AvailabilityService {
     }
 
     public View view() {
-        return policy(jdbc.sql("SELECT * FROM workspace WHERE id=1").query().singleRow());
+        return policy(
+                jdbc.sql(
+                                "SELECT * FROM "
+                                        + (configuration.live() ? "live_availability" : "workspace")
+                                        + " WHERE id=1")
+                        .query()
+                        .singleRow());
     }
 
     private View policy(Map<String, Object> row) {
-        if (!configuration.fixture())
+        if (!configuration.configured())
             return new View(
                     "UNKNOWN", "PROVIDER_NOT_CONFIGURED", null, null, null, false, false, false);
         Instant now = clock.instant(),
@@ -100,11 +106,16 @@ public class AvailabilityService {
      * Only called inside a successful owned attempt-failure transaction under the workspace guard.
      */
     public void observeCapacityFailure() {
+        observeCapacityFailure(configuration.live() ? "LIVE" : "FIXTURE");
+    }
+
+    public void observeCapacityFailure(String provenance) {
         Instant now = clock.instant();
         jdbc.sql(
-                        "UPDATE workspace SET"
-                            + " availability_state='BLOCKED',availability_reason_code='CAPACITY_UNAVAILABLE',availability_observed_at=?,availability_provider_reset_at=NULL,availability_next_probe_at=?,availability_version=availability_version+1"
-                            + " WHERE id=1")
+                        "UPDATE "
+                                + (provenance.equals("LIVE") ? "live_availability" : "workspace")
+                                + " SET availability_state='BLOCKED',availability_reason_code='CAPACITY_UNAVAILABLE',availability_observed_at=?,availability_provider_reset_at=NULL,availability_next_probe_at=?,availability_version=availability_version+1"
+                                + " WHERE id=1")
                 .params(Timestamp.from(now), Timestamp.from(now.plusMillis(cooldown.millis())))
                 .update();
     }
@@ -154,6 +165,7 @@ public class AvailabilityService {
     }
 
     public View recheck() {
+        if (configuration.live()) return view();
         if (!configuration.fixture())
             throw new ApiProblem(
                     503, "PROVIDER_NOT_CONFIGURED", "Creation is not configured.", "EDIT_TEXT");

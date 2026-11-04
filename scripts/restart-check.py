@@ -117,7 +117,7 @@ class Installation:
         if result_url:
             env['DJOUND_FIXTURE_RESULT_URL'] = result_url
         self.log = open(self.directory / f'app-{self.starts}.log', 'wb')
-        self.process = subprocess.Popen(['java', '-jar', str(JAR)], cwd=ROOT, env=env,
+        self.process = subprocess.Popen(['java', '-Djdk.httpclient.redirects.retrylimit=1', '-Djdk.httpclient.disableRetryConnect=true', '-Djdk.httpclient.enableAllMethodRetry=false', '-jar', str(JAR)], cwd=ROOT, env=env,
                                         stdout=self.log, stderr=subprocess.STDOUT)
         deadline = time.monotonic() + 35
         while time.monotonic() < deadline:
