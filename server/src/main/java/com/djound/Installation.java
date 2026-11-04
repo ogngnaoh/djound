@@ -37,6 +37,13 @@ public class Installation implements AutoCloseable {
         } catch (OverlappingFileLockException e) {
             channel.close();
             throw new IllegalStateException("Djound data directory is already in use", e);
+        } catch (IOException e) {
+            try {
+                channel.close();
+            } catch (IOException cleanup) {
+                e.addSuppressed(cleanup);
+            }
+            throw e;
         }
         if (acquired == null) {
             channel.close();
@@ -44,14 +51,39 @@ public class Installation implements AutoCloseable {
         }
         lock = acquired;
         try {
-            Flyway.configure().dataSource(ds).load().migrate();
+            JdbcClient jdbc = JdbcClient.create(ds);
             Path identity = root.resolve("installation.id");
+            // An existing pairing must be checked before Flyway can modify that database.
+            // Flyway migrates the connection's current schema; a fallback schema is not this
+            // installation.
+            if (Files.exists(identity)) UUID.fromString(Files.readString(identity).trim());
+            if (jdbc.sql("SELECT to_regclass(format('%I.workspace', current_schema())) IS NOT NULL")
+                    .query(Boolean.class)
+                    .single()) {
+                var existing =
+                        jdbc.sql(
+                                        "SELECT installation_id,canonical_directory FROM workspace"
+                                                + " WHERE id=1")
+                                .query()
+                                .listOfRows();
+                if (!existing.isEmpty()) {
+                    var binding = existing.getFirst();
+                    if (!root.toString().equals(binding.get("canonical_directory"))
+                            || !Files.exists(identity)
+                            || !Files.readString(identity)
+                                    .trim()
+                                    .equals(binding.get("installation_id")))
+                        throw new IllegalStateException(
+                                "Database is bound to another Djound installation/data directory,"
+                                        + " or its installation identity is missing");
+                }
+            }
+            Flyway.configure().dataSource(ds).load().migrate();
             if (!Files.exists(identity))
                 Files.writeString(
                         identity, UUID.randomUUID().toString(), StandardOpenOption.CREATE_NEW);
             String id = Files.readString(identity).trim();
             UUID.fromString(id);
-            JdbcClient jdbc = JdbcClient.create(ds);
             jdbc.sql(
                             "INSERT INTO workspace(id,installation_id,canonical_directory)"
                                     + " VALUES(1,?,?) ON CONFLICT DO NOTHING")
@@ -68,7 +100,11 @@ public class Installation implements AutoCloseable {
             Files.createDirectories(root.resolve("media"));
             Files.createDirectories(root.resolve("temporary"));
         } catch (Exception e) {
-            close();
+            try {
+                close();
+            } catch (IOException cleanup) {
+                e.addSuppressed(cleanup);
+            }
             throw e;
         }
     }
