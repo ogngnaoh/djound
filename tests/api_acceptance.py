@@ -75,6 +75,7 @@ status, _, body = request('/api/workspace')
 expect(200, status, 'workspace')
 workspace = json.loads(body)
 assert workspace['configuration'] == 'UNCONFIGURED' and not workspace['canSubmit']
+assert workspace['canSubmitWithAcknowledgement'] is False and workspace['unknownOutcome'] is None
 assert workspace['fixtureControlsEnabled'] is False
 status, _, body = request('/api/fixture/controls')
 problem(status, body, {404})

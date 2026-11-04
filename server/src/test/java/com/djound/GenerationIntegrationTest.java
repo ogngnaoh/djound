@@ -339,7 +339,7 @@ class GenerationIntegrationTest {
     }
 
     @Test
-    void unexpectedAdapterFailureBecomesTerminalAndReleasesWorkspace() throws Exception {
+    void uncertainSubmissionFailureReleasesWorkspaceWithAcknowledgementRequired() throws Exception {
         app.getBean(org.springframework.scheduling.concurrent.ThreadPoolTaskScheduler.class)
                 .shutdown();
         var source = original("failure-original-key");
@@ -350,16 +350,26 @@ class GenerationIntegrationTest {
                                 command("frozen before failure", 1),
                                 "failure-request-key");
         var failing =
-                new ScriptedAdapter(new GenerationConfiguration("FIXTURE", 0)) {
+                new FixtureOperations(
+                        jdbc(),
+                        app.getBean(GenerationConfiguration.class),
+                        app.getBean(FixtureExecutionSettings.class),
+                        app.getBean(ScriptedAdapter.class)) {
                     @Override
-                    public org.springframework.web.multipart.MultipartFile execute(long ordinal) {
-                        throw new IllegalStateException("intentional fixture failure");
+                    public Operation submit(Models.Attempt attempt, long ordinal, String outcome) {
+                        throw new IllegalStateException("submission response lost");
                     }
                 };
-        new GenerationRunner(generations(), failing, app.getBean(MediaStore.class)).tick();
+        new GenerationRunner(
+                        generations(),
+                        failing,
+                        app.getBean(PublicationStore.class),
+                        app.getBean(FixtureCheckpoints.class))
+                .tick();
         var attempt = finished(accepted.attemptId());
         assertEquals("FAILED", attempt.state());
-        assertEquals("GENERATION_FAILED", attempt.outcome().code());
+        assertEquals("OUTCOME_UNKNOWN", attempt.outcome().code());
+        assertEquals(attempt.id(), generations().unknownOutcome().attemptId());
         assertTrue(attempt.canRetry());
         assertNull(generations().activeAttemptId());
         assertTrue(explorations().get(source.explorationId()).renditions().isEmpty());

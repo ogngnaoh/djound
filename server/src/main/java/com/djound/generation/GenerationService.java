@@ -9,9 +9,7 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.PlatformTransactionManager;
 import org.springframework.transaction.support.*;
 
-import java.io.IOException;
 import java.nio.charset.StandardCharsets;
-import java.nio.file.Files;
 import java.sql.*;
 import java.time.Instant;
 import java.util.*;
@@ -78,7 +76,8 @@ public class GenerationService {
                         + field(command.basisRecordingId())
                         + command.expectedSourceRevision()
                         + "|"
-                        + command.expectedDraftRevision();
+                        + command.expectedDraftRevision()
+                        + acknowledgementSuffix(command.acknowledgedUnknownAttemptId());
         String fingerprint;
         try {
             fingerprint =
@@ -93,8 +92,8 @@ public class GenerationService {
                 status -> {
                     var workspace =
                             jdbc.sql(
-                                            "SELECT active_attempt_id FROM workspace WHERE id=1 FOR"
-                                                    + " UPDATE")
+                                            "SELECT active_attempt_id,unknown_outcome_attempt_id"
+                                                    + " FROM workspace WHERE id=1 FOR UPDATE")
                                     .query()
                                     .singleRow();
                     var old =
@@ -121,6 +120,7 @@ public class GenerationService {
                                 ((Number) receipt.get("draft_revision")).longValue(),
                                 true);
                     }
+                    validateAcknowledgement(workspace, command.acknowledgedUnknownAttemptId());
                     if (!configuration.fixture())
                         throw new ApiProblem(
                                 503,
@@ -257,6 +257,7 @@ public class GenerationService {
                     jdbc.sql("UPDATE workspace SET active_attempt_id=? WHERE id=1")
                             .param(attempt)
                             .update();
+                    acknowledge(command.acknowledgedUnknownAttemptId(), attempt);
                     return receipt(request, attempt, draft, draft + 1, false);
                 });
     }
@@ -271,19 +272,18 @@ public class GenerationService {
             throw new ApiProblem(
                     400, "INVALID_REQUEST", "Provide the previous attempt being retried.", "RETRY");
         String operation = "RETRY_REQUEST:" + requestId;
+        String payload =
+                operation
+                        + "|"
+                        + field(command.expectedPreviousAttemptId())
+                        + acknowledgementSuffix(command.acknowledgedUnknownAttemptId());
         String fingerprint;
         try {
             fingerprint =
                     HexFormat.of()
                             .formatHex(
                                     java.security.MessageDigest.getInstance("SHA-256")
-                                            .digest(
-                                                    (operation
-                                                                    + "|"
-                                                                    + field(
-                                                                            command
-                                                                                    .expectedPreviousAttemptId()))
-                                                            .getBytes(StandardCharsets.UTF_8)));
+                                            .digest(payload.getBytes(StandardCharsets.UTF_8)));
         } catch (java.security.NoSuchAlgorithmException impossible) {
             throw new IllegalStateException(impossible);
         }
@@ -291,8 +291,8 @@ public class GenerationService {
                 status -> {
                     var workspace =
                             jdbc.sql(
-                                            "SELECT active_attempt_id FROM workspace WHERE id=1 FOR"
-                                                    + " UPDATE")
+                                            "SELECT active_attempt_id,unknown_outcome_attempt_id"
+                                                    + " FROM workspace WHERE id=1 FOR UPDATE")
                                     .query()
                                     .singleRow();
                     var receipt =
@@ -314,6 +314,7 @@ public class GenerationService {
                                     "RETRY");
                         return retryReceipt(requestId, (String) row.get("attempt_id"), true);
                     }
+                    validateAcknowledgement(workspace, command.acknowledgedUnknownAttemptId());
                     if (!configuration.fixture())
                         throw new ApiProblem(
                                 503,
@@ -347,7 +348,8 @@ public class GenerationService {
                                             "GENERATION_FAILED",
                                             "OUTPUT_INVALID",
                                             "MEDIA_STORAGE_FAILED",
-                                            "PROCESS_INTERRUPTED")
+                                            "PROCESS_INTERRUPTED",
+                                            "OUTCOME_UNKNOWN")
                                     .contains(previous.outcome().code())) {
                         throw new ApiProblem(
                                 409,
@@ -417,6 +419,7 @@ public class GenerationService {
                                     requestId,
                                     attempt)
                             .update();
+                    acknowledge(command.acknowledgedUnknownAttemptId(), attempt);
                     return retryReceipt(requestId, attempt, false);
                 });
     }
@@ -456,7 +459,7 @@ public class GenerationService {
                         """
                         SELECT a.id AS attempt_key,a.state,a.version,a.outcome_code,a.outcome_detail,a.result_recording_id,a.previous_attempt_id,
                                a.created_at AS attempt_created_at,a.updated_at,r.*,
-                               (? AND a.state='FAILED' AND a.outcome_code IN ('GENERATION_FAILED','OUTPUT_INVALID','MEDIA_STORAGE_FAILED','PROCESS_INTERRUPTED')
+                               (? AND a.state='FAILED' AND a.outcome_code IN ('GENERATION_FAILED','OUTPUT_INVALID','MEDIA_STORAGE_FAILED','PROCESS_INTERRUPTED','OUTCOME_UNKNOWN')
                                 AND e.latest_attempt_id=a.id AND e.original_id=r.source_recording_id AND e.source_revision=r.source_revision
                                 AND r.adapter_configuration_id=? AND r.provenance='FIXTURE'
                                 AND w.active_attempt_id IS NULL) AS can_retry
@@ -519,20 +522,85 @@ public class GenerationService {
                     jdbc.sql("SELECT id FROM workspace WHERE id=1 FOR UPDATE")
                             .query(Integer.class)
                             .single();
+                    var active =
+                            jdbc.sql(
+                                            "SELECT id,operation_handle,state,version FROM"
+                                                    + " generation_attempt WHERE state NOT IN"
+                                                    + " ('SUCCEEDED','FAILED')")
+                                    .query()
+                                    .listOfRows();
+                    for (var row : active) {
+                        String id = (String) row.get("id"), state = (String) row.get("state");
+                        long version = ((Number) row.get("version")).longValue();
+                        if (state.equals("ACCEPTED")) {
+                            if (!configuration.fixture())
+                                fail(
+                                        get(id),
+                                        "RETRY_CONTEXT_UNAVAILABLE",
+                                        "Untouched work was not dispatched because fixture"
+                                                + " execution is disabled.");
+                            continue;
+                        }
+                        if (row.get("operation_handle") == null) {
+                            fail(
+                                    get(id),
+                                    "OUTCOME_UNKNOWN",
+                                    "An earlier creation may have been submitted before"
+                                        + " interruption. Its outcome is unknown; acknowledge this"
+                                        + " before another deliberate submission.");
+                        } else {
+                            if (jdbc.sql(
+                                                    "UPDATE generation_attempt SET"
+                                                        + " state='RECONCILING',version=version+1,updated_at=?"
+                                                        + " WHERE id=? AND version=?")
+                                            .params(Timestamp.from(Instant.now()), id, version)
+                                            .update()
+                                    != 1) throw new StaleAttemptOwner();
+                            jdbc.sql(
+                                            "UPDATE publication_journal SET attempt_version=? WHERE"
+                                                    + " attempt_id=? AND attempt_version=?")
+                                    .params(version + 1, id, version)
+                                    .update();
+                        }
+                    }
+                });
+    }
+
+    public Attempt active() {
+        String id = activeAttemptId();
+        return id == null ? null : get(id);
+    }
+
+    public String savedHandle(String id) {
+        return (String)
+                jdbc.sql("SELECT operation_handle FROM generation_attempt WHERE id=?")
+                        .param(id)
+                        .query()
+                        .singleRow()
+                        .get("operation_handle");
+    }
+
+    public Attempt saveHandle(Attempt owner, String handle) {
+        if (jdbc.sql(
+                                "UPDATE generation_attempt SET"
+                                    + " operation_handle=?,state='RUNNING',version=version+1,updated_at=?"
+                                    + " WHERE id=? AND version=? AND state='SUBMITTING'")
+                        .params(handle, Timestamp.from(Instant.now()), owner.id(), owner.version())
+                        .update()
+                != 1) throw new StaleAttemptOwner();
+        return get(owner.id());
+    }
+
+    public Attempt beginSaving(Attempt owner) {
+        return transactions.execute(
+                status -> {
+                    Attempt next = transition(owner, "SAVING");
                     jdbc.sql(
-                                    "UPDATE generation_attempt SET"
-                                        + " state='FAILED',version=version+1,outcome_code='PROCESS_INTERRUPTED',outcome_detail='Creation"
-                                        + " was interrupted. Your source and direction are still"
-                                        + " saved.',updated_at=? WHERE state IN"
-                                        + " ('SUBMITTING','RUNNING','SAVING','RECONCILING') OR"
-                                        + " (state='ACCEPTED' AND ?=false)")
-                            .params(Timestamp.from(Instant.now()), configuration.fixture())
+                                    "UPDATE publication_journal SET attempt_version=? WHERE"
+                                            + " attempt_id=? AND attempt_version=?")
+                            .params(next.version(), owner.id(), owner.version())
                             .update();
-                    jdbc.sql(
-                                    "UPDATE workspace SET active_attempt_id=NULL WHERE"
-                                        + " active_attempt_id IN (SELECT id FROM generation_attempt"
-                                        + " WHERE state IN ('FAILED','SUCCEEDED'))")
-                            .update();
+                    return next;
                 });
     }
 
@@ -542,8 +610,8 @@ public class GenerationService {
                 status -> {
                     var workspace =
                             jdbc.sql(
-                                            "SELECT active_attempt_id FROM workspace WHERE id=1 FOR"
-                                                    + " UPDATE")
+                                            "SELECT active_attempt_id,unknown_outcome_attempt_id"
+                                                    + " FROM workspace WHERE id=1 FOR UPDATE")
                                     .query()
                                     .singleRow();
                     String id = (String) workspace.get("active_attempt_id");
@@ -574,7 +642,7 @@ public class GenerationService {
                                 current.state(),
                                 current.version())
                         .update();
-        if (changed != 1) throw new IllegalStateException("Attempt phase changed concurrently");
+        if (changed != 1) throw new StaleAttemptOwner();
         return get(current.id());
     }
 
@@ -587,106 +655,88 @@ public class GenerationService {
                 .single();
     }
 
-    public void complete(Attempt saving, MediaStore.Upload upload) throws IOException {
-        final String storage = media.publish(upload);
-        transactions.executeWithoutResult(
-                status -> {
-                    TransactionSynchronizationManager.registerSynchronization(
-                            new TransactionSynchronization() {
-                                public void afterCompletion(int completion) {
-                                    // Preserve the file if commit outcome is unknown; only
-                                    // confirmed rollback permits cleanup.
-                                    if (completion == STATUS_ROLLED_BACK) {
-                                        try {
-                                            Files.deleteIfExists(media.path(storage));
-                                        } catch (IOException ignored) {
-                                            /* Conservative orphan reconciliation can reclaim it later. */
-                                        }
-                                    }
-                                }
-                            });
-                    jdbc.sql("SELECT id FROM workspace WHERE id=1 FOR UPDATE")
-                            .query(Integer.class)
-                            .single();
-                    var current = get(saving.id());
-                    if (!current.state().equals("SAVING") || current.version() != saving.version())
-                        throw new IllegalStateException("Attempt no longer owns publication");
-                    String recording = "rec_" + UUID.randomUUID();
-                    Timestamp now = Timestamp.from(Instant.now());
-                    String title = "Sample version " + (outputOrdinal(saving) + 1);
-                    jdbc.sql(
-                                    """
-                                    INSERT INTO recording(id,exploration_id,title,kind,file_name,storage_key,content_type,byte_size,duration_ms,sample_rate,channels,codec,sha256,provenance,created_at,direction,request_id,attempt_id)
-                                    VALUES(?,?,?,'RENDITION',?,?,?,?,?,?,?,?,?,'FIXTURE',?,?,?,?)
-                                    """)
-                            .params(
-                                    recording,
-                                    saving.explorationId(),
-                                    title,
-                                    upload.fileName(),
-                                    storage,
-                                    upload.contentType(),
-                                    upload.bytes(),
-                                    upload.durationMs(),
-                                    upload.sampleRate(),
-                                    upload.channels(),
-                                    upload.codec(),
-                                    upload.hash(),
-                                    now,
-                                    saving.request().direction(),
-                                    saving.requestId(),
-                                    saving.id())
-                            .update();
-                    int changed =
-                            jdbc.sql(
-                                            "UPDATE generation_attempt SET"
-                                                + " state='SUCCEEDED',version=version+1,result_recording_id=?,updated_at=?"
-                                                + " WHERE id=? AND state='SAVING' AND version=?")
-                                    .params(recording, now, saving.id(), saving.version())
-                                    .update();
-                    if (changed != 1)
-                        throw new IllegalStateException("Attempt no longer owns result");
-                    jdbc.sql("UPDATE exploration SET updated_at=? WHERE id=?")
-                            .params(now, saving.explorationId())
-                            .update();
-                    jdbc.sql(
-                                    "UPDATE workspace SET active_attempt_id=NULL WHERE id=1 AND"
-                                            + " active_attempt_id=?")
-                            .param(saving.id())
-                            .update();
-                });
-    }
-
-    public void fail(String id, String code, String detail) {
-        transactions.executeWithoutResult(
+    public boolean fail(Attempt owner, String code, String detail) {
+        return transactions.execute(
                 status -> {
                     jdbc.sql("SELECT id FROM workspace WHERE id=1 FOR UPDATE")
                             .query(Integer.class)
                             .single();
-                    var attempt = get(id);
-                    if (attempt.state().equals("SUCCEEDED") || attempt.state().equals("FAILED"))
-                        return;
                     int changed =
                             jdbc.sql(
                                             "UPDATE generation_attempt SET"
                                                 + " state='FAILED',version=version+1,outcome_code=?,outcome_detail=?,updated_at=?"
-                                                + " WHERE id=? AND version=?")
+                                                + " WHERE id=? AND version=? AND state=? AND state"
+                                                + " NOT IN ('SUCCEEDED','FAILED')")
                                     .params(
                                             code,
                                             detail,
                                             Timestamp.from(Instant.now()),
-                                            id,
-                                            attempt.version())
+                                            owner.id(),
+                                            owner.version(),
+                                            owner.state())
                                     .update();
-                    if (changed != 1)
-                        throw new IllegalStateException(
-                                "Attempt changed before failure could be committed");
+                    if (changed != 1) return false;
                     jdbc.sql(
                                     "UPDATE workspace SET active_attempt_id=NULL WHERE id=1 AND"
                                             + " active_attempt_id=?")
-                            .param(id)
+                            .param(owner.id())
                             .update();
+                    if (code.equals("OUTCOME_UNKNOWN"))
+                        jdbc.sql("UPDATE workspace SET unknown_outcome_attempt_id=? WHERE id=1")
+                                .param(owner.id())
+                                .update();
+                    return true;
                 });
+    }
+
+    public UnknownOutcome unknownOutcome() {
+        return jdbc.sql(
+                        "SELECT a.id,a.outcome_detail,a.updated_at FROM workspace w JOIN"
+                                + " generation_attempt a ON a.id=w.unknown_outcome_attempt_id WHERE"
+                                + " w.id=1")
+                .query(
+                        (r, n) ->
+                                new UnknownOutcome(
+                                        r.getString("id"),
+                                        r.getString("outcome_detail"),
+                                        r.getTimestamp("updated_at").toInstant()))
+                .optional()
+                .orElse(null);
+    }
+
+    private static String acknowledgementSuffix(String id) {
+        return id == null ? "" : "|ack:" + field(id);
+    }
+
+    private void validateAcknowledgement(Map<String, Object> workspace, String acknowledged) {
+        String unknown = (String) workspace.get("unknown_outcome_attempt_id");
+        if (!Objects.equals(unknown, acknowledged))
+            throw new ApiProblem(
+                    409,
+                    "REMOTE_OUTCOME_UNACKNOWLEDGED",
+                    "Review and acknowledge the unresolved earlier creation before submitting"
+                            + " another attempt.",
+                    "ACKNOWLEDGE_UNKNOWN_OUTCOME");
+    }
+
+    private void acknowledge(String unknown, String newAttempt) {
+        if (unknown == null) return;
+        jdbc.sql(
+                        "UPDATE generation_attempt SET"
+                                + " acknowledged_by_attempt_id=?,acknowledged_at=? WHERE id=? AND"
+                                + " outcome_code='OUTCOME_UNKNOWN'")
+                .params(newAttempt, Timestamp.from(Instant.now()), unknown)
+                .update();
+        jdbc.sql("UPDATE generation_attempt SET acknowledged_unknown_attempt_id=? WHERE id=?")
+                .params(unknown, newAttempt)
+                .update();
+        if (jdbc.sql(
+                                "UPDATE workspace SET unknown_outcome_attempt_id=NULL WHERE id=1"
+                                        + " AND unknown_outcome_attempt_id=?")
+                        .param(unknown)
+                        .update()
+                != 1)
+            throw new IllegalStateException("Unknown outcome acknowledgement lost its guard");
     }
 
     private static ApiProblem missing() {

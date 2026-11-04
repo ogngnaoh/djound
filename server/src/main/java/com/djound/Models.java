@@ -65,7 +65,16 @@ public final class Models {
             String text,
             String basisRecordingId,
             Long expectedSourceRevision,
-            Long expectedDraftRevision) {}
+            Long expectedDraftRevision,
+            String acknowledgedUnknownAttemptId) {
+        public CreateRequestCommand(
+                String text,
+                String basisRecordingId,
+                Long expectedSourceRevision,
+                Long expectedDraftRevision) {
+            this(text, basisRecordingId, expectedSourceRevision, expectedDraftRevision, null);
+        }
+    }
 
     public record CreationReceipt(
             String requestId,
@@ -107,7 +116,12 @@ public final class Models {
             Instant createdAt,
             Instant updatedAt) {}
 
-    public record RetryCommand(String expectedPreviousAttemptId) {}
+    public record RetryCommand(
+            String expectedPreviousAttemptId, String acknowledgedUnknownAttemptId) {
+        public RetryCommand(String expectedPreviousAttemptId) {
+            this(expectedPreviousAttemptId, null);
+        }
+    }
 
     public record RetryReceipt(
             String requestId, String attemptId, String statusUrl, boolean replayed) {}
@@ -117,4 +131,6 @@ public final class Models {
     public record FixtureOutcomeControl(String outcome) {}
 
     public record FixturePlaybackControl(String recordingId, Boolean unavailable) {}
+
+    public record UnknownOutcome(String attemptId, String detail, Instant occurredAt) {}
 }

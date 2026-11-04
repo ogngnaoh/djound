@@ -64,67 +64,113 @@ public class MediaStore {
                     out.write(buffer, 0, n);
                 }
             }
-            if (size == 0) throw invalid("The selected file is empty.");
-            byte[] header = new byte[12];
-            try (InputStream in = Files.newInputStream(temp)) {
-                in.readNBytes(header, 0, 12);
-            }
-            boolean wav =
-                    new String(header, 0, 4, java.nio.charset.StandardCharsets.US_ASCII)
-                                    .equals("RIFF")
-                            && new String(header, 8, 4, java.nio.charset.StandardCharsets.US_ASCII)
-                                    .equals("WAVE");
-            boolean mp3 =
-                    (header[0] == 'I' && header[1] == 'D' && header[2] == '3')
-                            || ((header[0] & 255) == 255 && (header[1] & 224) == 224);
-            if (!wav && !mp3)
-                throw new ApiProblem(
-                        415, "UNSUPPORTED_MEDIA", "Choose WAV PCM16 or MP3 audio.", "CHOOSE_FILE");
-            if (wav) validateWaveStructure(temp, size);
-            JsonNode data = probe(temp);
-            JsonNode streams = data.path("streams");
-            JsonNode audio = null;
-            for (JsonNode stream : streams) {
-                if (stream.path("codec_type").asString().equals("video")
-                        && stream.path("disposition").path("attached_pic").asInt() == 1) continue;
-                if (!stream.path("codec_type").asString().equals("audio") || audio != null)
-                    throw invalid(
-                            "The file must contain exactly one audio stream and no playable"
-                                    + " video.");
-                audio = stream;
-            }
-            if (audio == null) throw invalid("The file contains no audio stream.");
-            String codec = audio.path("codec_name").asString();
-            String format = data.path("format").path("format_name").asString();
-            if (!(wav && format.equals("wav") && codec.equals("pcm_s16le"))
-                    && !(mp3 && format.equals("mp3") && codec.equals("mp3")))
-                throw new ApiProblem(
-                        415,
-                        "UNSUPPORTED_CODEC",
-                        "Choose WAV with 16-bit PCM or MP3 audio.",
-                        "CHOOSE_FILE");
-            int rate = audio.path("sample_rate").asInt();
-            int channels = audio.path("channels").asInt();
-            if ((rate != 44100 && rate != 48000) || (channels != 1 && channels != 2))
-                throw invalid("Audio must be mono or stereo at 44.1 or 48 kHz.");
-            double seconds = data.path("format").path("duration").asDouble();
-            if (!Double.isFinite(seconds) || seconds < 1 || seconds > 300)
-                throw invalid("Audio must be between 1 and 300 seconds long.");
-            if (audio.path("nb_read_frames").asInt() <= 0)
-                throw invalid("The recording contains no readable audio frames.");
-            return new Upload(
-                    temp,
-                    fileName,
-                    size,
-                    HexFormat.of().formatHex(digest.digest()),
-                    (int) Math.round(seconds * 1000),
-                    rate,
-                    channels,
-                    codec,
-                    wav ? "audio/wav" : "audio/mpeg");
+            return inspect(temp, fileName, size, HexFormat.of().formatHex(digest.digest()));
         } catch (Exception e) {
             Files.deleteIfExists(temp);
             throw e;
+        }
+    }
+
+    public Upload validateFile(Path path, String fileName) throws IOException {
+        MessageDigest digest = sha();
+        long size = 0;
+        try (var in = Files.newInputStream(path)) {
+            byte[] buffer = new byte[32768];
+            int n;
+            while ((n = in.read(buffer)) != -1) {
+                size += n;
+                if (size > MAX_BYTES) throw invalid("The output exceeds the 64 MiB limit.");
+                digest.update(buffer, 0, n);
+            }
+        }
+        return inspect(path, safeName(fileName), size, HexFormat.of().formatHex(digest.digest()));
+    }
+
+    private Upload inspect(Path temp, String fileName, long size, String hash) throws IOException {
+        if (size == 0) throw invalid("The selected file is empty.");
+        byte[] header = new byte[12];
+        try (InputStream in = Files.newInputStream(temp)) {
+            in.readNBytes(header, 0, 12);
+        }
+        boolean wav =
+                new String(header, 0, 4, java.nio.charset.StandardCharsets.US_ASCII).equals("RIFF")
+                        && new String(header, 8, 4, java.nio.charset.StandardCharsets.US_ASCII)
+                                .equals("WAVE");
+        boolean mp3 =
+                (header[0] == 'I' && header[1] == 'D' && header[2] == '3')
+                        || ((header[0] & 255) == 255 && (header[1] & 224) == 224);
+        if (!wav && !mp3)
+            throw new ApiProblem(
+                    415, "UNSUPPORTED_MEDIA", "Choose WAV PCM16 or MP3 audio.", "CHOOSE_FILE");
+        if (wav) validateWaveStructure(temp, size);
+        JsonNode data = probe(temp);
+        JsonNode streams = data.path("streams");
+        JsonNode audio = null;
+        for (JsonNode stream : streams) {
+            if (stream.path("codec_type").asString().equals("video")
+                    && stream.path("disposition").path("attached_pic").asInt() == 1) continue;
+            if (!stream.path("codec_type").asString().equals("audio") || audio != null)
+                throw invalid(
+                        "The file must contain exactly one audio stream and no playable"
+                                + " video.");
+            audio = stream;
+        }
+        if (audio == null) throw invalid("The file contains no audio stream.");
+        String codec = audio.path("codec_name").asString();
+        String format = data.path("format").path("format_name").asString();
+        if (!(wav && format.equals("wav") && codec.equals("pcm_s16le"))
+                && !(mp3 && format.equals("mp3") && codec.equals("mp3")))
+            throw new ApiProblem(
+                    415,
+                    "UNSUPPORTED_CODEC",
+                    "Choose WAV with 16-bit PCM or MP3 audio.",
+                    "CHOOSE_FILE");
+        int rate = audio.path("sample_rate").asInt();
+        int channels = audio.path("channels").asInt();
+        if ((rate != 44100 && rate != 48000) || (channels != 1 && channels != 2))
+            throw invalid("Audio must be mono or stereo at 44.1 or 48 kHz.");
+        double seconds = data.path("format").path("duration").asDouble();
+        if (!Double.isFinite(seconds) || seconds < 1 || seconds > 300)
+            throw invalid("Audio must be between 1 and 300 seconds long.");
+        if (audio.path("nb_read_frames").asInt() <= 0)
+            throw invalid("The recording contains no readable audio frames.");
+        return new Upload(
+                temp,
+                fileName,
+                size,
+                hash,
+                (int) Math.round(seconds * 1000),
+                rate,
+                channels,
+                codec,
+                wav ? "audio/wav" : "audio/mpeg");
+    }
+
+    public Path temporaryPath(String name) {
+        if (!name.matches("result-[0-9a-f-]{36}\\.tmp"))
+            throw new IllegalArgumentException("Invalid result temporary name");
+        return installation.root.resolve("temporary").resolve(name);
+    }
+
+    public void link(Path temporary, String storageKey) throws IOException {
+        Files.createLink(path(storageKey), temporary);
+    }
+
+    public void cleanupUnreferenced(
+            java.util.Set<String> recordings, java.util.Set<String> temporaryNames)
+            throws IOException {
+        try (var paths = Files.list(installation.root.resolve("media"))) {
+            for (var file : paths.toList())
+                if (file.getFileName().toString().matches("[0-9a-f-]{36}\\.audio")
+                        && Files.isRegularFile(file, LinkOption.NOFOLLOW_LINKS)
+                        && !recordings.contains(file.getFileName().toString())) Files.delete(file);
+        }
+        try (var paths = Files.list(installation.root.resolve("temporary"))) {
+            for (var file : paths.toList())
+                if (file.getFileName().toString().matches("(upload-|result-).*\\.tmp")
+                        && Files.isRegularFile(file, LinkOption.NOFOLLOW_LINKS)
+                        && !temporaryNames.contains(file.getFileName().toString()))
+                    Files.delete(file);
         }
     }
 

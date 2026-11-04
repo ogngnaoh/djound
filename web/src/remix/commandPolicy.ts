@@ -7,3 +7,8 @@ export function isDefiniteRejection(status: number, code?: string) {
       (code === "PROVIDER_NOT_CONFIGURED" || code === "CAPACITY_UNAVAILABLE"))
   );
 }
+
+// Only call at a deliberate admission click. Pending replay never uses live UI state.
+export function captureAcknowledgement(attemptId?: string) {
+  return attemptId ? { acknowledgedUnknownAttemptId: attemptId } : {};
+}

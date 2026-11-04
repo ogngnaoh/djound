@@ -36,7 +36,10 @@ public class ApiController {
         result.put("mode", generations.configuration().mode());
         result.put("configuration", fixture ? "CONFIGURED" : "UNCONFIGURED");
         result.put("eligibility", fixture ? "ELIGIBLE" : "UNKNOWN");
-        result.put("canSubmit", fixture && active == null);
+        var unknown = generations.unknownOutcome();
+        result.put("unknownOutcome", unknown);
+        result.put("canSubmit", fixture && active == null && unknown == null);
+        result.put("canSubmitWithAcknowledgement", fixture && active == null && unknown != null);
         result.put("canCreateExploration", active == null);
         result.put("activeAttemptId", active);
         result.put("fixtureControlsEnabled", controls.enabled());

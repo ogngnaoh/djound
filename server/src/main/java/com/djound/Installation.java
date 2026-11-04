@@ -67,15 +67,14 @@ public class Installation implements AutoCloseable {
                         "Database is bound to another Djound installation/data directory");
             Files.createDirectories(root.resolve("media"));
             Files.createDirectories(root.resolve("temporary"));
-            // No requests run during startup; all these files are unpublished uploads from a prior
-            // process.
-            try (var paths = Files.list(root.resolve("temporary"))) {
-                for (Path p : paths.toList()) if (Files.isRegularFile(p)) Files.delete(p);
-            }
         } catch (Exception e) {
             close();
             throw e;
         }
+    }
+
+    public Path rootPath() {
+        return root;
     }
 
     public void close() throws IOException {

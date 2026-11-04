@@ -58,11 +58,13 @@ public class FixtureReviewControls {
     public FixtureControls setOutcome(FixtureOutcomeControl command) {
         requireEnabled();
         if (command == null
-                || !("SUCCESS".equals(command.outcome()) || "FAILURE".equals(command.outcome())))
+                || !("SUCCESS".equals(command.outcome())
+                        || "FAILURE".equals(command.outcome())
+                        || "UNKNOWN".equals(command.outcome())))
             throw new ApiProblem(
                     400,
                     "INVALID_REQUEST",
-                    "Choose SUCCESS or FAILURE for the next sample attempt.",
+                    "Choose SUCCESS, FAILURE or UNKNOWN for the next sample attempt.",
                     "RETRY");
         return transactions.execute(
                 status -> {

@@ -292,16 +292,30 @@ components:
         providerCompatibilityKnown: { type: boolean }
     Workspace:
       type: object
-      required: [mode, configuration, eligibility, canSubmit, canCreateExploration, activeAttemptId, fixtureControlsEnabled, inputPolicy]
+      required: [mode, configuration, eligibility, canSubmit, canSubmitWithAcknowledgement, canCreateExploration, activeAttemptId, unknownOutcome, fixtureControlsEnabled, inputPolicy]
       properties:
         mode: { type: string, enum: [UNCONFIGURED, FIXTURE] }
         configuration: { type: string, enum: [UNCONFIGURED, CONFIGURED] }
         eligibility: { type: string, enum: [ELIGIBLE, BLOCKED, UNKNOWN] }
         canSubmit: { type: boolean }
+        canSubmitWithAcknowledgement:
+          type: boolean
+          description: True only when acknowledgement of the unresolved outcome is the sole remaining submission blocker.
         canCreateExploration: { type: boolean }
         activeAttemptId: { type: [string, 'null'] }
+        unknownOutcome:
+          oneOf:
+            - $ref: '#/components/schemas/UnknownOutcome'
+            - type: 'null'
         fixtureControlsEnabled: { type: boolean }
         inputPolicy: { $ref: '#/components/schemas/InputPolicy' }
+    UnknownOutcome:
+      type: object
+      required: [attemptId, detail, occurredAt]
+      properties:
+        attemptId: { type: string }
+        detail: { type: string }
+        occurredAt: { type: string, format: date-time }
     Recording:
       type: object
       required: [id, explorationId, kind, title, fileName, contentType, byteSize, durationMs, sampleRate, channels, codec, sha256, mediaUrl, provenance, kept, direction, requestId, attemptId, createdAt]
@@ -388,6 +402,10 @@ components:
         basisRecordingId: { type: [string, 'null'] }
         expectedSourceRevision: { type: integer, format: int64, minimum: 1 }
         expectedDraftRevision: { type: integer, format: int64, minimum: 1 }
+        acknowledgedUnknownAttemptId:
+          type: string
+          minLength: 1
+          description: Explicit acknowledgement captured with this deliberate command. Retired only if the new command is accepted; omitted legacy commands retain their fingerprint encoding.
     CreationReceipt:
       type: object
       required: [requestId, attemptId, statusUrl, consumedDraftRevision, nextDraftRevision, replayed]
@@ -453,6 +471,10 @@ components:
       required: [expectedPreviousAttemptId]
       properties:
         expectedPreviousAttemptId: { type: string, minLength: 1 }
+        acknowledgedUnknownAttemptId:
+          type: string
+          minLength: 1
+          description: Explicit acknowledgement captured with this deliberate retry. Never added or changed during receipt replay.
     RetryReceipt:
       type: object
       required: [requestId, attemptId, statusUrl, replayed]
@@ -465,13 +487,13 @@ components:
       type: object
       required: [nextOutcome, unavailableRecordingId]
       properties:
-        nextOutcome: { type: string, enum: [SUCCESS, FAILURE] }
+        nextOutcome: { type: string, enum: [SUCCESS, FAILURE, UNKNOWN] }
         unavailableRecordingId: { type: [string, 'null'] }
     FixtureOutcomeControl:
       type: object
       required: [outcome]
       properties:
-        outcome: { type: string, enum: [SUCCESS, FAILURE] }
+        outcome: { type: string, enum: [SUCCESS, FAILURE, UNKNOWN] }
     FixturePlaybackControl:
       type: object
       required: [recordingId, unavailable]

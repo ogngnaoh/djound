@@ -73,6 +73,7 @@ status, workspace = json_request('/api/workspace')
 expect(200, status, 'workspace')
 assert workspace['mode'] == 'FIXTURE' and workspace['configuration'] == 'CONFIGURED'
 assert workspace['canSubmit'] and workspace['activeAttemptId'] is None
+assert workspace['canSubmitWithAcknowledgement'] is False and workspace['unknownOutcome'] is None
 sources = []
 for _ in range(2):
     status, receipt = upload('fixture-upload-' + uuid.uuid4().hex)
@@ -113,6 +114,7 @@ assert active['request']['assemblerVersion']
 status, workspace = json_request('/api/workspace')
 assert workspace['activeAttemptId'] == receipt['attemptId']
 assert not workspace['canSubmit'] and not workspace['canCreateExploration']
+assert workspace['canSubmitWithAcknowledgement'] is False
 assert not detail(sources[loser]['id'])['canReplaceSource']
 assert detail(sources[loser]['id'])['latestAttempt'] is None
 

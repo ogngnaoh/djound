@@ -108,6 +108,7 @@ def save(exploration_id, text, basis, revision):
 status, workspace = json_request('/api/workspace')
 expect(200, status, 'workspace')
 assert workspace['mode'] == 'FIXTURE' and workspace['fixtureControlsEnabled'] is True
+assert workspace['canSubmitWithAcknowledgement'] is False and workspace['unknownOutcome'] is None
 status, controls = json_request('/api/fixture/controls')
 expect(200, status, 'explicit sample controls')
 assert workspace['activeAttemptId'] is None

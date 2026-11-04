@@ -20,6 +20,10 @@ public class ScriptedAdapter {
         this.configuration = configuration;
     }
 
+    public void recordSubmission() {
+        executions.incrementAndGet();
+    }
+
     public int executionCount() {
         return executions.get();
     }

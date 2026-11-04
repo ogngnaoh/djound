@@ -262,10 +262,19 @@ export interface components {
             /** @enum {string} */
             eligibility: "ELIGIBLE" | "BLOCKED" | "UNKNOWN";
             canSubmit: boolean;
+            /** @description True only when acknowledgement of the unresolved outcome is the sole remaining submission blocker. */
+            canSubmitWithAcknowledgement: boolean;
             canCreateExploration: boolean;
             activeAttemptId: string | null;
+            unknownOutcome: components["schemas"]["UnknownOutcome"] | null;
             fixtureControlsEnabled: boolean;
             inputPolicy: components["schemas"]["InputPolicy"];
+        };
+        UnknownOutcome: {
+            attemptId: string;
+            detail: string;
+            /** Format: date-time */
+            occurredAt: string;
         };
         Recording: {
             id: string;
@@ -345,6 +354,8 @@ export interface components {
             expectedSourceRevision: number;
             /** Format: int64 */
             expectedDraftRevision: number;
+            /** @description Explicit acknowledgement captured with this deliberate command. Retired only if the new command is accepted; omitted legacy commands retain their fingerprint encoding. */
+            acknowledgedUnknownAttemptId?: string;
         };
         CreationReceipt: {
             requestId: string;
@@ -402,6 +413,8 @@ export interface components {
         };
         RetryCommand: {
             expectedPreviousAttemptId: string;
+            /** @description Explicit acknowledgement captured with this deliberate retry. Never added or changed during receipt replay. */
+            acknowledgedUnknownAttemptId?: string;
         };
         RetryReceipt: {
             requestId: string;
@@ -411,12 +424,12 @@ export interface components {
         };
         FixtureControls: {
             /** @enum {string} */
-            nextOutcome: "SUCCESS" | "FAILURE";
+            nextOutcome: "SUCCESS" | "FAILURE" | "UNKNOWN";
             unavailableRecordingId: string | null;
         };
         FixtureOutcomeControl: {
             /** @enum {string} */
-            outcome: "SUCCESS" | "FAILURE";
+            outcome: "SUCCESS" | "FAILURE" | "UNKNOWN";
         };
         FixturePlaybackControl: {
             recordingId: string;
