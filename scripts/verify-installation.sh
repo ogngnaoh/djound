@@ -4,7 +4,7 @@ set -euo pipefail
 source "$(dirname "$0")/env.sh"
 cd "$DJOUND_ROOT"
 check_mode="${1:-all}"
-case "$check_mode" in all|api|fixture|listening|recovery|unknown|capacity) ;; *) echo 'Usage: verify-installation.sh [all|api|fixture|listening|recovery|unknown|capacity]' >&2; exit 2 ;; esac
+case "$check_mode" in all|api|fixture|listening|recovery|unknown|capacity|interaction) ;; *) echo 'Usage: verify-installation.sh [all|api|fixture|listening|recovery|unknown|capacity|interaction]' >&2; exit 2 ;; esac
 mkdir -p .runtime/checks
 run_dir="$(mktemp -d "$DJOUND_ROOT/.runtime/checks/run.XXXXXX")"
 test_db="djound_check_$$_${RANDOM}"
@@ -34,7 +34,7 @@ export DJOUND_TEST_ALLOW_WRITE=1
 export DJOUND_MODE=UNCONFIGURED
 export DJOUND_FIXTURE_REVIEW_CONTROLS=false
 unset DJOUND_FIXTURE_COOLDOWN_MS
-if [[ "$check_mode" == fixture || "$check_mode" == listening || "$check_mode" == recovery || "$check_mode" == unknown || "$check_mode" == capacity ]]; then
+if [[ "$check_mode" == fixture || "$check_mode" == listening || "$check_mode" == recovery || "$check_mode" == unknown || "$check_mode" == capacity || "$check_mode" == interaction ]]; then
   export DJOUND_MODE=FIXTURE
   export DJOUND_FIXTURE_DELAY_MS=8000
   export DJOUND_FIXTURE_COOLDOWN_MS=6000
@@ -58,7 +58,9 @@ start_app() {
   exit 1
 }
 start_app
-if [[ "$check_mode" == capacity ]]; then
+if [[ "$check_mode" == interaction ]]; then
+  node scripts/interaction-smoke.mjs | tee "$run_dir/api-result.json"
+elif [[ "$check_mode" == capacity ]]; then
   python3 tests/availability_acceptance.py | tee "$run_dir/api-result.json"
   node scripts/capacity-smoke.mjs | tee "$run_dir/capacity-result.json"
 elif [[ "$check_mode" == unknown ]]; then

@@ -27,6 +27,7 @@ case "$mode" in
     bash scripts/package.sh
     bash scripts/verify-installation.sh
     bash scripts/verify-installation.sh fixture
+    bash scripts/verify-installation.sh interaction
     ;;
   *) echo 'Usage: scripts/verify.sh [all|fast|api|browser|fixture]' >&2; exit 2 ;;
 esac
