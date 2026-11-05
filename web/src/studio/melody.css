@@ -1,0 +1,297 @@
+.melody-editor {
+  min-width: 0;
+  color: #272830;
+}
+.melody-instruction {
+  color: #626671;
+  font-size: 14px;
+  line-height: 1.6;
+  margin: 0 0 24px;
+}
+.melody-scroll {
+  overflow: auto;
+  max-height: 540px;
+  padding: 8px 8px 8px 0;
+  border-radius: 4px;
+}
+.melody-roll {
+  position: relative;
+  min-width: 540px;
+  padding: 0 6px 0 48px;
+}
+.melody-pitches {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 40px;
+  display: flex;
+  flex-direction: column;
+}
+.melody-pitches span {
+  height: var(--melody-row-height, 23px);
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  padding-right: 8px;
+  font-size: 11px;
+  color: #626671;
+}
+.melody-grid {
+  position: relative;
+  border: 1px solid #e5e3df;
+  isolation: isolate;
+}
+.melody-grid-row {
+  position: absolute;
+  left: 0;
+  right: 0;
+  border-bottom: 1px solid #e9e7e3;
+  background: #fdfcfa;
+  pointer-events: none;
+  z-index: -1;
+}
+.melody-grid-sharp {
+  background: #f8f7f5;
+}
+.melody-grid-line {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 1px;
+  background: #e9e7e3;
+  pointer-events: none;
+  z-index: -1;
+}
+.melody-note {
+  position: absolute;
+  min-width: 8px;
+}
+.melody-note::before {
+  content: "";
+  position: absolute;
+  inset: 6px 0;
+  border-radius: 3px;
+  background: #8b94d4;
+  pointer-events: none;
+}
+.melody-note-selected::before {
+  background: #3d4fb0;
+  outline: 1px solid #3d4fb0;
+  outline-offset: 3px;
+}
+.melody-note-move {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  background: transparent;
+  border: 0;
+  padding: 0;
+  border-radius: 3px;
+  cursor: grab;
+  touch-action: none;
+  min-height: 26px;
+}
+.melody-note-move:active {
+  cursor: grabbing;
+}
+.melody-note-resize {
+  position: absolute;
+  right: -4px;
+  top: 0;
+  height: 100%;
+  width: 10px;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  cursor: ew-resize;
+  touch-action: none;
+}
+.melody-note-selected .melody-note-resize::after {
+  content: "";
+  position: absolute;
+  width: 2px;
+  height: 10px;
+  top: calc(50% - 5px);
+  right: 5px;
+  background: #fff;
+  opacity: 0.8;
+}
+.melody-timeline {
+  position: relative;
+  margin-top: 12px;
+  height: 20px;
+  color: #626671;
+  font-size: 12px;
+}
+.melody-timeline span {
+  position: absolute;
+  transform: translateX(-50%);
+}
+.melody-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+  margin-top: 12px;
+}
+.melody-toolbar button {
+  min-height: 44px;
+  padding: 0 20px;
+  background: #fdfcfa;
+  border: 1px solid #dedcd8;
+  border-radius: 6px;
+  color: #272830;
+  font: inherit;
+  font-size: 14px;
+  cursor: pointer;
+}
+.melody-toolbar button:hover:not(:disabled) {
+  background: #f1efec;
+}
+.melody-toolbar button:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+.melody-note-count {
+  color: #626671;
+  font-size: 12px;
+  margin-left: auto;
+}
+.melody-details {
+  min-width: 0;
+  margin: 28px 0 0;
+  padding: 20px 0 0;
+  border: 0;
+  border-top: 1px solid #dedcd8;
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 16px;
+}
+.melody-details legend {
+  padding-right: 16px;
+  color: #626671;
+  font-size: 13px;
+}
+.melody-details legend strong {
+  color: #272830;
+  font-weight: 500;
+  padding-left: 10px;
+}
+.melody-details label {
+  display: flex;
+  flex-direction: column;
+  gap: 9px;
+  font-size: 13px;
+  font-weight: 500;
+}
+.melody-details select,
+.melody-details input {
+  width: 100%;
+  min-width: 0;
+  min-height: 44px;
+  padding: 10px 12px;
+  border: 1px solid #dedcd8;
+  border-radius: 6px;
+  color: #272830;
+  background: #fdfcfa;
+  font: inherit;
+  font-size: 14px;
+}
+.melody-keyboard-hint {
+  grid-column: 1 / -1;
+  color: #626671;
+  font-size: 12px;
+  line-height: 1.6;
+  margin: 2px 0 0;
+}
+.melody-error {
+  color: #98483f;
+  font-size: 14px;
+  line-height: 1.5;
+  margin: 16px 0;
+}
+.melody-editor button:focus-visible,
+.melody-editor input:focus-visible,
+.melody-editor select:focus-visible,
+.melody-scroll:focus-visible {
+  outline: 2px solid #3d4fb0;
+  outline-offset: 3px;
+}
+@media (max-width: 600px) {
+  .melody-roll {
+    min-width: 600px;
+  }
+  .melody-details {
+    grid-template-columns: 1fr;
+  }
+  .melody-toolbar {
+    gap: 8px;
+  }
+  .melody-toolbar button {
+    padding: 0 14px;
+  }
+  .melody-note-count {
+    width: 100%;
+    margin-top: 4px;
+  }
+}
+@media (pointer: coarse) {
+  .melody-editor {
+    --melody-row-height: 44px;
+  }
+  .melody-note-move {
+    min-height: 44px;
+    min-width: 44px;
+  }
+  .melody-note-resize {
+    width: 16px;
+    right: -6px;
+  }
+}
+
+.melody-details-rail {
+  grid-template-columns: 1fr;
+  border-top: 0;
+  margin: 0 0 28px;
+  padding: 16px 0 0;
+  gap: 22px;
+}
+.melody-details-rail label {
+  font-size: 14px;
+  gap: 12px;
+}
+.melody-details-rail input,
+.melody-details-rail select {
+  font-size: 15px;
+}
+.melody-details-rail input:focus-visible,
+.melody-details-rail select:focus-visible {
+  outline: 2px solid #3d4fb0;
+  outline-offset: 3px;
+}
+.melody-editor .melody-selection-summary {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin: 26px 0 0;
+  font-size: 15px;
+  line-height: 1.5;
+}
+.melody-selection-summary span {
+  color: #626671;
+  font-size: 13px;
+}
+
+.melody-editing-help {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+.melody-details-rail legend {
+  margin-bottom: 20px;
+}
