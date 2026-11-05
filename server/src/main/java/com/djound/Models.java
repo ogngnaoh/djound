@@ -2,6 +2,7 @@ package com.djound;
 
 import java.time.Instant;
 import java.util.List;
+import java.util.Map;
 
 public final class Models {
     private Models() {}
@@ -25,7 +26,8 @@ public final class Models {
             String direction,
             String requestId,
             String attemptId,
-            Instant createdAt) {}
+            Instant createdAt,
+            Map<String, Object> localRecipe) {}
 
     public record RecordingUpdate(Boolean kept) {}
 

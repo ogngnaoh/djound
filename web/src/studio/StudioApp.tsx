@@ -68,11 +68,13 @@ export default function StudioApp() {
         ? "prototype"
         : new URLSearchParams(location.search).get("mode") === "backend"
           ? "backend"
-          : storage("djound.mode", "prototype") === "backend"
-            ? "backend"
-            : "prototype",
+          : storage("djound.mode", "backend") === "prototype"
+            ? "prototype"
+            : "backend",
     ),
     [scenario, setScenarioState] = useState<Scenario>("normal");
+  // Explicit URL mode survives client navigation that removes the query string.
+  useEffect(() => remember("djound.mode", mode), [mode]);
   const service = useMemo(
     () => createStudioService(mode, scenario),
     [mode, scenario],
@@ -371,21 +373,43 @@ function ProjectPage({
     queryKey: key,
     queryFn: () => service.get(id!),
     retry: false,
+    refetchInterval: mode === "backend" ? 3000 : false,
   });
   useEffect(() => {
     if (id) remember(`djound.last.${mode}`, id);
   }, [id, mode]);
   function update(p: Project) {
-    client.setQueryData(key, p);
-    void client.invalidateQueries({ queryKey: ["studio-library"] });
+    // Do not let a status read started before this mutation roll its revision back.
+    void client.cancelQueries({ queryKey: key }).then(() => {
+      client.setQueryData(key, p);
+      void client.invalidateQueries({ queryKey: ["studio-library"] });
+    });
   }
   if (q.isPending) return <Loading />;
-  if (q.isError)
+  if (q.isError && !q.data)
     return <Failure message={q.error.message} retry={() => void q.refetch()} />;
-  return melody ? (
-    <MelodyPage key={id} project={q.data} onUpdate={update} editing={editing} />
-  ) : (
-    <Studio key={id} project={q.data} onUpdate={update} />
+  if (!q.data) return <Loading />;
+  return (
+    <>
+      {q.isError && (
+        <p className="notice error" role="alert">
+          Could not refresh this project. Your current work is still shown.
+          <button className="text-action" onClick={() => void q.refetch()}>
+            Refresh project
+          </button>
+        </p>
+      )}
+      {melody ? (
+        <MelodyPage
+          key={id}
+          project={q.data}
+          onUpdate={update}
+          editing={editing}
+        />
+      ) : (
+        <Studio key={id} project={q.data} onUpdate={update} />
+      )}
+    </>
   );
 }
 function Studio({
@@ -407,6 +431,7 @@ function Studio({
     ),
     [sheet, setSheet] = useState(false),
     [fullHistory, setFullHistory] = useState(false),
+    [recoveryRevision, setRecoveryRevision] = useState(0),
     [error, setError] = useState("");
   const track =
     project.tracks.find((t) => t.id === inspected) ?? project.tracks[0];
@@ -449,6 +474,7 @@ function Studio({
       onUpdate={onUpdate}
       onInspect={setInspected}
       onBasis={(id) => void basis(id)}
+      onCreationSettled={() => setRecoveryRevision((revision) => revision + 1)}
       mode={mode}
     />
   );
@@ -457,7 +483,11 @@ function Studio({
       <section className="main-column studio-page">
         <ProjectHeader project={project} />
         {mode === "backend" && (
-          <CreationRecovery project={project} onUpdate={onUpdate} />
+          <CreationRecovery
+            project={project}
+            onUpdate={onUpdate}
+            revision={recoveryRevision}
+          />
         )}{" "}
         {error && (
           <p className="notice error" role="alert">
@@ -567,13 +597,17 @@ function Studio({
                 )}
                 {audio.track?.id === t.id && audio.playing ? "Pause" : "Play"}
               </button>
-              {t.kind === "version" ? (
+              {t.kind === "version" || t.kind === "original" ? (
                 <button
                   className={`row-use ${t.id === basisId ? "in-use" : ""}`}
                   disabled={t.id === basisId}
                   onClick={() => void basis(t.id)}
                 >
-                  {t.id === basisId ? "In use" : "Use this version"}
+                  {t.id === basisId
+                    ? "In use"
+                    : t.kind === "original"
+                      ? "Use original"
+                      : "Use this version"}
                 </button>
               ) : (
                 <span />
@@ -814,12 +848,13 @@ function MelodyPage({
         after?.(next);
       }
     } catch (e) {
-      if (!c.signal.aborted)
-        setError(
-          e instanceof Error
+      setError(
+        e instanceof DOMException && e.name === "AbortError"
+          ? "Operation cancelled. Your original and saved notes are preserved."
+          : e instanceof Error
             ? e.message
             : "This action could not finish. Your notes are preserved.",
-        );
+      );
     } finally {
       if (controller.current === c) {
         controller.current = null;
@@ -918,7 +953,7 @@ function MelodyPage({
               project={{ ...project, tracks: [project.tracks[0]] }}
             />
             <Button
-              disabled={!!busy || !project.available}
+              disabled={!!busy || !project.available || project.processing}
               onClick={() =>
                 void run("Detecting melody…", (signal) =>
                   service.detect(project, signal),
@@ -988,7 +1023,9 @@ function MelodyPage({
             />
             <Button
               variant="outline"
-              disabled={!!busy || !project.available || staleEdits}
+              disabled={
+                !!busy || !project.available || project.processing || staleEdits
+              }
               onClick={() => void previewNotes()}
             >
               <Play />
@@ -1016,7 +1053,7 @@ function MelodyPage({
             <>
               <Button
                 className="full"
-                disabled={!!busy || staleEdits}
+                disabled={!!busy || project.processing || staleEdits}
                 onClick={() =>
                   void run(
                     "Saving notes…",
@@ -1043,7 +1080,7 @@ function MelodyPage({
             <>
               <Button
                 className="full"
-                disabled={!!busy || staleEdits}
+                disabled={!!busy || project.processing || staleEdits}
                 onClick={() =>
                   void run(
                     "Confirming melody…",
@@ -1077,9 +1114,11 @@ function MelodyPage({
 function CreationRecovery({
   project,
   onUpdate,
+  revision,
 }: {
   project: Project;
   onUpdate: (p: Project) => void;
+  revision: number;
 }) {
   const [pending, setPending] = useState<{
       projectId: string;
@@ -1089,10 +1128,18 @@ function CreationRecovery({
     [busy, setBusy] = useState(false),
     [error, setError] = useState("");
   useEffect(() => {
+    let current = true;
     void pendingBackendCreation()
-      .then(setPending)
-      .catch(() => setError("Could not read pending creation recovery."));
-  }, [project.id]);
+      .then((command) => {
+        if (current) setPending(command);
+      })
+      .catch(() => {
+        if (current) setError("Could not read pending creation recovery.");
+      });
+    return () => {
+      current = false;
+    };
+  }, [project.id, revision]);
   if (!pending || pending.projectId !== project.id)
     return error ? (
       <p role="alert" className="notice error">

@@ -3,6 +3,11 @@
 set -euo pipefail
 source "$(dirname "$0")/env.sh"
 cd "$DJOUND_ROOT"
+case "${1:-studio}" in
+  studio) browser_check=scripts/studio-local-smoke.mjs ;;
+  legacy) browser_check=scripts/local-model-smoke.mjs ;;
+  *) echo 'Usage: verify-local.sh [studio|legacy]' >&2; exit 2 ;;
+esac
 mkdir -p .runtime/checks
 run_dir="$(mktemp -d "$DJOUND_ROOT/.runtime/checks/local.XXXXXX")"
 test_db="djound_local_check_$$_${RANDOM}"
@@ -45,7 +50,7 @@ start_app() {
   exit 1
 }
 start_app
-node scripts/local-model-smoke.mjs | tee "$run_dir/result.json"
+node "$browser_check" | tee "$run_dir/result.json"
 "${DJOUND_LOCAL_PYTHON:-$DJOUND_ROOT/.runtime/local-engine/venv/bin/python}" tests/local_audio_acceptance.py "$run_dir/result.json" "$DJOUND_DATA_DIR"
 kill "$app_pid"
 wait "$app_pid" || true

@@ -126,6 +126,7 @@ export function Refinement({
   onUpdate,
   onInspect,
   onBasis,
+  onCreationSettled,
   mode,
 }: {
   project: Project;
@@ -134,6 +135,7 @@ export function Refinement({
   onUpdate: (p: Project) => void;
   onInspect: (id: string) => void;
   onBasis: (id: string) => void;
+  onCreationSettled: () => void;
   mode: string;
 }) {
   const basis =
@@ -150,11 +152,29 @@ export function Refinement({
     [result, setResult] = useState<Track | null>(null);
   const controller = useRef<AbortController | null>(null),
     gate = useRef(false),
-    previousBasis = useRef(basisId);
+    previousBasis = useRef(basisId),
+    operation = useRef<"review" | "create" | null>(null),
+    reviewedRevision = useRef<{
+      source: number;
+      draft: number;
+    } | null>(null);
+  const supportedBasis = mode !== "backend" || basis.recipeKnown === true;
+  const submittedBasis =
+    proposal && (view === "creating" || view === "result")
+      ? (project.tracks.find((track) => track.id === proposal.basisId) ?? basis)
+      : basis;
   // Creation remains active when navigating to Library; the service owns its durable lifecycle.
+  useEffect(
+    () => () => {
+      if (operation.current === "review") controller.current?.abort();
+    },
+    [],
+  );
   useEffect(() => {
     if (previousBasis.current !== basisId) {
       previousBasis.current = basisId;
+      if (operation.current === "create") return;
+      if (operation.current === "review") controller.current?.abort();
       setRecipe(basis?.recipe ?? DEFAULT_RECIPE);
       setProposal(null);
       setView("request");
@@ -162,12 +182,25 @@ export function Refinement({
     }
   }, [basisId, basis]);
   useEffect(() => {
-    if (proposal && proposal.noteRevision !== project.noteRevision) {
+    if (
+      proposal &&
+      view !== "creating" &&
+      view !== "result" &&
+      (proposal.noteRevision !== project.noteRevision ||
+        reviewedRevision.current?.source !== project.sourceRevision ||
+        reviewedRevision.current?.draft !== project.draftRevision)
+    ) {
       setProposal(null);
       setView("request");
-      setError("The melody changed. Review your changes again.");
+      setError("The melody or saved draft changed. Review your changes again.");
     }
-  }, [project.noteRevision, proposal]);
+  }, [
+    project.noteRevision,
+    project.sourceRevision,
+    project.draftRevision,
+    proposal,
+    view,
+  ]);
   function changeText(value: string) {
     setText(value);
     try {
@@ -191,12 +224,14 @@ export function Refinement({
     setError("");
     const c = new AbortController();
     controller.current = c;
+    operation.current = "review";
     try {
       const reviewText =
         manual && !text.trim() ? "Direct arrangement changes" : text;
       if (reviewText !== text) changeText(reviewText);
       const saved = await service.saveDraft(project, reviewText, basisId);
       onUpdate(saved);
+      c.signal.throwIfAborted();
       const p = await service.propose(
         saved,
         reviewText,
@@ -205,17 +240,25 @@ export function Refinement({
         c.signal,
       );
       if (c.signal.aborted) return;
+      reviewedRevision.current = {
+        source: saved.sourceRevision,
+        draft: saved.draftRevision,
+      };
       setProposal(p);
       setRecipe(p.recipe);
       setView("review");
     } catch (e) {
-      if (!c.signal.aborted)
+      if (previousBasis.current === basisId)
         setError(
-          e instanceof Error
-            ? e.message
-            : "Could not review this change. Your words are preserved.",
+          e instanceof DOMException && e.name === "AbortError"
+            ? "Review cancelled. Your words are still here."
+            : e instanceof Error
+              ? e.message
+              : "Could not review this change. Your words are preserved.",
         );
     } finally {
+      controller.current = null;
+      operation.current = null;
       gate.current = false;
       setBusy(false);
     }
@@ -228,6 +271,7 @@ export function Refinement({
     setView("creating");
     const c = new AbortController();
     controller.current = c;
+    operation.current = "create";
     try {
       const next = await service.create(project, proposal, c.signal);
       onUpdate(next);
@@ -245,8 +289,11 @@ export function Refinement({
       );
       setView("review");
     } finally {
+      controller.current = null;
+      operation.current = null;
       gate.current = false;
       setBusy(false);
+      onCreationSettled();
     }
   }
   function cancel() {
@@ -264,11 +311,15 @@ export function Refinement({
       setError(e instanceof Error ? e.message : "Could not update Keep.");
     }
   }
-  const disabled = !project.confirmed || !project.available;
+  const disabled =
+    !project.confirmed ||
+    !project.available ||
+    project.processing ||
+    !supportedBasis;
   return (
     <div className="refinement">
       <header>
-        <h2>Refining {basis?.title ?? "Original"}</h2>
+        <h2>Refining {submittedBasis?.title ?? "Original"}</h2>
         <p>
           {view === "review"
             ? "Review before creating audio."
@@ -285,6 +336,17 @@ export function Refinement({
           {project.unavailableReason || "The local engine is unavailable."}{" "}
           Saved recordings remain playable.
         </div>
+      )}
+      {project.processing && !busy && (
+        <p className="notice" role="status">
+          A local operation is still running. Saved recordings remain playable.
+        </p>
+      )}
+      {!supportedBasis && (
+        <p className="notice" role="status">
+          This recording has no local arrangement settings. Choose the original
+          or a local version as the refinement basis.
+        </p>
       )}
       {error && (
         <div className="notice error" role="alert">
@@ -318,6 +380,11 @@ export function Refinement({
               "Review changes"
             )}
           </Button>
+          {busy && (
+            <Button variant="ghost" className="full" onClick={cancel}>
+              Cancel review
+            </Button>
+          )}
           <Button
             variant="ghost"
             className="full accent"
@@ -331,22 +398,27 @@ export function Refinement({
             <SlidersHorizontal /> Adjust arrangement
           </Button>
           <section className="current-arrangement">
-            <h3>Current arrangement</h3>
-            {mode === "backend" && (
+            <h3>
+              {basis.kind === "original"
+                ? "Starting arrangement"
+                : "Current arrangement"}
+            </h3>
+            {!supportedBasis && (
               <p className="small subtle">
-                Historical settings are inferred from the saved direction;
-                review the next proposal to confirm.
+                Arrangement settings are unavailable for this recording.
               </p>
             )}
-            {mode === "prototype" && <RecipeDetails recipe={basis.recipe} />}
+            {supportedBasis && <RecipeDetails recipe={basis.recipe} />}
           </section>
           <details className="arrangement-disclosure">
             <summary>
               Arrangement details <ChevronDown size={16} />
             </summary>
             <p>
-              Backing is {basis.recipe.density}, at a fixed 100 BPM. Your
-              confirmed melody keeps its own timing.
+              {supportedBasis
+                ? `Backing is ${basis.recipe.density}, at a fixed 100 BPM.`
+                : "This recording cannot be used for a local arrangement."}{" "}
+              Your confirmed melody keeps its own timing.
             </p>
           </details>
         </>
@@ -507,7 +579,7 @@ export function Refinement({
             <p>{proposal?.text || "Direct arrangement changes"}</p>
           </div>
           <p className="subtle">
-            Based on {basis.title}. Keep listening while you wait.
+            Based on {submittedBasis.title}. Keep listening while you wait.
           </p>
           <Button variant="outline" className="full" onClick={cancel}>
             Cancel creation
@@ -529,9 +601,9 @@ export function Refinement({
           <Button
             variant="outline"
             className="full"
-            onClick={() => audio.choose(basis)}
+            onClick={() => audio.choose(submittedBasis)}
           >
-            Compare with {basis.title}
+            Compare with {submittedBasis.title}
           </Button>
           <Button
             variant="outline"

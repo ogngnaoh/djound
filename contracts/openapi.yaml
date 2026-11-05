@@ -535,7 +535,7 @@ components:
         provisioned: { type: boolean }
     Recording:
       type: object
-      required: [id, explorationId, kind, title, fileName, contentType, byteSize, durationMs, sampleRate, channels, codec, sha256, mediaUrl, provenance, kept, direction, requestId, attemptId, createdAt]
+      required: [id, explorationId, kind, title, fileName, contentType, byteSize, durationMs, sampleRate, channels, codec, sha256, mediaUrl, provenance, kept, direction, requestId, attemptId, createdAt, localRecipe]
       properties:
         id: { type: string }
         explorationId: { type: string }
@@ -552,6 +552,11 @@ components:
         mediaUrl: { type: string }
         provenance: { type: string, enum: [ORIGINAL, FIXTURE, LIVE, LOCAL] }
         kept: { type: boolean }
+        localRecipe:
+          description: Exact immutable reviewed arrangement used for this LOCAL rendition. Null for originals and recordings without a local plan; never inferred from direction text.
+          oneOf:
+            - { $ref: '#/components/schemas/LocalRecipe' }
+            - { type: 'null' }
         direction: { type: [string, 'null'] }
         requestId: { type: [string, 'null'] }
         attemptId: { type: [string, 'null'] }

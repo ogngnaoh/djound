@@ -3,8 +3,8 @@
 set -euo pipefail
 source "$(dirname "$0")/env.sh"
 cd "$DJOUND_ROOT"
-check_mode="${1:-all}"
-case "$check_mode" in all|api|fixture|listening|recovery|unknown|capacity|interaction|live-policy|upload|upload-local) ;; *) echo 'Usage: verify-installation.sh [all|api|fixture|listening|recovery|unknown|capacity|interaction|live-policy|upload|upload-local]' >&2; exit 2 ;; esac
+check_mode="${1:-studio}"
+case "$check_mode" in all|studio|api|fixture|fixture-api|listening|recovery|unknown|capacity|interaction|live-policy|upload|upload-local) ;; *) echo 'Usage: verify-installation.sh [all|studio|api|fixture|fixture-api|listening|recovery|unknown|capacity|interaction|live-policy|upload|upload-local]' >&2; exit 2 ;; esac
 mkdir -p .runtime/checks
 run_dir="$(mktemp -d "$DJOUND_ROOT/.runtime/checks/run.XXXXXX")"
 test_db="djound_check_$$_${RANDOM}"
@@ -38,7 +38,7 @@ if [[ "$check_mode" == live-policy ]]; then
 fi
 export DJOUND_FIXTURE_REVIEW_CONTROLS=false
 unset DJOUND_FIXTURE_COOLDOWN_MS
-if [[ "$check_mode" == fixture || "$check_mode" == listening || "$check_mode" == recovery || "$check_mode" == unknown || "$check_mode" == capacity || "$check_mode" == interaction || "$check_mode" == upload ]]; then
+if [[ "$check_mode" == fixture || "$check_mode" == fixture-api || "$check_mode" == listening || "$check_mode" == recovery || "$check_mode" == unknown || "$check_mode" == capacity || "$check_mode" == interaction || "$check_mode" == upload ]]; then
   export DJOUND_MODE=FIXTURE
   export DJOUND_FIXTURE_DELAY_MS=8000
   export DJOUND_FIXTURE_COOLDOWN_MS=6000
@@ -62,7 +62,14 @@ start_app() {
   exit 1
 }
 start_app
-if [[ "$check_mode" == upload || "$check_mode" == upload-local ]]; then
+if [[ "$check_mode" == studio ]]; then
+  python3 tests/api_acceptance.py | tee "$run_dir/api-result.json"
+  node scripts/studio-smoke.mjs | tee "$run_dir/studio-result.json"
+elif [[ "$check_mode" == fixture-api ]]; then
+  python3 tests/fixture_acceptance.py | tee "$run_dir/api-result.json"
+  python3 tests/recovery_acceptance.py | tee "$run_dir/recovery-api-result.json"
+  python3 tests/availability_acceptance.py | tee "$run_dir/availability-api-result.json"
+elif [[ "$check_mode" == upload || "$check_mode" == upload-local ]]; then
   node scripts/upload-smoke.mjs | tee "$run_dir/api-result.json"
 elif [[ "$check_mode" == live-policy ]]; then
   node scripts/live-policy-smoke.mjs | tee "$run_dir/api-result.json"

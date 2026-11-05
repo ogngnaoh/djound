@@ -8,6 +8,8 @@ import org.springframework.transaction.PlatformTransactionManager;
 import org.springframework.transaction.support.TransactionTemplate;
 import org.springframework.web.multipart.MultipartFile;
 
+import tools.jackson.databind.ObjectMapper;
+
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.sql.ResultSet;
@@ -17,6 +19,11 @@ import java.util.*;
 
 @Service
 public class Explorations {
+    private static final ObjectMapper JSON = new ObjectMapper();
+    private static final String RECORDING_SELECT =
+            "SELECT r.*, p.recipe_json AS local_recipe_json FROM recording r "
+                    + "LEFT JOIN generation_request q ON q.id=r.request_id "
+                    + "LEFT JOIN local_plan p ON p.id=q.local_plan_id AND r.provenance='LOCAL' ";
     private final JdbcClient jdbc;
     private final MediaStore media;
     private final TransactionTemplate transactions;
@@ -421,7 +428,7 @@ public class Explorations {
                                        ((SELECT active_attempt_id IS NULL FROM workspace WHERE id=1)
                                         AND NOT EXISTS(SELECT 1 FROM recording rendition
                                                        WHERE rendition.exploration_id=e.id AND rendition.kind='RENDITION'))
-                                        AS can_replace_source, original.*
+                                        AS can_replace_source, original.*, NULL AS local_recipe_json
                                 FROM exploration e JOIN recording original ON original.id=e.original_id
                                 WHERE e.id=?
                                 """)
@@ -447,8 +454,9 @@ public class Explorations {
                         .orElseThrow(Explorations::missing);
         var renditions =
                 jdbc.sql(
-                                "SELECT * FROM recording WHERE exploration_id=? AND"
-                                        + " kind='RENDITION' ORDER BY created_at,id")
+                                RECORDING_SELECT
+                                        + "WHERE r.exploration_id=? AND r.kind='RENDITION'"
+                                        + " ORDER BY r.created_at,r.id")
                         .param(id)
                         .query(Explorations::mapRecording)
                         .list();
@@ -469,7 +477,7 @@ public class Explorations {
         var summaries =
                 jdbc.sql(
                                 """
-                                SELECT e.id AS exploration_key, e.title AS exploration_title, e.updated_at, original.*,
+                                SELECT e.id AS exploration_key, e.title AS exploration_title, e.updated_at, original.*, NULL AS local_recipe_json,
                                        (SELECT COUNT(*) FROM recording result WHERE result.exploration_id=e.id AND result.kind='RENDITION') AS rendition_count
                                 FROM exploration e JOIN recording original ON original.id=e.original_id
                                 ORDER BY e.updated_at DESC,e.id
@@ -488,8 +496,9 @@ public class Explorations {
         var kept =
                 jdbc
                         .sql(
-                                "SELECT * FROM recording WHERE kind='RENDITION' AND kept=true ORDER"
-                                        + " BY created_at,id")
+                                RECORDING_SELECT
+                                        + "WHERE r.kind='RENDITION' AND r.kept=true"
+                                        + " ORDER BY r.created_at,r.id")
                         .query(Explorations::mapRecording)
                         .list()
                         .stream()
@@ -516,11 +525,11 @@ public class Explorations {
                     "RETRY");
         }
         var changed =
-                jdbc.sql("UPDATE recording SET kept=? WHERE id=? AND kind='RENDITION' RETURNING *")
+                jdbc.sql("UPDATE recording SET kept=? WHERE id=? AND kind='RENDITION' RETURNING id")
                         .params(command.kept(), id)
-                        .query(Explorations::mapRecording)
+                        .query(String.class)
                         .optional();
-        if (changed.isPresent()) return changed.get();
+        if (changed.isPresent()) return recording(changed.get());
         recording(id); // Distinguish a missing recording from an original.
         throw new ApiProblem(
                 422,
@@ -530,7 +539,7 @@ public class Explorations {
     }
 
     public Recording recording(String id) {
-        return jdbc.sql("SELECT * FROM recording WHERE id=?")
+        return jdbc.sql(RECORDING_SELECT + "WHERE r.id=?")
                 .param(id)
                 .query(Explorations::mapRecording)
                 .optional()
@@ -559,6 +568,11 @@ public class Explorations {
                 "RETURN_TO_LIBRARY");
     }
 
+    @SuppressWarnings("unchecked")
+    private static Map<String, Object> localRecipe(String serialized) {
+        return serialized == null ? null : JSON.readValue(serialized, Map.class);
+    }
+
     private static Recording mapRecording(ResultSet r, int n) throws SQLException {
         return new Recording(
                 r.getString("id"),
@@ -579,6 +593,7 @@ public class Explorations {
                 r.getString("direction"),
                 r.getString("request_id"),
                 r.getString("attempt_id"),
-                r.getTimestamp("created_at").toInstant());
+                r.getTimestamp("created_at").toInstant(),
+                localRecipe(r.getString("local_recipe_json")));
     }
 }

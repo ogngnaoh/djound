@@ -32,6 +32,8 @@ export type Track = {
   kept: boolean;
   kind: "original" | "version" | "preview";
   recipe: Recipe;
+  /** True when settings are authoritative, including the original local starting recipe. */
+  recipeKnown?: boolean;
 };
 export type Project = {
   id: string;
@@ -48,6 +50,8 @@ export type Project = {
   basisId: string;
   previewUrl?: string;
   available: boolean;
+  /** An active preparation or creation for this project, separate from engine readiness. */
+  processing?: boolean;
   unavailableReason?: string;
 };
 export type Proposal = {
@@ -93,6 +97,15 @@ export const DEFAULT_RECIPE: Recipe = {
   instrument: "electric_piano",
   bass: true,
   drums: true,
+  density: "steady",
+  backingVolume: "normal",
+  bpm: 100,
+};
+/** Local engine baseline for an uploaded melody; not a description of its waveform. */
+export const LOCAL_SOURCE_RECIPE: Recipe = {
+  instrument: "piano",
+  bass: false,
+  drums: false,
   density: "steady",
   backingVolume: "normal",
   bpm: 100,

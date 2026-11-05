@@ -20,7 +20,13 @@ const browser = await chromium.launch({
 });
 const page = await browser.newPage({ viewport: { width: 1440, height: 960 } });
 page.setDefaultTimeout(12000);
-const errors = [];
+const errors = [],
+  backendRequests = [];
+// Fail closed if mode persistence regresses: this suite must never submit real work.
+await page.route("**/api/**", (route) => {
+  backendRequests.push(route.request().url());
+  return route.abort("blockedbyclient");
+});
 page.on("pageerror", (e) => errors.push(e.message));
 page.on("console", (m) => {
   if (m.type() === "error") errors.push(m.text());
@@ -150,6 +156,9 @@ try {
     page.getByText("Evening melody · Version 4", { exact: true }),
   ).toBeVisible();
   await page.reload();
+  await expect(
+    page.getByRole("button", { name: /Prototype workspace/ }),
+  ).toBeVisible();
   await expect(
     page.getByText("Evening melody · Version 4", { exact: true }),
   ).toBeVisible();
@@ -295,6 +304,7 @@ try {
   await page.setViewportSize({ width: 390, height: 844 });
   await shot("mobile-studio");
   expect(errors).toEqual([]);
+  expect(backendRequests).toEqual([]);
   console.log(
     JSON.stringify(
       {
@@ -304,6 +314,7 @@ try {
           "inspect/play/basis independence",
           "pause/resume/restart",
           "review/cancel/create/Keep/reload",
+          "explicit prototype choice survives navigation and reload; no backend requests",
           "sample/melody/edit/undo/redo/preview/confirm",
           "unclear/manual fallback",
           "creation failure",

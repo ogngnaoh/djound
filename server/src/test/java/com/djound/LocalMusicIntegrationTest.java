@@ -192,6 +192,39 @@ else:
         assertTrue(gen().create(id, command(p), "local-generate-key").replayed());
         assertEquals(1, ex().get(id).renditions().size());
         var recording = ex().setKept(done.resultRecordingId(), new Models.RecordingUpdate(true));
+        assertNull(ex().get(id).original().localRecipe());
+        assertEquals(p.recipe(), recording.localRecipe());
+        assertEquals(p.recipe(), ex().get(id).renditions().getFirst().localRecipe());
+        assertEquals(p.recipe(), ex().list().getFirst().keptRecordings().getFirst().localRecipe());
+        var savedDraft =
+                ex().saveDraft(
+                                id,
+                                new Models.DraftUpdate(
+                                        "Use guitar next",
+                                        recording.id(),
+                                        ex().get(id).draft().revision()));
+        var newPlan =
+                local().manual(
+                                id,
+                                new PlanCommand(
+                                        1L,
+                                        n.revision(),
+                                        savedDraft.revision(),
+                                        savedDraft.text(),
+                                        recording.id()));
+        var edited = new LinkedHashMap<>(newPlan.recipe());
+        edited.put("instrument", "guitar");
+        local().correct(
+                        newPlan.id(),
+                        new CorrectionCommand(
+                                1L,
+                                n.revision(),
+                                savedDraft.revision(),
+                                savedDraft.text(),
+                                recording.id(),
+                                edited));
+        // A newer, different proposal cannot change a saved rendition's immutable settings.
+        assertEquals(p.recipe(), ex().recording(recording.id()).localRecipe());
         String hash = recording.sha256();
         assertEquals(
                 0,
@@ -202,6 +235,7 @@ else:
         app = launch();
         assertEquals(hash, ex().recording(recording.id()).sha256());
         assertTrue(ex().recording(recording.id()).kept());
+        assertEquals(p.recipe(), ex().recording(recording.id()).localRecipe());
         assertEquals("CONFIRMED", local().state(id).notes().status());
     }
 

@@ -187,7 +187,7 @@ export function LibraryPage() {
                 <dt>Duration</dt>
                 <dd>{clock(selected.track.duration)}</dd>
               </dl>
-              {mode === "prototype" ? (
+              {mode === "prototype" || selected.track.recipeKnown ? (
                 <RecipeDetails recipe={selected.track.recipe} />
               ) : (
                 <p className="small subtle">

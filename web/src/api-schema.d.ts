@@ -526,6 +526,8 @@ export interface components {
             /** @enum {string} */
             provenance: "ORIGINAL" | "FIXTURE" | "LIVE" | "LOCAL";
             kept: boolean;
+            /** @description Exact immutable reviewed arrangement used for this LOCAL rendition. Null for originals and recordings without a local plan; never inferred from direction text. */
+            localRecipe: components["schemas"]["LocalRecipe"] | null;
             direction: string | null;
             requestId: string | null;
             attemptId: string | null;

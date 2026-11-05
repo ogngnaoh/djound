@@ -12,6 +12,7 @@ import { isDefiniteRejection } from "../remix/commandPolicy.ts";
 import { noteIssue } from "../remix/localPolicy.ts";
 import {
   DEFAULT_RECIPE,
+  LOCAL_SOURCE_RECIPE,
   describeRecipe,
   type Mode,
   type Note,
@@ -636,23 +637,11 @@ async function transmitCreation(
 function failure(problem: { detail?: string } | undefined, fallback: string) {
   return new Error(problem?.detail || fallback);
 }
-function recipeFromDirection(text: string | null): Recipe {
-  const r = { ...DEFAULT_RECIPE };
-  const s = text?.toLowerCase() ?? "";
-  if (/guitar/.test(s)) r.instrument = "guitar";
-  else if (/electric.piano/.test(s)) r.instrument = "electric_piano";
-  else if (/piano/.test(s)) r.instrument = "piano";
-  if (/bass off|no bass/.test(s)) r.bass = false;
-  if (/drums off|no drums/.test(s)) r.drums = false;
-  if (/soft/.test(s)) r.backingVolume = "soft";
-  if (/sparse/.test(s)) r.density = "sparse";
-  return r;
-}
 function trackFromRecording(r: Recording): Track {
   return {
     id: r.id,
     projectId: r.explorationId,
-    title: r.title,
+    title: r.kind === "ORIGINAL" ? "Original" : r.title,
     description:
       r.kind === "ORIGINAL"
         ? "Uploaded original"
@@ -661,7 +650,8 @@ function trackFromRecording(r: Recording): Track {
     duration: r.durationMs / 1000,
     kept: r.kept,
     kind: r.kind === "ORIGINAL" ? "original" : "version",
-    recipe: recipeFromDirection(r.direction),
+    recipe: r.localRecipe ?? { ...LOCAL_SOURCE_RECIPE },
+    recipeKnown: r.kind === "ORIGINAL" || r.localRecipe != null,
   };
 }
 function backendProject(e: Exploration, local?: LocalState): Project {
@@ -669,10 +659,6 @@ function backendProject(e: Exploration, local?: LocalState): Project {
     ...trackFromRecording(r),
     projectTitle: e.title,
   }));
-  if (local?.plan) {
-    const basis = tracks.find((t) => t.id === local.plan!.basisRecordingId);
-    if (basis) basis.recipe = local.plan.basisRecipe;
-  }
   return {
     id: e.id,
     title: e.title,
@@ -688,6 +674,11 @@ function backendProject(e: Exploration, local?: LocalState): Project {
     basisId: e.draft.basisRecordingId ?? e.original.id,
     previewUrl: local?.notes?.previewUrl ?? undefined,
     available: local?.available ?? false,
+    processing: Boolean(
+      local?.activeJob ||
+      (e.latestAttempt &&
+        !["SUCCEEDED", "FAILED"].includes(e.latestAttempt.state)),
+    ),
     unavailableReason:
       local?.unavailableReason ??
       "Connect to the local engine to detect notes and create arrangements.",

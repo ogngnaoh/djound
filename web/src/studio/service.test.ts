@@ -327,3 +327,120 @@ test("reset clears only prototype request and note edits, restoring the canonica
   assert.equal(localStorage.getItem("djound.last.backend"), "backend-project");
   assert.equal((await reset.list()).length, 3);
 });
+
+test("backend history uses immutable recipes, never request text or the latest proposal", async () => {
+  const { api } = await import("../api.ts");
+  const originalGet = api.GET;
+  const authoritative = {
+    instrument: "electric_piano",
+    bass: true,
+    drums: false,
+    density: "sparse",
+    backingVolume: "soft",
+    bpm: 100,
+  };
+  const recording = {
+    explorationId: "project",
+    title: "Version 1",
+    id: "version-one",
+    kind: "RENDITION",
+    provenance: "LOCAL",
+    durationMs: 12000,
+    mediaUrl: "/api/media/version-one",
+    kept: true,
+    direction: "Use guitar, add drums and make everything louder.",
+    localRecipe: authoritative,
+  };
+  const exploration = {
+    id: "project",
+    title: "Recorded melody",
+    updatedAt: "2026-11-05T12:00:00Z",
+    sourceRevision: 1,
+    draft: {
+      revision: 3,
+      text: "next request",
+      basisRecordingId: "version-one",
+    },
+    original: {
+      ...recording,
+      id: "original",
+      kind: "ORIGINAL",
+      localRecipe: null,
+      fileName: "melody.wav",
+    },
+    renditions: [
+      recording,
+      { ...recording, id: "legacy", provenance: "LIVE", localRecipe: null },
+    ],
+  };
+  let preparationActive = false;
+  let attemptState: string | null = null;
+  try {
+    api.GET = (async (path: string) => ({
+      data: path.endsWith("/local")
+        ? {
+            available: true,
+            activeJob: preparationActive
+              ? { id: "active-preparation", state: "RUNNING" }
+              : null,
+            notes: { revision: 1, status: "CONFIRMED", notes: [] },
+            plan: {
+              basisRecordingId: "version-one",
+              basisRecipe: {
+                ...authoritative,
+                instrument: "guitar",
+                drums: true,
+              },
+            },
+          }
+        : {
+            ...exploration,
+            latestAttempt: attemptState ? { state: attemptState } : null,
+          },
+    })) as unknown as typeof api.GET;
+    const project = await createStudioService("backend", "normal").get(
+      "project",
+    );
+    assert.deepEqual(project.tracks[1].recipe, authoritative);
+    assert.equal(project.tracks[1].recipeKnown, true);
+    assert.equal(project.tracks[2].recipeKnown, false);
+    assert.deepEqual(project.tracks[0].recipe, {
+      instrument: "piano",
+      bass: false,
+      drums: false,
+      density: "steady",
+      backingVolume: "normal",
+      bpm: 100,
+    });
+    assert.equal(project.tracks[0].recipeKnown, true);
+    assert.equal(project.tracks[0].title, "Original");
+    assert.equal(project.processing, false);
+    const service = createStudioService("backend", "normal");
+    preparationActive = true;
+    assert.equal((await service.get("project")).processing, true);
+    preparationActive = false;
+    for (const state of [
+      "ACCEPTED",
+      "SUBMITTING",
+      "RUNNING",
+      "SAVING",
+      "RECONCILING",
+      "SUCCEEDED",
+      "FAILED",
+    ]) {
+      attemptState = state;
+      const current = await service.get("project");
+      assert.equal(
+        current.processing,
+        !["SUCCEEDED", "FAILED"].includes(state),
+      );
+      assert.equal(
+        current.available,
+        true,
+        "Processing must not change engine readiness",
+      );
+    }
+  } finally {
+    api.GET = originalGet;
+  }
+});
