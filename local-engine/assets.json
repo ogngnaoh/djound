@@ -1,0 +1,105 @@
+{
+  "schemaVersion": 1,
+  "model": "mlx-community/Qwen3.5-0.8B-4bit",
+  "revision": "da28692b5f139cb0ec58a356b437486b7dac7462",
+  "modelLicense": "Apache-2.0",
+  "assets": [
+    {
+      "path": "qwen35/README.md",
+      "url": "https://huggingface.co/mlx-community/Qwen3.5-0.8B-4bit/resolve/da28692b5f139cb0ec58a356b437486b7dac7462/README.md",
+      "bytes": 678,
+      "git_blob_sha1": "1d5de9efcc5248f9f4c3e443152db2a2753e59a1"
+    },
+    {
+      "path": "qwen35/chat_template.jinja",
+      "url": "https://huggingface.co/mlx-community/Qwen3.5-0.8B-4bit/resolve/da28692b5f139cb0ec58a356b437486b7dac7462/chat_template.jinja",
+      "bytes": 7755,
+      "git_blob_sha1": "0ef09f214eaa6d9bca297988afc1454b5827b2c7"
+    },
+    {
+      "path": "qwen35/config.json",
+      "url": "https://huggingface.co/mlx-community/Qwen3.5-0.8B-4bit/resolve/da28692b5f139cb0ec58a356b437486b7dac7462/config.json",
+      "bytes": 3112,
+      "git_blob_sha1": "f2a232ff3224989be3b1a4db407475dbef3247f6"
+    },
+    {
+      "path": "qwen35/model.safetensors",
+      "url": "https://huggingface.co/mlx-community/Qwen3.5-0.8B-4bit/resolve/da28692b5f139cb0ec58a356b437486b7dac7462/model.safetensors",
+      "bytes": 625229487,
+      "sha256": "f5a0d9dd3efa73510542a8023d610ff26be2b4b020d181cfc4bedaa1fcc5dd9e"
+    },
+    {
+      "path": "qwen35/model.safetensors.index.json",
+      "url": "https://huggingface.co/mlx-community/Qwen3.5-0.8B-4bit/resolve/da28692b5f139cb0ec58a356b437486b7dac7462/model.safetensors.index.json",
+      "bytes": 71473,
+      "git_blob_sha1": "e9a7b6207ef38295c02bbdb5e5e98a27161a4a51"
+    },
+    {
+      "path": "qwen35/preprocessor_config.json",
+      "url": "https://huggingface.co/mlx-community/Qwen3.5-0.8B-4bit/resolve/da28692b5f139cb0ec58a356b437486b7dac7462/preprocessor_config.json",
+      "bytes": 390,
+      "git_blob_sha1": "2ea84a437d448ff71b08df68fdd949d5cc4ebb64"
+    },
+    {
+      "path": "qwen35/processor_config.json",
+      "url": "https://huggingface.co/mlx-community/Qwen3.5-0.8B-4bit/resolve/da28692b5f139cb0ec58a356b437486b7dac7462/processor_config.json",
+      "bytes": 1300,
+      "git_blob_sha1": "7ad6acdf4203f22b7b990e36ccc3a1fe38563d5e"
+    },
+    {
+      "path": "qwen35/tokenizer.json",
+      "url": "https://huggingface.co/mlx-community/Qwen3.5-0.8B-4bit/resolve/da28692b5f139cb0ec58a356b437486b7dac7462/tokenizer.json",
+      "bytes": 19989343,
+      "sha256": "87a7830d63fcf43bf241c3c5242e96e62dd3fdc29224ca26fed8ea333db72de4"
+    },
+    {
+      "path": "qwen35/tokenizer_config.json",
+      "url": "https://huggingface.co/mlx-community/Qwen3.5-0.8B-4bit/resolve/da28692b5f139cb0ec58a356b437486b7dac7462/tokenizer_config.json",
+      "bytes": 1139,
+      "git_blob_sha1": "a068e2468cff426a9b105006e74e044030a6faf4"
+    },
+    {
+      "path": "qwen35/video_preprocessor_config.json",
+      "url": "https://huggingface.co/mlx-community/Qwen3.5-0.8B-4bit/resolve/da28692b5f139cb0ec58a356b437486b7dac7462/video_preprocessor_config.json",
+      "bytes": 385,
+      "git_blob_sha1": "3ba673a5ad7d4d13f54155ecd38b2a94a6dac8fe"
+    },
+    {
+      "path": "qwen35/vocab.json",
+      "url": "https://huggingface.co/mlx-community/Qwen3.5-0.8B-4bit/resolve/da28692b5f139cb0ec58a356b437486b7dac7462/vocab.json",
+      "bytes": 6722759,
+      "git_blob_sha1": "0aa0ce0658d60ac4a5d609f4eadb0e8e43514176"
+    },
+    {
+      "path": "downloads/basic_pitch-0.4.0-py2.py3-none-any.whl",
+      "url": "https://files.pythonhosted.org/packages/99/0e/3a36d22562daeb0ae3c78ac78da3f8dba96543c5576ed57d4acb8ddbab5b/basic_pitch-0.4.0-py2.py3-none-any.whl",
+      "sha256": "738adb503aae7fdfc7d1e1511aa0ce35052315f260a19531ef4c356708425db0",
+      "bytes": 758279
+    },
+    {
+      "path": "tsf.h",
+      "url": "https://raw.githubusercontent.com/schellingb/TinySoundFont/853a0a171759f1ddba0de1442133a75912bbeffa/tsf.h",
+      "sha256": "70d55963c98f60ebb81518eaa1f25d46888d5180eb5f5289fd6b74ffc177d197",
+      "bytes": 92719
+    },
+    {
+      "path": "FluidR3_GM.sf2",
+      "url": "https://github.com/pianobooster/fluid-soundfont/releases/download/v3.1/FluidR3_GM.sf2",
+      "sha256": "74594e8f4250680adf590507a306655a299935343583256f3b722c48a1bc1cb0",
+      "bytes": 148398306
+    },
+    {
+      "path": "TinySoundFont-LICENSE",
+      "url": "https://raw.githubusercontent.com/schellingb/TinySoundFont/853a0a171759f1ddba0de1442133a75912bbeffa/LICENSE",
+      "sha256": "ef10cb839de73fb6d5d32ea7151979e87809a6df70dc7e7ee8457ae1c9e7aa7e",
+      "bytes": 1155
+    },
+    {
+      "path": "FluidR3-COPYING",
+      "url": "https://raw.githubusercontent.com/pianobooster/fluid-soundfont/main/COPYING",
+      "sha256": "8ef830b65c97a976b86e34bb5fde08d99dfb1db13c4149b5b20bc837ac6c4568",
+      "bytes": 1086
+    }
+  ],
+  "modelDirectory": "qwen35"
+}

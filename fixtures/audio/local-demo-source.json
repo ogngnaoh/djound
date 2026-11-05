@@ -1,0 +1,170 @@
+{
+  "title": "Djound local demo melody",
+  "type": "Authored synthetic test melody, not a human recording or generated output",
+  "duration_seconds": 12,
+  "composition": {
+    "id": "syncopated-minor",
+    "audio_file": "syncopated-minor.wav",
+    "sha256": "7400e5b7ea4821a12c19518a246a09de49403cd492f618f6b5c8003829351992",
+    "description": "Monophonic C-minor phrase with offbeat timing and accents.",
+    "tempo_bpm": 110,
+    "events": [
+      {
+        "onset_seconds": 0.25,
+        "duration_seconds": 0.36,
+        "midi_note": 60,
+        "velocity": 1.0,
+        "role": "melody"
+      },
+      {
+        "onset_seconds": 0.659091,
+        "duration_seconds": 0.26,
+        "midi_note": 63,
+        "velocity": 0.75,
+        "role": "melody"
+      },
+      {
+        "onset_seconds": 1.068182,
+        "duration_seconds": 0.26,
+        "midi_note": 67,
+        "velocity": 1.0,
+        "role": "melody"
+      },
+      {
+        "onset_seconds": 1.340909,
+        "duration_seconds": 0.36,
+        "midi_note": 70,
+        "velocity": 0.75,
+        "role": "melody"
+      },
+      {
+        "onset_seconds": 2.022727,
+        "duration_seconds": 0.26,
+        "midi_note": 67,
+        "velocity": 1.0,
+        "role": "melody"
+      },
+      {
+        "onset_seconds": 2.431818,
+        "duration_seconds": 0.26,
+        "midi_note": 65,
+        "velocity": 0.75,
+        "role": "melody"
+      },
+      {
+        "onset_seconds": 2.840909,
+        "duration_seconds": 0.36,
+        "midi_note": 63,
+        "velocity": 1.0,
+        "role": "melody"
+      },
+      {
+        "onset_seconds": 3.25,
+        "duration_seconds": 0.26,
+        "midi_note": 62,
+        "velocity": 0.75,
+        "role": "melody"
+      },
+      {
+        "onset_seconds": 3.931818,
+        "duration_seconds": 0.26,
+        "midi_note": 60,
+        "velocity": 1.0,
+        "role": "melody"
+      },
+      {
+        "onset_seconds": 4.340909,
+        "duration_seconds": 0.36,
+        "midi_note": 67,
+        "velocity": 0.75,
+        "role": "melody"
+      },
+      {
+        "onset_seconds": 4.613636,
+        "duration_seconds": 0.26,
+        "midi_note": 72,
+        "velocity": 1.0,
+        "role": "melody"
+      },
+      {
+        "onset_seconds": 5.295455,
+        "duration_seconds": 0.26,
+        "midi_note": 70,
+        "velocity": 0.75,
+        "role": "melody"
+      },
+      {
+        "onset_seconds": 5.704545,
+        "duration_seconds": 0.36,
+        "midi_note": 68,
+        "velocity": 1.0,
+        "role": "melody"
+      },
+      {
+        "onset_seconds": 6.113636,
+        "duration_seconds": 0.26,
+        "midi_note": 67,
+        "velocity": 0.75,
+        "role": "melody"
+      },
+      {
+        "onset_seconds": 6.522727,
+        "duration_seconds": 0.26,
+        "midi_note": 65,
+        "velocity": 1.0,
+        "role": "melody"
+      },
+      {
+        "onset_seconds": 7.204545,
+        "duration_seconds": 0.36,
+        "midi_note": 63,
+        "velocity": 0.75,
+        "role": "melody"
+      },
+      {
+        "onset_seconds": 7.613636,
+        "duration_seconds": 0.26,
+        "midi_note": 65,
+        "velocity": 1.0,
+        "role": "melody"
+      },
+      {
+        "onset_seconds": 7.886364,
+        "duration_seconds": 0.26,
+        "midi_note": 67,
+        "velocity": 0.75,
+        "role": "melody"
+      },
+      {
+        "onset_seconds": 8.568182,
+        "duration_seconds": 0.36,
+        "midi_note": 62,
+        "velocity": 1.0,
+        "role": "melody"
+      },
+      {
+        "onset_seconds": 8.977273,
+        "duration_seconds": 0.26,
+        "midi_note": 60,
+        "velocity": 0.75,
+        "role": "melody"
+      },
+      {
+        "onset_seconds": 9.795455,
+        "duration_seconds": 0.26,
+        "midi_note": 63,
+        "velocity": 1.0,
+        "role": "melody"
+      },
+      {
+        "onset_seconds": 10.613636,
+        "duration_seconds": 0.36,
+        "midi_note": 60,
+        "velocity": 0.75,
+        "role": "melody"
+      }
+    ]
+  },
+  "source_sha256": "6e41121a1cd3cb48048ddc5ee216fd31231b3863b7d464ef39fb5a62925a3c58",
+  "preparation": "Existing authored melody_suite.py syncopated-minor output converted to PCM16 with FFmpeg; no model output used as source."
+}
