@@ -206,6 +206,101 @@ else:
     }
 
     @Test
+    void directArrangementWorksAfterPlannerFailureAndInheritsChosenVersion() throws Exception {
+        String id = source();
+        var n = confirmed(id);
+        var draft = ex().get(id).draft();
+        var request = new PlanCommand(1L, n.revision(), draft.revision(), draft.text(), null);
+        Files.writeString(root.resolve("fail-plan"), "fail all planner calls");
+        assertEquals("FAILED", completed(local().propose(id, request)).state());
+        int jobs = db().sql("SELECT count(*) FROM local_job").query(Integer.class).single();
+        var direct = local().manual(id, request);
+        assertEquals("USER_DEFINED", direct.model().get("origin"));
+        var recipe = new LinkedHashMap<>(direct.recipe());
+        recipe.put("instrument", "guitar");
+        recipe.put("bass", true);
+        var corrected =
+                local().correct(
+                                direct.id(),
+                                new CorrectionCommand(
+                                        1L,
+                                        n.revision(),
+                                        draft.revision(),
+                                        draft.text(),
+                                        null,
+                                        recipe));
+        assertEquals(
+                jobs, db().sql("SELECT count(*) FROM local_job").query(Integer.class).single());
+        assertFalse(
+                ((Map<?, ?>) corrected.model().get("correction"))
+                        .containsKey("modelSuggestedRecipe"));
+        var revised =
+                local().correct(
+                                corrected.id(),
+                                new CorrectionCommand(
+                                        1L,
+                                        n.revision(),
+                                        draft.revision(),
+                                        draft.text(),
+                                        null,
+                                        recipe));
+        var receipt = gen().create(id, command(revised), "manual-creation-key");
+        var done = finished(receipt.attemptId());
+        assertEquals("SUCCEEDED", done.state());
+        var nextDraft =
+                ex().saveDraft(
+                                id,
+                                new Models.DraftUpdate(
+                                        "Keep my guitar",
+                                        done.resultRecordingId(),
+                                        ex().get(id).draft().revision()));
+        var next =
+                local().manual(
+                                id,
+                                new PlanCommand(
+                                        1L,
+                                        n.revision(),
+                                        nextDraft.revision(),
+                                        nextDraft.text(),
+                                        done.resultRecordingId()));
+        assertEquals(recipe, next.recipe());
+        assertEquals(recipe, next.basisRecipe());
+        assertEquals(
+                "STALE_DRAFT",
+                assertThrows(ApiProblem.class, () -> local().manual(id, request)).code());
+        assertEquals(
+                "NOTES_CHANGED",
+                assertThrows(
+                                ApiProblem.class,
+                                () ->
+                                        local().manual(
+                                                        id,
+                                                        new PlanCommand(
+                                                                1L,
+                                                                n.revision() + 1,
+                                                                nextDraft.revision(),
+                                                                nextDraft.text(),
+                                                                null)))
+                        .code());
+        assertEquals(
+                "LOCAL_BASIS_UNSUPPORTED",
+                assertThrows(
+                                ApiProblem.class,
+                                () ->
+                                        local().manual(
+                                                        id,
+                                                        new PlanCommand(
+                                                                1L,
+                                                                n.revision(),
+                                                                nextDraft.revision(),
+                                                                nextDraft.text(),
+                                                                "missing")))
+                        .code());
+        assertEquals(
+                jobs, db().sql("SELECT count(*) FROM local_job").query(Integer.class).single());
+    }
+
+    @Test
     void stalePlansAndUnpreviewedChangesCannotGenerate() throws Exception {
         String id = source();
         var n = confirmed(id);

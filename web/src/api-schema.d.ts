@@ -4,6 +4,23 @@
  */
 
 export interface paths {
+    "/api/explorations/{id}/local/manual-plans": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** @description Copies the selected basis arrangement into an immutable reviewable plan without calling a language model. Text is retained as user context, not interpreted. Corrections and explicit creation remain separate actions. */
+        post: operations["createManualLocalPlan"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/local/plans/{id}/corrections": {
         parameters: {
             query?: never;
@@ -772,6 +789,33 @@ export interface components {
 }
 export type $defs = Record<string, never>;
 export interface operations {
+    createManualLocalPlan: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["LocalPlanCommand"];
+            };
+        };
+        responses: {
+            /** @description Direct arrangement plan ready for user review */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["LocalPlan"];
+                };
+            };
+            default: components["responses"]["Problem"];
+        };
+    };
     correctLocalPlan: {
         parameters: {
             query?: never;

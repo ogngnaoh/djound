@@ -146,6 +146,14 @@ public class ApiController {
         return local.propose(id, command);
     }
 
+    @PostMapping("/explorations/{id}/local/manual-plans")
+    @ResponseStatus(HttpStatus.CREATED)
+    public com.djound.local.LocalModels.Plan manualLocalPlan(
+            @PathVariable String id,
+            @RequestBody com.djound.local.LocalModels.PlanCommand command) {
+        return local.manual(id, command);
+    }
+
     @PostMapping("/local/plans/{id}/corrections")
     @ResponseStatus(HttpStatus.CREATED)
     public com.djound.local.LocalModels.Plan correctLocalPlan(

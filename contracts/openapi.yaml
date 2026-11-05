@@ -6,6 +6,24 @@ info:
 servers:
   - url: /
 paths:
+  /api/explorations/{id}/local/manual-plans:
+    post:
+      operationId: createManualLocalPlan
+      description: Copies the selected basis arrangement into an immutable reviewable plan without calling a language model. Text is retained as user context, not interpreted. Corrections and explicit creation remain separate actions.
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/LocalPlanCommand' }
+      responses:
+        '201':
+          description: Direct arrangement plan ready for user review
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/LocalPlan' }
+        default: { $ref: '#/components/responses/Problem' }
   /api/local/plans/{id}/corrections:
     post:
       operationId: correctLocalPlan

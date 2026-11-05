@@ -318,57 +318,93 @@ public class LocalMusic {
                 });
     }
 
-    public Job propose(String id, PlanCommand command) {
-        enabled();
+    private Map<String, Object> planningPayload(String id, PlanCommand command) {
         if (command == null
                 || command.expectedSourceRevision() == null
                 || command.expectedDraftRevision() == null
                 || command.text() == null
                 || command.text().isBlank()
                 || command.text().codePointCount(0, command.text().length()) > 1000)
+            throw problem("INVALID_REQUEST", "Provide a direction of at most 1000 characters.");
+        var e = exploration(id, command.expectedSourceRevision());
+        currentNotes(id, command.expectedSourceRevision(), command.expectedNoteRevision(), true);
+        if (number(e, "draft_revision") != command.expectedDraftRevision())
+            throw problem("STALE_DRAFT", "The direction changed. Review the current draft.");
+        String basis =
+                command.basisRecordingId() == null
+                        ? (String) e.get("original_id")
+                        : command.basisRecordingId();
+        if (!db.sql(
+                        "SELECT EXISTS(SELECT 1 FROM recording WHERE id=? AND exploration_id=? AND"
+                                + " (id=? OR (kind='RENDITION' AND provenance='LOCAL')))")
+                .params(basis, id, e.get("original_id"))
+                .query(Boolean.class)
+                .single())
             throw problem(
-                    "INVALID_REQUEST",
-                    "Describe a supported instrument or backing change in at most 1000"
-                            + " characters.");
+                    "LOCAL_BASIS_UNSUPPORTED",
+                    "Choose the original or a local arrangement as the basis.");
+        Map<String, Object> payload = new LinkedHashMap<>();
+        payload.put("schemaVersion", 1);
+        payload.put("operation", "plan");
+        payload.put("prompt", command.text());
+        payload.put("parentRecipe", basisRecipe(basis));
+        payload.put("draftRevision", command.expectedDraftRevision());
+        payload.put("basisRecordingId", basis);
+        payload.put("sourceRecordingId", e.get("original_id"));
+        return payload;
+    }
+
+    public Job propose(String id, PlanCommand command) {
+        enabled();
         return tx.execute(
                 s -> {
                     guard();
                     idle();
-                    var e = exploration(id, command.expectedSourceRevision());
-                    Notes n =
-                            currentNotes(
+                    var payload = planningPayload(id, command);
+                    return accept(
+                            id,
+                            "PLAN",
+                            command.expectedSourceRevision(),
+                            command.expectedNoteRevision(),
+                            payload);
+                });
+    }
+
+    /** Copy the chosen basis into a reviewable plan without any model execution. */
+    public Plan manual(String id, PlanCommand command) {
+        enabled();
+        return tx.execute(
+                s -> {
+                    guard();
+                    idle();
+                    var payload = planningPayload(id, command);
+                    String planId = "plan_" + UUID.randomUUID();
+                    db.sql(
+                                    "INSERT INTO"
+                                        + " local_plan(id,exploration_id,source_recording_id,source_revision,note_revision,draft_revision,basis_recording_id,submitted_text,recipe_json,basis_recipe_json,summary,warnings_json,can_generate,model_json)"
+                                        + " VALUES(?,?,?,?,?,?,?,?,?,?,?,?,true,?)")
+                            .params(
+                                    planId,
                                     id,
+                                    payload.get("sourceRecordingId"),
                                     command.expectedSourceRevision(),
                                     command.expectedNoteRevision(),
-                                    true);
-                    if (number(e, "draft_revision") != command.expectedDraftRevision())
-                        throw problem(
-                                "STALE_DRAFT", "The direction changed. Review the current draft.");
-                    String basis =
-                            command.basisRecordingId() == null
-                                    ? (String) e.get("original_id")
-                                    : command.basisRecordingId();
-                    if (!db.sql(
-                                    "SELECT EXISTS(SELECT 1 FROM recording WHERE id=? AND"
-                                            + " exploration_id=? AND (id=? OR (kind='RENDITION' AND"
-                                            + " provenance='LOCAL')))")
-                            .params(basis, id, e.get("original_id"))
-                            .query(Boolean.class)
-                            .single())
-                        throw problem(
-                                "LOCAL_BASIS_UNSUPPORTED",
-                                "Choose the original or a local arrangement as the basis. Legacy"
-                                    + " live/sample versions have no local arrangement recipe.");
-                    Map<String, Object> payload = new LinkedHashMap<>();
-                    payload.put("schemaVersion", 1);
-                    payload.put("operation", "plan");
-                    payload.put("prompt", command.text());
-                    payload.put("parentRecipe", basisRecipe(basis));
-                    payload.put("draftRevision", command.expectedDraftRevision());
-                    payload.put("basisRecordingId", basis);
-                    payload.put("sourceRecordingId", e.get("original_id"));
-                    return accept(
-                            id, "PLAN", command.expectedSourceRevision(), n.revision(), payload);
+                                    command.expectedDraftRevision(),
+                                    payload.get("basisRecordingId"),
+                                    command.text(),
+                                    write(payload.get("parentRecipe")),
+                                    write(payload.get("parentRecipe")),
+                                    "Choose your arrangement. These settings start from the"
+                                            + " selected version; your words have not been"
+                                            + " interpreted.",
+                                    write(
+                                            List.of(
+                                                    "Direct controls: review and save your choices"
+                                                        + " before creating. No language model was"
+                                                        + " called.")),
+                                    write(Map.of("origin", "USER_DEFINED")))
+                            .update();
+                    return plan(planId);
                 });
     }
 
@@ -469,10 +505,12 @@ public class LocalMusic {
                                     null,
                                     id));
                     Map<String, Object> provenance = new LinkedHashMap<>(parent.model());
+                    boolean manual = "USER_DEFINED".equals(parent.model().get("origin"));
                     Object originalId = parent.id(), originalRecipe = parent.recipe();
                     if (parent.model().get("correction") instanceof Map<?, ?> previous) {
                         originalId = previous.get("originalPlanId");
-                        originalRecipe = previous.get("modelSuggestedRecipe");
+                        originalRecipe =
+                                previous.get(manual ? "initialRecipe" : "modelSuggestedRecipe");
                     }
                     provenance.put(
                             "correction",
@@ -483,7 +521,7 @@ public class LocalMusic {
                                     parent.id(),
                                     "originalPlanId",
                                     originalId,
-                                    "modelSuggestedRecipe",
+                                    manual ? "initialRecipe" : "modelSuggestedRecipe",
                                     originalRecipe,
                                     "editedFromRecipe",
                                     parent.recipe()));
@@ -507,9 +545,13 @@ public class LocalMusic {
                                             + " unchanged.",
                                     write(
                                             List.of(
-                                                    "You edited these controls; they may differ"
-                                                        + " from the model's interpretation of your"
-                                                        + " words.")),
+                                                    manual
+                                                            ? "Direct arrangement choices; no"
+                                                                    + " language model was called."
+                                                            : "You edited these controls; they may"
+                                                                    + " differ from the model's"
+                                                                    + " interpretation of your"
+                                                                    + " words.")),
                                     write(provenance))
                             .update();
                     return plan(corrected);
