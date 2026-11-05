@@ -4,6 +4,151 @@
  */
 
 export interface paths {
+    "/api/local/plans/{id}/corrections": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** @description Creates an immutable user-edited plan without invoking the language model. Preserves the original model suggestion and requires the same current source, confirmed notes, draft, text and basis. */
+        post: operations["correctLocalPlan"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/explorations/{id}/local": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["getLocalMusic"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/explorations/{id}/local/transcriptions": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: operations["transcribeLocal"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/explorations/{id}/local/notes": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put: operations["saveLocalNotes"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/explorations/{id}/local/previews": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: operations["previewLocalNotes"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/explorations/{id}/local/plans": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: operations["proposeLocalPlan"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/local/jobs/{id}/cancel": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: operations["cancelLocalPreparation"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/attempts/{id}/cancel": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: operations["cancelLocalCreation"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/local/jobs/{id}/audio": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["getLocalPreview"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/workspace": {
         parameters: {
             query?: never;
@@ -295,7 +440,7 @@ export interface components {
         };
         Workspace: {
             /** @enum {string} */
-            mode: "UNCONFIGURED" | "FIXTURE" | "LIVE";
+            mode: "UNCONFIGURED" | "FIXTURE" | "LIVE" | "LOCAL";
             /** @enum {string} */
             configuration: "UNCONFIGURED" | "CONFIGURED";
             /** @enum {string} */
@@ -333,7 +478,7 @@ export interface components {
             /** Format: date-time */
             occurredAt: string;
             /** @enum {string} */
-            provenance: "FIXTURE" | "LIVE";
+            provenance: "FIXTURE" | "LIVE" | "LOCAL";
         };
         /** @description Installation-bound authorization for live submissions, separate from unknown provider quota. Limit sums optional legacy authorization and explicit append-only operator grants. Reservation consumes a slot before transmission, with no refund or automatic replenishment. */
         SubmissionAllowance: {
@@ -362,7 +507,7 @@ export interface components {
             sha256: string;
             mediaUrl: string;
             /** @enum {string} */
-            provenance: "ORIGINAL" | "FIXTURE" | "LIVE";
+            provenance: "ORIGINAL" | "FIXTURE" | "LIVE" | "LOCAL";
             kept: boolean;
             direction: string | null;
             requestId: string | null;
@@ -417,6 +562,8 @@ export interface components {
             replayed: boolean;
         };
         CreateRequestCommand: {
+            /** @description Required in LOCAL mode; explicitly approves the immutable source/note/draft/basis-bound plan. */
+            localPlanId?: string | null;
             text: string;
             basisRecordingId: string | null;
             /** Format: int64 */
@@ -450,7 +597,7 @@ export interface components {
             assemblerVersion: string;
             adapterConfigurationId: string;
             /** @enum {string} */
-            provenance: "FIXTURE" | "LIVE";
+            provenance: "FIXTURE" | "LIVE" | "LOCAL";
             /** Format: date-time */
             createdAt: string;
         };
@@ -508,6 +655,101 @@ export interface components {
             recordingId: string;
             unavailable: boolean;
         };
+        LocalNote: {
+            start: number;
+            end: number;
+            pitch: number;
+            velocity: number;
+        };
+        LocalNotes: {
+            revision: number;
+            sourceRevision: number;
+            /** @enum {string} */
+            status: "PROPOSED" | "CONFIRMED";
+            notes: components["schemas"]["LocalNote"][];
+            durationSeconds: number;
+            previewUrl: string | null;
+        };
+        LocalJob: {
+            id: string;
+            /** @enum {string} */
+            kind: "TRANSCRIBE" | "PREVIEW" | "PLAN";
+            /** @enum {string} */
+            state: "ACCEPTED" | "RUNNING" | "SUCCEEDED" | "FAILED";
+            sourceRevision: number;
+            noteRevision: number | null;
+            outcomeCode: string | null;
+            detail: string | null;
+            /** Format: date-time */
+            updatedAt: string;
+        };
+        LocalRecipe: {
+            /** @enum {string} */
+            instrument: "piano" | "electric_piano" | "guitar";
+            bass: boolean;
+            drums: boolean;
+            /** @enum {string} */
+            density: "sparse" | "steady";
+            /** @enum {string} */
+            backingVolume: "soft" | "normal";
+            /**
+             * @description Backing-only pulse; does not retime melody notes.
+             * @constant
+             */
+            bpm: 100;
+        };
+        LocalPlan: {
+            id: string;
+            noteRevision: number;
+            sourceRevision: number;
+            draftRevision: number;
+            text: string;
+            basisRecordingId: string;
+            recipe: components["schemas"]["LocalRecipe"];
+            basisRecipe: components["schemas"]["LocalRecipe"];
+            summary: string;
+            canGenerate: boolean;
+            warnings: string[];
+            model: {
+                [key: string]: unknown;
+            };
+        };
+        LocalState: {
+            available: boolean;
+            unavailableReason: string | null;
+            activeJob: components["schemas"]["LocalJob"] | null;
+            latestJob: components["schemas"]["LocalJob"] | null;
+            notes: components["schemas"]["LocalNotes"] | null;
+            plan: components["schemas"]["LocalPlan"] | null;
+        };
+        LocalSourceCommand: {
+            expectedSourceRevision: number;
+        };
+        LocalRevisionCommand: {
+            expectedSourceRevision: number;
+            expectedNoteRevision: number;
+        };
+        LocalNotesCommand: {
+            expectedSourceRevision: number;
+            expectedNoteRevision: number;
+            notes: components["schemas"]["LocalNote"][];
+            confirm: boolean;
+        };
+        LocalPlanCommand: {
+            expectedSourceRevision: number;
+            expectedNoteRevision: number;
+            expectedDraftRevision: number;
+            text: string;
+            basisRecordingId: string | null;
+        };
+        LocalCorrectionCommand: {
+            expectedSourceRevision: number;
+            expectedNoteRevision: number;
+            expectedDraftRevision: number;
+            text: string;
+            basisRecordingId: string | null;
+            recipe: components["schemas"]["LocalRecipe"];
+        };
     };
     responses: {
         /** @description Typed recoverable application error */
@@ -530,6 +772,233 @@ export interface components {
 }
 export type $defs = Record<string, never>;
 export interface operations {
+    correctLocalPlan: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["LocalCorrectionCommand"];
+            };
+        };
+        responses: {
+            /** @description A new user-corrected plan, still requiring explicit Create confirmation */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["LocalPlan"];
+                };
+            };
+            default: components["responses"]["Problem"];
+        };
+    };
+    getLocalMusic: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Durable local notes, preparation state and current proposed changes */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["LocalState"];
+                };
+            };
+            default: components["responses"]["Problem"];
+        };
+    };
+    transcribeLocal: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["LocalSourceCommand"];
+            };
+        };
+        responses: {
+            /** @description Saved local operation */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["LocalJob"];
+                };
+            };
+            default: components["responses"]["Problem"];
+        };
+    };
+    saveLocalNotes: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["LocalNotesCommand"];
+            };
+        };
+        responses: {
+            /** @description Saved local operation */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["LocalNotes"];
+                };
+            };
+            default: components["responses"]["Problem"];
+        };
+    };
+    previewLocalNotes: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["LocalRevisionCommand"];
+            };
+        };
+        responses: {
+            /** @description Saved local operation */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["LocalJob"];
+                };
+            };
+            default: components["responses"]["Problem"];
+        };
+    };
+    proposeLocalPlan: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["LocalPlanCommand"];
+            };
+        };
+        responses: {
+            /** @description Saved local operation */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["LocalJob"];
+                };
+            };
+            default: components["responses"]["Problem"];
+        };
+    };
+    cancelLocalPreparation: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Cancelled or already terminal operation */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["LocalJob"];
+                };
+            };
+            default: components["responses"]["Problem"];
+        };
+    };
+    cancelLocalCreation: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Cancelled or already terminal operation */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Attempt"];
+                };
+            };
+            default: components["responses"]["Problem"];
+        };
+    };
+    getLocalPreview: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Immutable validated note preview */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "audio/wav": string;
+                };
+            };
+            default: components["responses"]["Problem"];
+        };
+    };
     getWorkspace: {
         parameters: {
             query?: never;

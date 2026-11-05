@@ -71,7 +71,8 @@ class LiveOperationsIntegrationTest {
                                         + origin
                                         + "/gradio_api/file=/tmp/gradio/result.wav\",\"meta\":{\"_type\":\"gradio.FileData\"}}";
                         response =
-                                ("data: {\"msg\":\"process_completed\",\"event_id\":\"test-event\",\"success\":true,\"output\":{\"data\":["
+                                ("data:"
+                                     + " {\"msg\":\"process_completed\",\"event_id\":\"test-event\",\"success\":true,\"output\":{\"data\":["
                                                 + item
                                                 + ","
                                                 + item
@@ -259,7 +260,9 @@ class LiveOperationsIntegrationTest {
                         app.getBean(FixtureOperations.class),
                         publication(),
                         app.getBean(FixtureCheckpoints.class),
-                        operations())
+                        operations(),
+                        app.getBean(com.djound.local.LocalMusic.class),
+                        app.getBean(com.djound.local.LocalWorker.class))
                 .tick();
         var failed = service().get(receipt.attemptId());
         if (extraSamples == 0) {

@@ -38,7 +38,7 @@ public class PublicationStore {
         boolean valid =
                 jdbc.sql(
                                 "SELECT EXISTS(SELECT 1 FROM generation_attempt WHERE id=? AND"
-                                        + " version=? AND state='SAVING')")
+                                        + " version=? AND state='SAVING' AND NOT cancel_requested)")
                         .params(owner.id(), owner.version())
                         .query(Boolean.class)
                         .single();
@@ -81,7 +81,10 @@ public class PublicationStore {
             // Partial bodies are never resumed as if complete; only observation/download is
             // repeated.
             Files.deleteIfExists(temporary);
-            retriever.retrieve(operation, temporary, owner);
+            if (owner.request().provenance().equals("LOCAL")) {
+                Path local = Path.of(java.net.URI.create(operation.resultUrl()));
+                Files.copy(local, temporary);
+            } else retriever.retrieve(operation, temporary, owner);
             validated = media.validateFile(temporary, (String) journal.get("file_name"));
             int count =
                     jdbc.sql(
@@ -109,7 +112,9 @@ public class PublicationStore {
                     || !validated.hash().equals(journal.get("sha256")))
                 throw invalid("The surviving result does not match its validated hash and size.");
         }
-        if (owner.request().provenance().equals("LIVE") && validated.preciseSeconds() > 30.0)
+        if ((owner.request().provenance().equals("LIVE") && validated.preciseSeconds() > 30.0)
+                || (owner.request().provenance().equals("LOCAL")
+                        && validated.preciseSeconds() > 12.0))
             throw invalid(
                     "The live result exceeds the supported 30-second bound. Audio is never"
                             + " cropped.");
@@ -156,7 +161,7 @@ public class PublicationStore {
                             .params(
                                     recording,
                                     owner.explorationId(),
-                                    (owner.request().provenance().equals("LIVE")
+                                    (!owner.request().provenance().equals("FIXTURE")
                                                     ? "Version "
                                                     : "Sample version ")
                                             + (ordinal + 1),
@@ -178,7 +183,8 @@ public class PublicationStore {
                     if (jdbc.sql(
                                             "UPDATE generation_attempt SET"
                                                 + " state='SUCCEEDED',version=version+1,result_recording_id=?,updated_at=?"
-                                                + " WHERE id=? AND version=? AND state='SAVING'")
+                                                + " WHERE id=? AND version=? AND state='SAVING' AND"
+                                                + " NOT cancel_requested")
                                     .params(recording, now, owner.id(), owner.version())
                                     .update()
                             != 1) throw new StaleAttemptOwner();

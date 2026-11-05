@@ -36,6 +36,7 @@ class RuntimeCheckTest(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, 'DJOUND_MODE'):
             runtime.configuration({'DJOUND_MODE': 'AUTO_LIVE'})
         self.assertEqual((18093, 'FIXTURE'), runtime.configuration({'DJOUND_PORT': '18093', 'DJOUND_MODE': 'FIXTURE'}))
+        self.assertEqual((8080, 'LOCAL'), runtime.configuration({'DJOUND_MODE': 'LOCAL'}))
 
     def test_status_uses_only_local_read_and_rejects_a_different_service(self):
         requests = []

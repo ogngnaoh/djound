@@ -20,6 +20,8 @@ public class GenerationRunner {
     private final FixtureOperations operations;
     private final PublicationStore publications;
     private final LiveOperations live;
+    private final com.djound.local.LocalMusic local;
+    private final com.djound.local.LocalWorker worker;
     private final FixtureCheckpoints checkpoints;
     private final AtomicBoolean running = new AtomicBoolean();
 
@@ -28,8 +30,12 @@ public class GenerationRunner {
             FixtureOperations operations,
             PublicationStore publications,
             FixtureCheckpoints checkpoints,
-            LiveOperations live)
+            LiveOperations live,
+            com.djound.local.LocalMusic local,
+            com.djound.local.LocalWorker worker)
             throws java.io.IOException {
+        this.local = local;
+        this.worker = worker;
         this.live = live;
         this.service = service;
         this.operations = operations;
@@ -85,6 +91,56 @@ public class GenerationRunner {
         }
     }
 
+    private void runLocal(Models.Attempt owner) {
+        try {
+            if (!owner.state().equals("ACCEPTED")) {
+                service.fail(
+                        owner,
+                        "PROCESS_INTERRUPTED",
+                        "Local creation was interrupted; retry the saved plan deliberately.");
+                return;
+            }
+            owner = service.claimNext();
+            if (owner == null) return;
+            owner = service.transition(owner, "RUNNING");
+            final String id = owner.id();
+            var result =
+                    worker.execute(
+                            id,
+                            local.renderRequest(
+                                    service.localPlanId(owner.requestId()), owner.explorationId()),
+                            () -> service.cancellationRequested(id));
+            var path = worker.audio(id, result.path("audioPath").asText());
+            if (service.cancellationRequested(id)) return;
+            owner = service.beginSaving(owner);
+            publications.publish(
+                    owner,
+                    new FixtureOperations.Operation(
+                            id,
+                            "SUCCESS",
+                            "local-version.wav",
+                            path.toUri().toString(),
+                            Instant.now()));
+        } catch (StaleAttemptOwner ignored) {
+        } catch (Exception error) {
+            if (owner != null
+                    && service.fail(
+                            owner,
+                            error instanceof ApiProblem p ? p.code() : "GENERATION_FAILED",
+                            error instanceof ApiProblem
+                                    ? error.getMessage()
+                                    : "Local rendering could not finish. Your confirmed notes and"
+                                          + " plan remain saved.")) {
+                try {
+                    publications.discardFailed(owner);
+                } catch (java.io.IOException cleanup) {
+                    log.warn("Deferred local cleanup", cleanup);
+                }
+            }
+            if (error instanceof InterruptedException) Thread.currentThread().interrupt();
+        }
+    }
+
     @Scheduled(fixedDelay = 250, initialDelay = 250)
     public void tick() {
         if (!running.compareAndSet(false, true)) return;
@@ -92,6 +148,10 @@ public class GenerationRunner {
         try {
             owner = service.active();
             if (owner == null) return;
+            if (owner.request().provenance().equals("LOCAL")) {
+                runLocal(owner);
+                return;
+            }
             if (owner.request().provenance().equals("LIVE")) {
                 runLive(owner);
                 return;

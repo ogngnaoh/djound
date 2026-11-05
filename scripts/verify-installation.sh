@@ -32,7 +32,7 @@ export DJOUND_ALLOWED_ORIGINS="http://127.0.0.1:$test_port"
 export DJOUND_TEST_BASE_URL="http://127.0.0.1:$test_port"
 export DJOUND_TEST_ALLOW_WRITE=1
 export DJOUND_MODE=UNCONFIGURED
-java_options=(-Djdk.httpclient.redirects.retrylimit=1 -Djdk.httpclient.disableRetryConnect=true -Djdk.httpclient.enableAllMethodRetry=false)
+java_options=(-Xmx768m -Djdk.httpclient.redirects.retrylimit=1 -Djdk.httpclient.disableRetryConnect=true -Djdk.httpclient.enableAllMethodRetry=false)
 if [[ "$check_mode" == live-policy ]]; then
   export DJOUND_MODE=LIVE
 fi
@@ -101,7 +101,7 @@ jar, log, directory, expected, port = sys.argv[1:]
 env = dict(os.environ, DJOUND_DATA_DIR=directory, DJOUND_PORT=port)
 with open(log, 'w') as output:
     try:
-        options = ['-Djdk.httpclient.redirects.retrylimit=1', '-Djdk.httpclient.disableRetryConnect=true', '-Djdk.httpclient.enableAllMethodRetry=false']
+        options = ['-Xmx768m', '-Djdk.httpclient.redirects.retrylimit=1', '-Djdk.httpclient.disableRetryConnect=true', '-Djdk.httpclient.enableAllMethodRetry=false']
         result = subprocess.run(['java', *options, '-jar', jar], env=env, stdout=output, stderr=subprocess.STDOUT, timeout=30)
     except subprocess.TimeoutExpired:
         raise SystemExit('Guard failed to refuse startup within 30 seconds: ' + log)

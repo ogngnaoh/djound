@@ -365,7 +365,9 @@ class GenerationIntegrationTest {
                         failing,
                         app.getBean(PublicationStore.class),
                         app.getBean(FixtureCheckpoints.class),
-                        app.getBean(LiveOperations.class))
+                        app.getBean(LiveOperations.class),
+                        app.getBean(com.djound.local.LocalMusic.class),
+                        app.getBean(com.djound.local.LocalWorker.class))
                 .tick();
         var attempt = finished(accepted.attemptId());
         assertEquals("FAILED", attempt.state());

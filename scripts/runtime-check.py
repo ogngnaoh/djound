@@ -27,8 +27,8 @@ def configuration(environment):
     if not re.fullmatch(r'[0-9]+', raw_port) or not 1 <= int(raw_port) <= 65535:
         raise ValueError('DJOUND_PORT must be an integer from 1 through 65535.')
     mode = environment.get('DJOUND_MODE', 'UNCONFIGURED')
-    if mode not in {'UNCONFIGURED', 'FIXTURE', 'LIVE'}:
-        raise ValueError('DJOUND_MODE must be UNCONFIGURED, FIXTURE, or LIVE.')
+    if mode not in {'UNCONFIGURED', 'FIXTURE', 'LIVE', 'LOCAL'}:
+        raise ValueError('DJOUND_MODE must be UNCONFIGURED, FIXTURE, LIVE, or LOCAL.')
     return int(raw_port), mode
 
 
@@ -72,7 +72,7 @@ def read_status(port):
             if len(data) > 65536:
                 raise ValueError('Unexpected workspace response size.')
         workspace = json.loads(data)
-        if not isinstance(workspace, dict) or workspace.get('mode') not in {'UNCONFIGURED', 'FIXTURE', 'LIVE'}:
+        if not isinstance(workspace, dict) or workspace.get('mode') not in {'UNCONFIGURED', 'FIXTURE', 'LIVE', 'LOCAL'}:
             raise ValueError('The service is not a recognized Djound workspace.')
         allowance = workspace.get('submissionAllowance')
         if allowance is not None and (not isinstance(allowance, dict) or any(
@@ -115,6 +115,17 @@ def check(port, mode):
         ancestor = ancestor.parent
     if (data.exists() and not data.is_dir()) or not ancestor.is_dir() or not os.access(ancestor, os.W_OK):
         problems.append('DJOUND_DATA_DIR must be a directory in a writable location; no files were changed.')
+    if mode == 'LOCAL':
+        python = os.environ.get('DJOUND_LOCAL_PYTHON', str(ROOT / '.runtime/local-engine/venv/bin/python'))
+        worker = os.environ.get('DJOUND_LOCAL_WORKER', str(ROOT / 'local-engine/worker.py'))
+        try:
+            result = command([python, worker, '--check'], timeout=30)
+            ready = json.loads(result.stdout)
+            if ready.get('ready') is not True:
+                raise ValueError('Local engine readiness failed.')
+        except (OSError, ValueError, subprocess.SubprocessError):
+            problems.append('Local music tools are not ready. Complete the setup in local-engine/README.md; '
+                            'the readiness check never downloads or runs models.')
     try:
         host = os.environ.get('DOCKER_HOST', '')
         endpoint = command(['docker', 'context', 'inspect', '--format', '{{.Endpoints.docker.Host}}']).stdout.strip()

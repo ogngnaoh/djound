@@ -87,6 +87,7 @@ public class Explorations {
                                     true);
                         }
                         generations.requireLiveDuration(upload);
+                        generations.requireNoLocalPreparation();
                         if (workspace.get("active_attempt_id") != null)
                             throw new ApiProblem(
                                     409,
@@ -236,6 +237,7 @@ public class Explorations {
                                         .findFirst()
                                         .orElseThrow(Explorations::missing);
                         generations.requireLiveDuration(upload);
+                        generations.requireNoLocalPreparation();
                         if (workspace.get("active_attempt_id") != null) {
                             throw new ApiProblem(
                                     409,

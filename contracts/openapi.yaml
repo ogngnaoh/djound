@@ -6,6 +6,140 @@ info:
 servers:
   - url: /
 paths:
+  /api/local/plans/{id}/corrections:
+    post:
+      operationId: correctLocalPlan
+      description: Creates an immutable user-edited plan without invoking the language model. Preserves the original model suggestion and requires the same current source, confirmed notes, draft, text and basis.
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/LocalCorrectionCommand' }
+      responses:
+        '201':
+          description: A new user-corrected plan, still requiring explicit Create confirmation
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/LocalPlan' }
+        default: { $ref: '#/components/responses/Problem' }
+  /api/explorations/{id}/local:
+    get:
+      operationId: getLocalMusic
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string } }
+      responses:
+        '200':
+          description: Durable local notes, preparation state and current proposed changes
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/LocalState' }
+        default: { $ref: '#/components/responses/Problem' }
+  /api/explorations/{id}/local/transcriptions:
+    post:
+      operationId: transcribeLocal
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/LocalSourceCommand' }
+      responses:
+        '202':
+          description: Saved local operation
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/LocalJob' }
+        default: { $ref: '#/components/responses/Problem' }
+  /api/explorations/{id}/local/notes:
+    put:
+      operationId: saveLocalNotes
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/LocalNotesCommand' }
+      responses:
+        '200':
+          description: Saved local operation
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/LocalNotes' }
+        default: { $ref: '#/components/responses/Problem' }
+  /api/explorations/{id}/local/previews:
+    post:
+      operationId: previewLocalNotes
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/LocalRevisionCommand' }
+      responses:
+        '202':
+          description: Saved local operation
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/LocalJob' }
+        default: { $ref: '#/components/responses/Problem' }
+  /api/explorations/{id}/local/plans:
+    post:
+      operationId: proposeLocalPlan
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/LocalPlanCommand' }
+      responses:
+        '202':
+          description: Saved local operation
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/LocalJob' }
+        default: { $ref: '#/components/responses/Problem' }
+  /api/local/jobs/{id}/cancel:
+    post:
+      operationId: cancelLocalPreparation
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string } }
+      responses:
+        '200':
+          description: Cancelled or already terminal operation
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/LocalJob' }
+        default: { $ref: '#/components/responses/Problem' }
+  /api/attempts/{id}/cancel:
+    post:
+      operationId: cancelLocalCreation
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string } }
+      responses:
+        '200':
+          description: Cancelled or already terminal operation
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Attempt' }
+        default: { $ref: '#/components/responses/Problem' }
+  /api/local/jobs/{id}/audio:
+    get:
+      operationId: getLocalPreview
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string } }
+      responses:
+        '200':
+          description: Immutable validated note preview
+          content:
+            audio/wav:
+              schema: { type: string, format: binary }
+        default: { $ref: '#/components/responses/Problem' }
   /api/workspace:
     get:
       operationId: getWorkspace
@@ -330,7 +464,7 @@ components:
       type: object
       required: [mode, configuration, eligibility, reasonCode, observedAt, providerResetAt, nextProbeAt, supportsStatusCheck, canRecheck, canSubmit, canSubmitWithAcknowledgement, canCreateExploration, activeAttemptId, activeExplorationId, unknownOutcome, submissionAllowance, fixtureControlsEnabled, inputPolicy]
       properties:
-        mode: { type: string, enum: [UNCONFIGURED, FIXTURE, LIVE] }
+        mode: { type: string, enum: [UNCONFIGURED, FIXTURE, LIVE, LOCAL] }
         configuration: { type: string, enum: [UNCONFIGURED, CONFIGURED] }
         eligibility: { type: string, enum: [ELIGIBLE, BLOCKED, UNKNOWN] }
         reasonCode: { type: [string, 'null'] }
@@ -371,7 +505,7 @@ components:
         attemptId: { type: string }
         detail: { type: string }
         occurredAt: { type: string, format: date-time }
-        provenance: { type: string, enum: [FIXTURE, LIVE] }
+        provenance: { type: string, enum: [FIXTURE, LIVE, LOCAL] }
     SubmissionAllowance:
       type: object
       description: Installation-bound authorization for live submissions, separate from unknown provider quota. Limit sums optional legacy authorization and explicit append-only operator grants. Reservation consumes a slot before transmission, with no refund or automatic replenishment.
@@ -398,7 +532,7 @@ components:
         codec: { type: string }
         sha256: { type: string }
         mediaUrl: { type: string }
-        provenance: { type: string, enum: [ORIGINAL, FIXTURE, LIVE] }
+        provenance: { type: string, enum: [ORIGINAL, FIXTURE, LIVE, LOCAL] }
         kept: { type: boolean }
         direction: { type: [string, 'null'] }
         requestId: { type: [string, 'null'] }
@@ -463,7 +597,8 @@ components:
       type: object
       required: [text, basisRecordingId, expectedSourceRevision, expectedDraftRevision]
       properties:
-        text: { type: string, minLength: 1, maxLength: 4000 }
+        localPlanId: { type: [string, 'null'], description: Required in LOCAL mode; explicitly approves the immutable source/note/draft/basis-bound plan. }
+        text: { type: string, minLength: 1, maxLength: 1000 }
         basisRecordingId: { type: [string, 'null'] }
         expectedSourceRevision: { type: integer, format: int64, minimum: 1 }
         expectedDraftRevision: { type: integer, format: int64, minimum: 1 }
@@ -496,7 +631,7 @@ components:
         assembledInstructions: { type: string }
         assemblerVersion: { type: string }
         adapterConfigurationId: { type: string }
-        provenance: { type: string, enum: [FIXTURE, LIVE] }
+        provenance: { type: string, enum: [FIXTURE, LIVE, LOCAL] }
         createdAt: { type: string, format: date-time }
     Attempt:
       type: object
@@ -572,3 +707,112 @@ components:
       properties:
         recordingId: { type: string, minLength: 1 }
         unavailable: { type: boolean }
+
+    LocalNote:
+      type: object
+      additionalProperties: false
+      required: [start, end, pitch, velocity]
+      properties:
+        start: { type: number, minimum: 0, maximum: 12 }
+        end: { type: number, exclusiveMinimum: 0, maximum: 12 }
+        pitch: { type: integer, minimum: 0, maximum: 127 }
+        velocity: { type: integer, minimum: 1, maximum: 127 }
+    LocalNotes:
+      type: object
+      required: [revision, sourceRevision, status, notes, durationSeconds, previewUrl]
+      properties:
+        revision: { type: integer }
+        sourceRevision: { type: integer }
+        status: { type: string, enum: [PROPOSED, CONFIRMED] }
+        notes: { type: array, items: { $ref: '#/components/schemas/LocalNote' } }
+        durationSeconds: { type: number }
+        previewUrl: { type: [string, 'null'] }
+    LocalJob:
+      type: object
+      required: [id, kind, state, sourceRevision, noteRevision, outcomeCode, detail, updatedAt]
+      properties:
+        id: { type: string }
+        kind: { type: string, enum: [TRANSCRIBE, PREVIEW, PLAN] }
+        state: { type: string, enum: [ACCEPTED, RUNNING, SUCCEEDED, FAILED] }
+        sourceRevision: { type: integer }
+        noteRevision: { type: [integer, 'null'] }
+        outcomeCode: { type: [string, 'null'] }
+        detail: { type: [string, 'null'] }
+        updatedAt: { type: string, format: date-time }
+    LocalRecipe:
+      type: object
+      additionalProperties: false
+      required: [instrument, bass, drums, density, backingVolume, bpm]
+      properties:
+        instrument: { type: string, enum: [piano, electric_piano, guitar] }
+        bass: { type: boolean }
+        drums: { type: boolean }
+        density: { type: string, enum: [sparse, steady] }
+        backingVolume: { type: string, enum: [soft, normal] }
+        bpm: { type: integer, const: 100, description: Backing-only pulse; does not retime melody notes. }
+    LocalPlan:
+      type: object
+      required: [id, noteRevision, sourceRevision, draftRevision, text, basisRecordingId, recipe, basisRecipe, summary, canGenerate, warnings, model]
+      properties:
+        id: { type: string }
+        noteRevision: { type: integer }
+        sourceRevision: { type: integer }
+        draftRevision: { type: integer }
+        text: { type: string }
+        basisRecordingId: { type: string }
+        recipe: { $ref: '#/components/schemas/LocalRecipe' }
+        basisRecipe: { $ref: '#/components/schemas/LocalRecipe' }
+        summary: { type: string }
+        canGenerate: { type: boolean }
+        warnings: { type: array, items: { type: string } }
+        model: { type: object, additionalProperties: true }
+    LocalState:
+      type: object
+      required: [available, unavailableReason, activeJob, latestJob, notes, plan]
+      properties:
+        available: { type: boolean }
+        unavailableReason: { type: [string, 'null'] }
+        activeJob: { anyOf: [{ $ref: '#/components/schemas/LocalJob' }, { type: 'null' }] }
+        latestJob: { anyOf: [{ $ref: '#/components/schemas/LocalJob' }, { type: 'null' }] }
+        notes: { anyOf: [{ $ref: '#/components/schemas/LocalNotes' }, { type: 'null' }] }
+        plan: { anyOf: [{ $ref: '#/components/schemas/LocalPlan' }, { type: 'null' }] }
+    LocalSourceCommand:
+      type: object
+      required: [expectedSourceRevision]
+      properties:
+        expectedSourceRevision: { type: integer, minimum: 1 }
+    LocalRevisionCommand:
+      type: object
+      required: [expectedSourceRevision, expectedNoteRevision]
+      properties:
+        expectedSourceRevision: { type: integer, minimum: 1 }
+        expectedNoteRevision: { type: integer, minimum: 1 }
+    LocalNotesCommand:
+      type: object
+      required: [expectedSourceRevision, expectedNoteRevision, notes, confirm]
+      properties:
+        expectedSourceRevision: { type: integer, minimum: 1 }
+        expectedNoteRevision: { type: integer, minimum: 1 }
+        notes: { type: array, minItems: 1, maxItems: 256, items: { $ref: '#/components/schemas/LocalNote' } }
+        confirm: { type: boolean }
+    LocalPlanCommand:
+      type: object
+      required: [expectedSourceRevision, expectedNoteRevision, expectedDraftRevision, text, basisRecordingId]
+      properties:
+        expectedSourceRevision: { type: integer, minimum: 1 }
+        expectedNoteRevision: { type: integer, minimum: 1 }
+        expectedDraftRevision: { type: integer, minimum: 1 }
+        text: { type: string, minLength: 1, maxLength: 1000 }
+        basisRecordingId: { type: [string, 'null'] }
+
+    LocalCorrectionCommand:
+      type: object
+      additionalProperties: false
+      required: [expectedSourceRevision, expectedNoteRevision, expectedDraftRevision, text, basisRecordingId, recipe]
+      properties:
+        expectedSourceRevision: { type: integer, minimum: 1 }
+        expectedNoteRevision: { type: integer, minimum: 1 }
+        expectedDraftRevision: { type: integer, minimum: 1 }
+        text: { type: string, minLength: 1, maxLength: 1000 }
+        basisRecordingId: { type: [string, 'null'] }
+        recipe: { $ref: '#/components/schemas/LocalRecipe' }

@@ -13,6 +13,7 @@ import java.util.*;
 @RequestMapping("/api")
 public class ApiController {
     private final Explorations explorations;
+    private final com.djound.local.LocalMusic local;
     private final MediaStore media;
     private final com.djound.generation.GenerationService generations;
     private final com.djound.generation.FixtureReviewControls controls;
@@ -23,7 +24,9 @@ public class ApiController {
             MediaStore media,
             com.djound.generation.GenerationService generations,
             com.djound.generation.FixtureReviewControls controls,
-            com.djound.availability.AvailabilityService availability) {
+            com.djound.availability.AvailabilityService availability,
+            com.djound.local.LocalMusic local) {
+        this.local = local;
         this.availability = availability;
         this.controls = controls;
         this.generations = generations;
@@ -38,6 +41,8 @@ public class ApiController {
         String active = activeAttempt == null ? null : activeAttempt.id();
         boolean configured = generations.configuration().configured();
         boolean live = generations.configuration().live();
+        boolean localMode = generations.configuration().local();
+        boolean preparation = local.busy();
         boolean allowed = generations.allowanceAvailable();
         result.put("submissionAllowance", generations.submissionAllowance());
         result.put("mode", generations.configuration().mode());
@@ -55,6 +60,7 @@ public class ApiController {
         result.put(
                 "canSubmit",
                 configured
+                        && !preparation
                         && allowed
                         && active == null
                         && unknown == null
@@ -62,11 +68,12 @@ public class ApiController {
         result.put(
                 "canSubmitWithAcknowledgement",
                 configured
+                        && !preparation
                         && allowed
                         && active == null
                         && unknown != null
                         && capacity.allowsSubmission());
-        result.put("canCreateExploration", active == null);
+        result.put("canCreateExploration", active == null && !preparation);
         result.put("activeAttemptId", active);
         result.put(
                 "activeExplorationId",
@@ -88,17 +95,84 @@ public class ApiController {
                                 "channels",
                                 List.of(1, 2),
                                 "maxTextCodePoints",
-                                4000,
+                                localMode ? 1000 : 4000,
                                 "providerCompatibilityKnown",
-                                live));
+                                live || localMode));
         inputPolicy.put("maxAssembledCodePoints", live ? 500 : 16000);
         String example =
                 new com.djound.generation.PromptAssembler().assemble("", "x").instructions();
         inputPolicy.put(
                 "instructionOverheadCodePoints", example.codePointCount(0, example.length()) - 1);
-        inputPolicy.put("providerMaxDurationMs", live ? 30000 : null);
+        inputPolicy.put(
+                "providerMaxDurationMs",
+                localMode ? Integer.valueOf(12000) : live ? Integer.valueOf(30000) : null);
         result.put("inputPolicy", inputPolicy);
         return result;
+    }
+
+    @GetMapping("/explorations/{id}/local")
+    public com.djound.local.LocalModels.State localState(@PathVariable String id) {
+        return local.state(id);
+    }
+
+    @PostMapping("/explorations/{id}/local/transcriptions")
+    @ResponseStatus(HttpStatus.ACCEPTED)
+    public com.djound.local.LocalModels.Job transcribe(
+            @PathVariable String id,
+            @RequestBody com.djound.local.LocalModels.SourceCommand command) {
+        return local.transcribe(id, command);
+    }
+
+    @PutMapping("/explorations/{id}/local/notes")
+    public com.djound.local.LocalModels.Notes saveLocalNotes(
+            @PathVariable String id,
+            @RequestBody com.djound.local.LocalModels.NotesCommand command) {
+        return local.saveNotes(id, command);
+    }
+
+    @PostMapping("/explorations/{id}/local/previews")
+    @ResponseStatus(HttpStatus.ACCEPTED)
+    public com.djound.local.LocalModels.Job previewNotes(
+            @PathVariable String id,
+            @RequestBody com.djound.local.LocalModels.RevisionCommand command) {
+        return local.preview(id, command);
+    }
+
+    @PostMapping("/explorations/{id}/local/plans")
+    @ResponseStatus(HttpStatus.ACCEPTED)
+    public com.djound.local.LocalModels.Job planLocal(
+            @PathVariable String id,
+            @RequestBody com.djound.local.LocalModels.PlanCommand command) {
+        return local.propose(id, command);
+    }
+
+    @PostMapping("/local/plans/{id}/corrections")
+    @ResponseStatus(HttpStatus.CREATED)
+    public com.djound.local.LocalModels.Plan correctLocalPlan(
+            @PathVariable String id,
+            @RequestBody com.djound.local.LocalModels.CorrectionCommand command) {
+        return local.correct(id, command);
+    }
+
+    @PostMapping("/local/jobs/{id}/cancel")
+    public com.djound.local.LocalModels.Job cancelPreparation(@PathVariable String id) {
+        return local.cancel(id);
+    }
+
+    @PostMapping("/attempts/{id}/cancel")
+    public Models.Attempt cancelLocalAttempt(@PathVariable String id) {
+        return generations.cancelLocal(id);
+    }
+
+    @GetMapping("/local/jobs/{id}/audio")
+    public ResponseEntity<FileSystemResource> localAudio(@PathVariable String id) throws Exception {
+        var path = local.previewAudio(id);
+        return ResponseEntity.ok()
+                .contentType(MediaType.parseMediaType("audio/wav"))
+                .contentLength(Files.size(path))
+                .header("Accept-Ranges", "bytes")
+                .header("Cache-Control", "private, max-age=31536000, immutable")
+                .body(new FileSystemResource(path));
     }
 
     @GetMapping("/explorations")

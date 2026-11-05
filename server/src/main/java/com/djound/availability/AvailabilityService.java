@@ -51,6 +51,8 @@ public class AvailabilityService {
     }
 
     public View view() {
+        if (configuration.local())
+            return new View("ELIGIBLE", "LOCAL_READY", null, null, null, false, false, true);
         return policy(
                 jdbc.sql(
                                 "SELECT * FROM "

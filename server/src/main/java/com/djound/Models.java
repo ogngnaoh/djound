@@ -66,13 +66,29 @@ public final class Models {
             String basisRecordingId,
             Long expectedSourceRevision,
             Long expectedDraftRevision,
-            String acknowledgedUnknownAttemptId) {
+            String acknowledgedUnknownAttemptId,
+            String localPlanId) {
+        public CreateRequestCommand(
+                String text,
+                String basisRecordingId,
+                Long expectedSourceRevision,
+                Long expectedDraftRevision,
+                String acknowledgedUnknownAttemptId) {
+            this(
+                    text,
+                    basisRecordingId,
+                    expectedSourceRevision,
+                    expectedDraftRevision,
+                    acknowledgedUnknownAttemptId,
+                    null);
+        }
+
         public CreateRequestCommand(
                 String text,
                 String basisRecordingId,
                 Long expectedSourceRevision,
                 Long expectedDraftRevision) {
-            this(text, basisRecordingId, expectedSourceRevision, expectedDraftRevision, null);
+            this(text, basisRecordingId, expectedSourceRevision, expectedDraftRevision, null, null);
         }
     }
 

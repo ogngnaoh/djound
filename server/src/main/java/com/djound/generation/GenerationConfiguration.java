@@ -10,9 +10,12 @@ public record GenerationConfiguration(String mode, long delayMs, boolean reviewC
             @Value("${djound.mode}") String mode,
             @Value("${djound.fixture-delay-ms}") long delayMs,
             @Value("${djound.fixture-review-controls}") boolean reviewControls) {
-        if (!mode.equals("UNCONFIGURED") && !mode.equals("FIXTURE") && !mode.equals("LIVE"))
+        if (!mode.equals("UNCONFIGURED")
+                && !mode.equals("FIXTURE")
+                && !mode.equals("LIVE")
+                && !mode.equals("LOCAL"))
             throw new IllegalArgumentException(
-                    "DJOUND_MODE must be UNCONFIGURED, FIXTURE, or LIVE");
+                    "DJOUND_MODE must be UNCONFIGURED, FIXTURE, LIVE, or LOCAL");
         if (delayMs < 0 || delayMs > 30000)
             throw new IllegalArgumentException(
                     "DJOUND_FIXTURE_DELAY_MS must be between 0 and 30000");
@@ -44,11 +47,17 @@ public record GenerationConfiguration(String mode, long delayMs, boolean reviewC
         return mode.equals("LIVE");
     }
 
+    public boolean local() {
+        return mode.equals("LOCAL");
+    }
+
     public boolean configured() {
-        return fixture() || live();
+        return fixture() || live() || local();
     }
 
     public String adapterId() {
-        return live() ? "melodyflow-anonymous-v1" : "scripted-samples-v1";
+        return local()
+                ? "local-notes-v1"
+                : live() ? "melodyflow-anonymous-v1" : "scripted-samples-v1";
     }
 }

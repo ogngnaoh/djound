@@ -29,9 +29,13 @@ if [[ -z "${DJOUND_ALLOWED_ORIGINS:-}" ]]; then
 fi
 # Also required when normal mode recovers a saved live result without resubmission.
 java_options=(
+  -Xmx768m
   -Djdk.httpclient.redirects.retrylimit=1
   -Djdk.httpclient.disableRetryConnect=true
   -Djdk.httpclient.enableAllMethodRetry=false
 )
 echo "Starting Djound. Open http://127.0.0.1:${DJOUND_PORT:-8080} after startup completes; Ctrl+C stops the app."
-exec java "${java_options[@]}" -jar "${jars[0]}"
+# Spring loads some classes lazily. Repackaging server/target must never replace
+# the bytes beneath a running JVM's classloader.
+runtime_jar="$(python3 scripts/prepare-launch.py "${jars[0]}" "$DJOUND_ROOT/.runtime/packages")"
+exec java "${java_options[@]}" -jar "$runtime_jar"

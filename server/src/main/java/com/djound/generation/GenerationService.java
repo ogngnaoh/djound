@@ -23,6 +23,8 @@ public class GenerationService {
     private final FixtureReviewControls controls;
     private final com.djound.availability.AvailabilityService availability;
     private final LiveAllowance allowance;
+    private final com.djound.local.LocalMusic local;
+    private final com.djound.local.LocalWorker localWorker;
     private final PromptAssembler assembler = new PromptAssembler();
 
     public GenerationService(
@@ -32,7 +34,11 @@ public class GenerationService {
             MediaStore media,
             FixtureReviewControls controls,
             com.djound.availability.AvailabilityService availability,
-            LiveAllowance allowance) {
+            LiveAllowance allowance,
+            com.djound.local.LocalMusic local,
+            com.djound.local.LocalWorker localWorker) {
+        this.local = local;
+        this.localWorker = localWorker;
         this.allowance = allowance;
         this.availability = availability;
         this.jdbc = jdbc;
@@ -40,6 +46,10 @@ public class GenerationService {
         this.configuration = configuration;
         this.media = media;
         this.controls = controls;
+    }
+
+    public void requireNoLocalPreparation() {
+        local.requireIdle();
     }
 
     public GenerationConfiguration configuration() {
@@ -68,7 +78,7 @@ public class GenerationService {
     // Probe immutable bytes outside database locks. A receipt always bypasses current compatibility
     // checks.
     private String preflightSource(String key, String id, boolean retry) {
-        if (!configuration.live()
+        if ((!configuration.live() && !configuration.local())
                 || jdbc.sql("SELECT EXISTS(SELECT 1 FROM command_receipt WHERE command_key=?)")
                         .param(key)
                         .query(Boolean.class)
@@ -104,11 +114,16 @@ public class GenerationService {
     }
 
     public void requireLiveDuration(MediaStore.Upload upload) {
-        if (configuration.live() && upload.preciseSeconds() > 30.0)
+        if ((configuration.live() && upload.preciseSeconds() > 30.0)
+                || (configuration.local() && upload.preciseSeconds() > 12.0))
             throw new ApiProblem(
                     422,
                     "PROVIDER_DURATION_UNSUPPORTED",
-                    "The live adapter supports sources from 1 through 30 seconds. Choose a"
+                    (configuration.local()
+                                    ? "Local melody work supports sources from 1 through 12"
+                                            + " seconds. Choose a"
+                                    : "The live adapter supports sources from 1 through 30 seconds."
+                                            + " Choose a")
                             + " compatible source; audio is never cropped.",
                     "CHOOSE_FILE");
     }
@@ -150,7 +165,10 @@ public class GenerationService {
                         + command.expectedSourceRevision()
                         + "|"
                         + command.expectedDraftRevision()
-                        + acknowledgementSuffix(command.acknowledgedUnknownAttemptId());
+                        + acknowledgementSuffix(command.acknowledgedUnknownAttemptId())
+                        + (command.localPlanId() == null
+                                ? ""
+                                : "|plan:" + field(command.localPlanId()));
         String fingerprint;
         try {
             fingerprint =
@@ -196,6 +214,7 @@ public class GenerationService {
                     }
                     if (configuration.configured()) availability.requireAvailable();
                     if (configuration.live()) allowance.requireAvailable();
+                    local.requireIdle();
                     validateAcknowledgement(workspace, command.acknowledgedUnknownAttemptId());
                     if (!configuration.configured())
                         throw new ApiProblem(
@@ -260,11 +279,30 @@ public class GenerationService {
                                                                     + " unavailable or belongs to"
                                                                     + " another exploration.",
                                                             "REFRESH_EXPLORATION"));
+                    var frozenPlan =
+                            configuration.local()
+                                    ? local.requirePlan(explorationId, command)
+                                    : null;
+                    if (!configuration.local() && command.localPlanId() != null)
+                        throw new ApiProblem(
+                                409,
+                                "PLAN_CHANGED",
+                                "Local plans require local music mode.",
+                                "EDIT_TEXT");
                     String inherited =
-                            Optional.ofNullable((String) basisRow.get("direction")).orElse("");
-                    var assembled = assembler.assemble(inherited, command.text());
+                            configuration.local()
+                                    ? ""
+                                    : Optional.ofNullable((String) basisRow.get("direction"))
+                                            .orElse("");
+                    var assembled =
+                            frozenPlan == null
+                                    ? assembler.assemble(inherited, command.text())
+                                    : new PromptAssembler.Assembled(
+                                            local.reviewedDirection(frozenPlan),
+                                            local.frozenInstructions(frozenPlan));
                     requireLiveText(assembled.instructions());
-                    if (configuration.live() && !original.equals(checkedSource))
+                    if ((configuration.live() || configuration.local())
+                            && !original.equals(checkedSource))
                         throw new ApiProblem(
                                 409,
                                 "SOURCE_CHANGED",
@@ -275,8 +313,8 @@ public class GenerationService {
                     Timestamp now = Timestamp.from(Instant.now());
                     jdbc.sql(
                                     """
-                                    INSERT INTO generation_request(id,exploration_id,source_recording_id,source_revision,basis_recording_id,submitted_text,inherited_direction,direction,assembled_instructions,assembler_version,adapter_configuration_id,provenance,created_at)
-                                    VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)
+                                    INSERT INTO generation_request(id,exploration_id,source_recording_id,source_revision,basis_recording_id,submitted_text,inherited_direction,direction,assembled_instructions,assembler_version,adapter_configuration_id,provenance,created_at,local_plan_id)
+                                    VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?)
                                     """)
                             .params(
                                     request,
@@ -288,10 +326,13 @@ public class GenerationService {
                                     inherited,
                                     assembled.direction(),
                                     assembled.instructions(),
-                                    PromptAssembler.VERSION,
+                                    configuration.local()
+                                            ? "local-plan-v1"
+                                            : PromptAssembler.VERSION,
                                     configuration.adapterId(),
                                     configuration.mode(),
-                                    now)
+                                    now,
+                                    command.localPlanId())
                             .update();
                     jdbc.sql(
                                     "INSERT INTO"
@@ -401,6 +442,7 @@ public class GenerationService {
                     }
                     if (configuration.configured()) availability.requireAvailable();
                     if (configuration.live()) allowance.requireAvailable();
+                    local.requireIdle();
                     validateAcknowledgement(workspace, command.acknowledgedUnknownAttemptId());
                     if (!configuration.configured())
                         throw new ApiProblem(
@@ -436,6 +478,15 @@ public class GenerationService {
                                             "OUTPUT_INVALID",
                                             "MEDIA_STORAGE_FAILED",
                                             "PROCESS_INTERRUPTED",
+                                            "LOCAL_WORKER_FAILED",
+                                            "LOCAL_ENGINE_FAILED",
+                                            "LOCAL_BUSY",
+                                            "LOCAL_MEMORY_LIMIT",
+                                            "LOCAL_MEMORY_PRESSURE",
+                                            "LOCAL_RESOURCE_MONITOR_FAILED",
+                                            "LOCAL_SETUP_REQUIRED",
+                                            "LOCAL_TIMEOUT",
+                                            "LOCAL_ENGINE_UNAVAILABLE",
                                             "OUTCOME_UNKNOWN",
                                             "CAPACITY_UNAVAILABLE")
                                     .contains(previous.outcome().code())) {
@@ -554,7 +605,7 @@ public class GenerationService {
                         """
                         SELECT a.id AS attempt_key,a.state,a.version,a.outcome_code,a.outcome_detail,a.result_recording_id,a.previous_attempt_id,
                                a.created_at AS attempt_created_at,a.updated_at,r.*,
-                               (? AND a.state='FAILED' AND a.outcome_code IN ('GENERATION_FAILED','OUTPUT_INVALID','MEDIA_STORAGE_FAILED','PROCESS_INTERRUPTED','OUTCOME_UNKNOWN','CAPACITY_UNAVAILABLE')
+                               (? AND a.state='FAILED' AND a.outcome_code IN ('GENERATION_FAILED','OUTPUT_INVALID','MEDIA_STORAGE_FAILED','PROCESS_INTERRUPTED','OUTCOME_UNKNOWN','CAPACITY_UNAVAILABLE','LOCAL_WORKER_FAILED','LOCAL_TIMEOUT','LOCAL_ENGINE_UNAVAILABLE','LOCAL_ENGINE_FAILED','LOCAL_BUSY','LOCAL_MEMORY_LIMIT','LOCAL_MEMORY_PRESSURE','LOCAL_RESOURCE_MONITOR_FAILED','LOCAL_SETUP_REQUIRED')
                                 AND e.latest_attempt_id=a.id AND e.original_id=r.source_recording_id AND e.source_revision=r.source_revision
                                 AND r.adapter_configuration_id=? AND r.provenance=?
                                 AND w.active_attempt_id IS NULL) AS can_retry
@@ -639,6 +690,14 @@ public class GenerationService {
                     for (var row : active) {
                         String id = (String) row.get("id"), state = (String) row.get("state");
                         long version = ((Number) row.get("version")).longValue();
+                        if (get(id).request().provenance().equals("LOCAL")) {
+                            fail(
+                                    get(id),
+                                    "PROCESS_INTERRUPTED",
+                                    "Local creation was interrupted. Your frozen plan is saved;"
+                                            + " retry deliberately.");
+                            continue;
+                        }
                         if (state.equals("ACCEPTED")) {
                             if (!configuration.configured()
                                     || !get(id).request()
@@ -674,6 +733,50 @@ public class GenerationService {
                         }
                     }
                 });
+    }
+
+    public String localPlanId(String requestId) {
+        return jdbc.sql("SELECT local_plan_id FROM generation_request WHERE id=?")
+                .param(requestId)
+                .query(String.class)
+                .single();
+    }
+
+    public boolean cancellationRequested(String id) {
+        return jdbc.sql(
+                        "SELECT cancel_requested OR state IN ('SUCCEEDED','FAILED') FROM"
+                                + " generation_attempt WHERE id=?")
+                .param(id)
+                .query(Boolean.class)
+                .single();
+    }
+
+    public Attempt cancelLocal(String id) {
+        Attempt initial = get(id);
+        if (!initial.request().provenance().equals("LOCAL"))
+            throw new ApiProblem(
+                    409,
+                    "CANCEL_UNSUPPORTED",
+                    "Only local work can be cancelled by this command.",
+                    "WAIT");
+        transactions.executeWithoutResult(
+                s -> {
+                    jdbc.sql("SELECT id FROM workspace WHERE id=1 FOR UPDATE")
+                            .query(Integer.class)
+                            .single();
+                    jdbc.sql(
+                                    "UPDATE generation_attempt SET cancel_requested=true WHERE id=?"
+                                            + " AND state NOT IN ('SUCCEEDED','FAILED')")
+                            .param(id)
+                            .update();
+                });
+        localWorker.stop(id);
+        Attempt current = get(id);
+        fail(
+                current,
+                "CANCELLED",
+                "Local creation was cancelled. Your notes and previous versions remain saved.");
+        return get(id);
     }
 
     public Attempt active() {
