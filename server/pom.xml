@@ -8,6 +8,8 @@
   <dependency><groupId>org.flywaydb</groupId><artifactId>flyway-database-postgresql</artifactId></dependency>
   <dependency><groupId>org.postgresql</groupId><artifactId>postgresql</artifactId><scope>runtime</scope></dependency>
   <dependency><groupId>org.springframework.boot</groupId><artifactId>spring-boot-starter-test</artifactId><scope>test</scope></dependency>
+  <!-- Keep the explicitly provisioned provider on the same JUnit platform as the tests. -->
+  <dependency><groupId>org.junit.platform</groupId><artifactId>junit-platform-launcher</artifactId><scope>test</scope></dependency>
  </dependencies>
  <build>
   <resources>
@@ -17,5 +19,20 @@
     <includes><include>audio/sample-*.wav</include><include>manifest.json</include><include>README.md</include></includes>
    </resource>
   </resources>
-  <plugins><plugin><groupId>org.apache.maven.plugins</groupId><artifactId>maven-surefire-plugin</artifactId><configuration><argLine>-Djdk.httpclient.redirects.retrylimit=1 -Djdk.httpclient.disableRetryConnect=true -Djdk.httpclient.enableAllMethodRetry=false</argLine></configuration></plugin><plugin><groupId>org.springframework.boot</groupId><artifactId>spring-boot-maven-plugin</artifactId></plugin></plugins></build>
+  <plugins>
+   <plugin>
+    <groupId>org.apache.maven.plugins</groupId><artifactId>maven-surefire-plugin</artifactId>
+    <!-- Declare the normally auto-detected provider so bootstrap's go-offline
+         goal also resolves it. Use the parent-managed plugin version. -->
+    <dependencies>
+     <dependency>
+      <groupId>org.apache.maven.surefire</groupId><artifactId>surefire-junit-platform</artifactId>
+      <version>${maven-surefire-plugin.version}</version>
+     </dependency>
+    </dependencies>
+    <configuration><argLine>-Djdk.httpclient.redirects.retrylimit=1 -Djdk.httpclient.disableRetryConnect=true -Djdk.httpclient.enableAllMethodRetry=false</argLine></configuration>
+   </plugin>
+   <plugin><groupId>org.springframework.boot</groupId><artifactId>spring-boot-maven-plugin</artifactId></plugin>
+  </plugins>
+ </build>
 </project>

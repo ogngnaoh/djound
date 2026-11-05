@@ -35,6 +35,7 @@ const shot = async (name) =>
   page.screenshot({
     path: path.join(evidence, `${name}.png`),
     fullPage: false,
+    animations: "disabled",
   });
 async function scenario(value) {
   await page.getByRole("button", { name: /Prototype workspace/ }).click();

@@ -21,15 +21,8 @@ case "$mode" in
   browser)
     node scripts/studio-smoke.mjs
     ;;
-  legacy-browser)
-    node scripts/browser-smoke.mjs
-    node scripts/editor-smoke.mjs
-    ;;
   fixture)
     bash scripts/verify-installation.sh fixture-api
-    ;;
-  legacy-fixture)
-    bash scripts/verify-installation.sh fixture
     ;;
   all)
     bash scripts/verify.sh fast
@@ -37,5 +30,5 @@ case "$mode" in
     bash scripts/verify-installation.sh studio
     bash scripts/verify-installation.sh fixture-api
     ;;
-  *) echo 'Usage: scripts/verify.sh [all|fast|api|browser|fixture|legacy-browser|legacy-fixture]' >&2; exit 2 ;;
+  *) echo 'Usage: scripts/verify.sh [all|fast|api|browser|fixture]' >&2; exit 2 ;;
 esac

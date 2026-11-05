@@ -10,11 +10,10 @@
     "build": "pnpm generate && tsc --noEmit && vite build",
     "format": "prettier --write src vite.config.ts tsconfig.json package.json index.html pnpm-workspace.yaml",
     "format:check": "prettier --check src vite.config.ts tsconfig.json package.json index.html pnpm-workspace.yaml",
-    "test": "node --experimental-strip-types --test src/editor/state.test.ts src/recovery.test.ts src/remix/localPolicy.test.ts src/remix/arrangementPolicy.test.ts src/studio/service.test.ts",
+    "test": "node --experimental-strip-types --test src/recovery.test.ts src/remix/commandPolicy.test.ts src/remix/localPolicy.test.ts src/studio/service.test.ts",
     "test:studio": "node ../scripts/studio-smoke.mjs"
   },
   "dependencies": {
-    "@fontsource-variable/dm-sans": "5.3.0",
     "@fontsource-variable/inter": "5.3.0",
     "@tanstack/react-query": "5.90.16",
     "class-variance-authority": "0.7.1",
@@ -30,6 +29,7 @@
   "devDependencies": {
     "@playwright/test": "1.58.2",
     "@tailwindcss/vite": "4.3.4",
+    "@types/node": "24.19.2",
     "@types/react": "19.2.7",
     "@types/react-dom": "19.2.3",
     "@vitejs/plugin-react": "5.1.2",

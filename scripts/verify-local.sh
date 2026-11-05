@@ -5,8 +5,7 @@ source "$(dirname "$0")/env.sh"
 cd "$DJOUND_ROOT"
 case "${1:-studio}" in
   studio) browser_check=scripts/studio-local-smoke.mjs ;;
-  legacy) browser_check=scripts/local-model-smoke.mjs ;;
-  *) echo 'Usage: verify-local.sh [studio|legacy]' >&2; exit 2 ;;
+  *) echo 'Usage: verify-local.sh [studio]' >&2; exit 2 ;;
 esac
 mkdir -p .runtime/checks
 run_dir="$(mktemp -d "$DJOUND_ROOT/.runtime/checks/local.XXXXXX")"

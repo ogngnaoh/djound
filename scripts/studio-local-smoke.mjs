@@ -86,6 +86,7 @@ const shot = (name) =>
   page.screenshot({
     path: path.join(evidence, `${name}.png`),
     fullPage: false,
+    animations: "disabled",
   });
 const sha256 = (bytes) => createHash("sha256").update(bytes).digest("hex");
 async function get(route) {
@@ -228,7 +229,9 @@ async function playRow(recording) {
     .click();
   await expect
     .poll(() =>
-      page.locator("audio").evaluate((a) => new URL(a.currentSrc).pathname),
+      page
+        .locator("audio")
+        .evaluate((a) => (a.currentSrc ? new URL(a.currentSrc).pathname : "")),
     )
     .toBe(recording.mediaUrl);
   await expect
@@ -277,7 +280,9 @@ try {
   await choices.getByRole("button", { name: "Original", exact: true }).click();
   await expect
     .poll(() =>
-      page.locator("audio").evaluate((a) => new URL(a.currentSrc).pathname),
+      page
+        .locator("audio")
+        .evaluate((a) => (a.currentSrc ? new URL(a.currentSrc).pathname : "")),
     )
     .toBe(source.mediaUrl);
   await expect(page.locator("audio")).toHaveCount(1);
@@ -548,7 +553,9 @@ try {
   await kept.getByRole("button", { name: "Play", exact: true }).click();
   await expect
     .poll(() =>
-      page.locator("audio").evaluate((a) => new URL(a.currentSrc).pathname),
+      page
+        .locator("audio")
+        .evaluate((a) => (a.currentSrc ? new URL(a.currentSrc).pathname : "")),
     )
     .toBe(second.mediaUrl);
   await pause();

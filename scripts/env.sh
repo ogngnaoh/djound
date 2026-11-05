@@ -1,6 +1,10 @@
 #!/usr/bin/env bash
-# Source this file to select project-local tools when installed.
-DJOUND_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+# Source this file from Bash or zsh to select project-local tools when installed.
+if [[ -n "${ZSH_VERSION:-}" ]]; then
+  DJOUND_ROOT="$(cd "$(dirname "${(%):-%x}")/.." && pwd)"
+else
+  DJOUND_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+fi
 export DJOUND_ROOT
 if [[ -d "$DJOUND_ROOT/.tools/jdk/Contents/Home" ]]; then
   export JAVA_HOME="$DJOUND_ROOT/.tools/jdk/Contents/Home"

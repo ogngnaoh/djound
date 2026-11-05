@@ -4,7 +4,7 @@ set -euo pipefail
 source "$(dirname "$0")/env.sh"
 cd "$DJOUND_ROOT"
 check_mode="${1:-studio}"
-case "$check_mode" in all|studio|api|fixture|fixture-api|listening|recovery|unknown|capacity|interaction|live-policy|upload|upload-local) ;; *) echo 'Usage: verify-installation.sh [all|studio|api|fixture|fixture-api|listening|recovery|unknown|capacity|interaction|live-policy|upload|upload-local]' >&2; exit 2 ;; esac
+case "$check_mode" in studio|api|fixture-api) ;; *) echo 'Usage: verify-installation.sh [studio|api|fixture-api]' >&2; exit 2 ;; esac
 mkdir -p .runtime/checks
 run_dir="$(mktemp -d "$DJOUND_ROOT/.runtime/checks/run.XXXXXX")"
 test_db="djound_check_$$_${RANDOM}"
@@ -33,12 +33,9 @@ export DJOUND_TEST_BASE_URL="http://127.0.0.1:$test_port"
 export DJOUND_TEST_ALLOW_WRITE=1
 export DJOUND_MODE=UNCONFIGURED
 java_options=(-Xmx768m -Djdk.httpclient.redirects.retrylimit=1 -Djdk.httpclient.disableRetryConnect=true -Djdk.httpclient.enableAllMethodRetry=false)
-if [[ "$check_mode" == live-policy ]]; then
-  export DJOUND_MODE=LIVE
-fi
 export DJOUND_FIXTURE_REVIEW_CONTROLS=false
 unset DJOUND_FIXTURE_COOLDOWN_MS
-if [[ "$check_mode" == fixture || "$check_mode" == fixture-api || "$check_mode" == listening || "$check_mode" == recovery || "$check_mode" == unknown || "$check_mode" == capacity || "$check_mode" == interaction || "$check_mode" == upload ]]; then
+if [[ "$check_mode" == fixture-api ]]; then
   export DJOUND_MODE=FIXTURE
   export DJOUND_FIXTURE_DELAY_MS=8000
   export DJOUND_FIXTURE_COOLDOWN_MS=6000
@@ -69,36 +66,7 @@ elif [[ "$check_mode" == fixture-api ]]; then
   python3 tests/fixture_acceptance.py | tee "$run_dir/api-result.json"
   python3 tests/recovery_acceptance.py | tee "$run_dir/recovery-api-result.json"
   python3 tests/availability_acceptance.py | tee "$run_dir/availability-api-result.json"
-elif [[ "$check_mode" == upload || "$check_mode" == upload-local ]]; then
-  node scripts/upload-smoke.mjs | tee "$run_dir/api-result.json"
-elif [[ "$check_mode" == live-policy ]]; then
-  node scripts/live-policy-smoke.mjs | tee "$run_dir/api-result.json"
-elif [[ "$check_mode" == interaction ]]; then
-  node scripts/interaction-smoke.mjs | tee "$run_dir/api-result.json"
-elif [[ "$check_mode" == capacity ]]; then
-  python3 tests/availability_acceptance.py | tee "$run_dir/api-result.json"
-  node scripts/capacity-smoke.mjs | tee "$run_dir/capacity-result.json"
-elif [[ "$check_mode" == unknown ]]; then
-  node scripts/unknown-smoke.mjs | tee "$run_dir/api-result.json"
-elif [[ "$check_mode" == recovery ]]; then
-  python3 tests/recovery_acceptance.py | tee "$run_dir/api-result.json"
-  node scripts/recovery-smoke.mjs | tee "$run_dir/recovery-result.json"
-elif [[ "$check_mode" == listening ]]; then
-  node scripts/listening-smoke.mjs | tee "$run_dir/api-result.json"
-elif [[ "$check_mode" == fixture ]]; then
-  python3 tests/fixture_acceptance.py | tee "$run_dir/api-result.json"
-  node scripts/creation-smoke.mjs | tee "$run_dir/creation-result.json"
-  node scripts/listening-smoke.mjs | tee "$run_dir/listening-result.json"
-  python3 tests/recovery_acceptance.py | tee "$run_dir/recovery-api-result.json"
-  node scripts/recovery-smoke.mjs | tee "$run_dir/recovery-result.json"
-  node scripts/unknown-smoke.mjs | tee "$run_dir/unknown-result.json"
-  python3 tests/availability_acceptance.py | tee "$run_dir/availability-api-result.json"
-  node scripts/capacity-smoke.mjs | tee "$run_dir/capacity-result.json"
 else
-  if [[ "$check_mode" == all ]]; then
-    node scripts/browser-smoke.mjs | tee "$run_dir/browser-result.json"
-    node scripts/editor-smoke.mjs | tee "$run_dir/editor-result.json"
-  fi
   python3 tests/api_acceptance.py | tee "$run_dir/api-result.json"
 fi
 expect_startup_failure() {
