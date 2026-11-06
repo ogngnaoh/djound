@@ -126,7 +126,7 @@ def check(port, mode):
             if ready.get('ready') is not True:
                 raise ValueError('Local engine readiness failed.')
         except (OSError, ValueError, subprocess.SubprocessError):
-            problems.append('Local music tools are not ready. Complete the setup in local-engine/README.md; '
+            problems.append('Local music tools are not ready. Follow the local setup in README.md. '
                             'the readiness check never downloads or runs models.')
     try:
         host = os.environ.get('DOCKER_HOST', '')

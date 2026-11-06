@@ -1,0 +1,44 @@
+[
+  {
+    "id": "add-bass",
+    "parent": "default",
+    "text": "edit: add bass",
+    "expected": {
+      "bass": true
+    }
+  },
+  {
+    "id": "already-piano",
+    "parent": "default",
+    "text": "edit: use piano",
+    "expected": "noop"
+  },
+  {
+    "id": "unknown-part",
+    "parent": "default",
+    "text": "edit: add a string quartet",
+    "expected": "unsupported"
+  },
+  {
+    "id": "remove-drums",
+    "parent": "full",
+    "text": "edit: remove drums",
+    "expected": {
+      "drums": false
+    }
+  },
+  {
+    "id": "quiet-drums",
+    "parent": "full",
+    "text": "quieter drums",
+    "expected": {
+      "mix": {
+        "drums": {
+          "gainDb": -3,
+          "pan": 0,
+          "muted": false
+        }
+      }
+    }
+  }
+]

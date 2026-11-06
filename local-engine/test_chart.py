@@ -40,14 +40,11 @@ class ChartContractTests(unittest.TestCase):
             edit_bar(CHART, 1, 'G', None)
 
     def test_qualified_defaults_match_frozen_proposal_and_events(self):
-        spec = util.spec_from_file_location('frozen_chart', ROOT / 'benchmarks/harmony/harmony.py')
-        frozen = util.module_from_spec(spec)
-        spec.loader.exec_module(frozen)
-        study = json.loads((ROOT / 'experiments/rhythm-arrangement/study.json').read_text())
+        study = json.loads((ROOT / 'tests/fixtures/chart.json').read_text())
         chart, bars = propose(study['notes'], 12, 110, 500)
-        original = frozen.fit(study['notes'], 12, 110, .5)
+        original = study['expectedBars']
         self.assertEqual(bars, original)
-        self.assertEqual(backing(chart, 12, True, False, False), frozen.backing(original))
+        self.assertEqual(backing(chart, 12, True, False, False), study['expectedBacking'])
         edited = edit_bar(chart, 1, 'Ab', 12)
         self.assertEqual(chart['chords'][1], 'Cm')
         self.assertEqual(edited['chords'], ['Eb', 'Ab', 'Fm', 'Cm', 'Cm', None])
@@ -82,7 +79,7 @@ class ChartAudioTests(unittest.TestCase):
         import hashlib
         import numpy as np
         source = ROOT / 'fixtures/audio/local-demo-source.wav'
-        spec = json.loads((ROOT / 'experiments/rhythm-arrangement/study.json').read_text())
+        spec = json.loads((ROOT / 'tests/fixtures/chart.json').read_text())
         notes = spec['notes']
         chart, _ = propose(notes, 12, 110, 500)
         old = dict(DEFAULT_RECIPE, instrument='recorded', bass=True, drums=True)

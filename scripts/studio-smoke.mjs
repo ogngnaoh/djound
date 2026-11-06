@@ -1,4 +1,3 @@
-// Browser plugin unavailable: use Playwright against an isolated browser profile.
 // This suite stays in Prototype mode and never invokes an AI model or writes backend data.
 import { createRequire } from "node:module";
 import { existsSync } from "node:fs";

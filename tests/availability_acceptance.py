@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""S07 capacity policy against a real isolated app, PostgreSQL, and media store."""
+"""Capacity policy against a real isolated app, PostgreSQL, and media store."""
 import hashlib
 import json
 import os
