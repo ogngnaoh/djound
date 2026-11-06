@@ -57,8 +57,11 @@ jobs:
 
       - name: Install media and browser dependencies
         run: |
+          # Avoid the slow regional Azure mirror on hosted runners.
+          sudo find /etc/apt -type f \( -name '*.sources' -o -name '*.list' \) -exec \
+            sed -i 's|http://azure.archive.ubuntu.com/ubuntu|https://archive.ubuntu.com/ubuntu|g' {} +
           sudo apt-get update
-          sudo apt-get install --yes ffmpeg
+          sudo apt-get install --yes --no-install-recommends ffmpeg
           pnpm --dir web install --frozen-lockfile
           pnpm --dir web exec playwright install --with-deps chromium
 
