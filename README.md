@@ -4,7 +4,7 @@
 
 a local music studio where you can rearrange a melody in your own words.
 
-[play the demo](showcase/release/zanarkand.mp4)
+https://github.com/user-attachments/assets/62703213-9001-49cb-a7bd-21509d79f341
 
 in the demo, i start with a piano phrase from *to zanarkand*, check the notes, and try it on electric piano with bass and drums. then i take the drums out and soften the bass. you can hear the original at 0:15 and the final take at 0:27. the film uses audio from the app and shortens the processing waits. [watch or download the film](showcase/release/zanarkand.mp4) · [music credits](#credits)
 
