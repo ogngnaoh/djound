@@ -14,6 +14,7 @@ import { Button } from "../components/ui/button";
 import { useAudio } from "./Player";
 import { allTracksMuted, mixChanges, normalizeMix, TrackMix } from "./TrackMix";
 import { GuidedEdits, isGuided } from "./GuidedEdits";
+import { DrumGroove, grooveLabel, validGrid } from "./DrumGroove";
 import {
   DEFAULT_RECIPE,
   describeRecipe,
@@ -79,6 +80,12 @@ export function RecipeDetails({ recipe }: { recipe: Recipe }) {
           <dd>{change.value}</dd>
         </Fragment>
       ))}
+      {recipe.groove && (
+        <>
+          <dt>Drum pattern</dt>
+          <dd>{grooveLabel(recipe)}</dd>
+        </>
+      )}
     </dl>
   );
 }
@@ -399,6 +406,7 @@ export function Refinement({
     !project.available ||
     project.processing ||
     !supportedBasis;
+  const duration = project.melodyDuration ?? project.tracks[0].duration;
   const guidedOnly =
     mode === "backend" &&
     project.available &&
@@ -530,7 +538,7 @@ export function Refinement({
             </summary>
             <p>
               {supportedBasis
-                ? `Backing is ${basis.recipe.density}, at a fixed 100 BPM.`
+                ? `Backing is ${basis.recipe.density}, at ${basis.recipe.bpm} BPM.`
                 : "This recording cannot be used for a local arrangement."}{" "}
               Your confirmed melody keeps its own timing.
             </p>
@@ -562,12 +570,25 @@ export function Refinement({
               }}
             />
             {mode === "backend" && (
-              <TrackMix recipe={recipe} onChange={setRecipe} />
+              <>
+                <DrumGroove
+                  projectId={project.id}
+                  recipe={recipe}
+                  duration={duration}
+                  onChange={setRecipe}
+                />
+                <TrackMix recipe={recipe} onChange={setRecipe} />
+              </>
             )}
           </fieldset>
           <Button
             className="full"
-            disabled={disabled || busy || allTracksMuted(recipe)}
+            disabled={
+              disabled ||
+              busy ||
+              allTracksMuted(recipe) ||
+              !validGrid(recipe, duration)
+            }
             onClick={() => void review(true)}
           >
             {busy ? "Reviewing…" : "Review arrangement"}
@@ -598,6 +619,17 @@ export function Refinement({
             </button>
           </section>
           <h2 className="proposed-heading">Proposed changes</h2>
+          {grooveLabel(recipe) !== grooveLabel(proposal.before) && (
+            <div className="change-row" data-changed="true">
+              <span>Drum pattern</span>
+              <span>
+                <span className="subtle">
+                  {grooveLabel(proposal.before)} →{" "}
+                </span>
+                {grooveLabel(recipe)}
+              </span>
+            </div>
+          )}
           {mixChanges(recipe, proposal.before).map((change) => (
             <div className="change-row" data-changed="true" key={change.label}>
               <span>{change.label}</span>

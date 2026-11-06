@@ -87,6 +87,8 @@ def request_values(path):
         if source.stat().st_size > 64 * 1024 ** 2:
             raise EngineError('LOCAL_AUDIO_LIMIT', 'The audio file exceeds the local upload size limit.')
     elif operation == 'plan':
+        if 'duration' in request and (type(request['duration']) not in (int, float) or not 0 < request['duration'] <= 12):
+            raise EngineError('LOCAL_AUDIO_LIMIT', 'Choose a clip up to 12 seconds for this arrangement.')
         if not isinstance(request.get('prompt'), str) or not 1 <= len(request['prompt'].strip()) <= 1000:
             raise EngineError('LOCAL_INVALID_REQUEST', 'Describe a concrete edit in 1000 characters or fewer.')
         if request.get('parentRecipe') is not None:
@@ -94,7 +96,7 @@ def request_values(path):
     else:
         notes(request.get('notes'), request.get('duration'))
         if operation == 'render':
-            validated_recipe = recipe(request.get('recipe'))
+            validated_recipe = recipe(request.get('recipe'), request['duration'])
             if validated_recipe['instrument'] == 'recorded':
                 source = inside(request.get('sourceAudio', ''), data_root(), True)
                 if source.stat().st_size > 64 * 1024 ** 2:

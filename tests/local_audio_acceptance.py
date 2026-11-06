@@ -1,11 +1,36 @@
 """Independent checks of actual app renders; run after local-model-smoke.mjs."""
 import hashlib
 import json
+from fractions import Fraction
 from pathlib import Path
 import sys
 
 import numpy as np
 import soundfile as sf
+
+
+def grid_onsets(pattern, sample_rate, frame_count):
+    """Independent bar score: (GM drum pitch, offset measured in quarter notes)."""
+    if pattern == 'swing_ride':
+        bar = [(36, 0), (51, 0), (51, 1), (44, 1), (51, Fraction(5, 3)),
+               (51, 2), (51, 3), (44, 3), (51, Fraction(11, 3))]
+    else:
+        assert pattern == 'four_on_the_floor'
+        bar = [(36, beat) for beat in range(4)]
+        bar += [(39, 1), (39, 3)]
+        bar += [(46, Fraction(2 * beat + 1, 2)) for beat in range(4)]
+    downbeat = Fraction(710, 1000)
+    quarter = Fraction(60, 120)
+    expected = []
+    index = 0
+    while (downbeat + 4 * index * quarter) * sample_rate < frame_count:
+        for pitch, offset in bar:
+            start = downbeat + (4 * index + offset) * quarter
+            frame = round(start * sample_rate)
+            if frame_count - frame >= round(.01 * sample_rate):
+                expected.append((pitch, frame))
+        index += 1
+    return sorted(expected)
 
 
 result = json.loads(Path(sys.argv[1]).read_text())
@@ -35,7 +60,7 @@ for index, recording in enumerate(result['snapshot']['renditions'], 1):
                     'rms': float(np.sqrt(np.mean(samples ** 2))), 'clippedSamples': 0,
                     'leadPcmSha256': lead_hashes[-1], 'notesSha256': note_hashes[-1],
                     'worker': manifest['provenance']['supervisor']})
-if len(reports) in (5, 7):
+if len(reports) in (5, 7, 10):
     # The fourth rendition mixes the first version's dry stems on the same timeline.
     # Compare serialized samples to an independent stereo matrix and gain equation.
     parent = data / 'local-jobs' / result['snapshot']['renditions'][0]['attemptId'] / 'output'
@@ -56,7 +81,7 @@ if len(reports) in (5, 7):
     print('PASS: actual text-to-mix samples match the stereo matrix; direct controls restore the original WAV byte for byte.')
 else:
     assert len(reports) == 3
-if len(reports) == 7:
+if len(reports) in (7, 10):
     uploaded = Path(__file__).resolve().parents[1] / 'fixtures/audio/local-demo-source.wav'
     source, _ = sf.read(uploaded, dtype='float32', always_2d=True)
     source_hash = hashlib.sha256(source.astype('<f4').tobytes()).hexdigest()
@@ -75,6 +100,38 @@ if len(reports) == 7:
         assert proof['sourceSha256'] == result['snapshot']['original']['sha256']
     mix_check['uploadedLeadPcmSha256'] = source_hash
     print('PASS: recorded-lead mix equals the original samples plus backing; isolating the lead restores its source PCM exactly.')
+if len(reports) == 10:
+    groove_checks = []
+    downbeat_frame = round(.710 * rate)
+    assert np.any(source[:downbeat_frame]), 'The fixture must have audible lead before the first drum beat'
+    for i, pattern in ((7, 'swing_ride'), (8, 'four_on_the_floor'), (9, 'swing_ride')):
+        recording = result['snapshot']['renditions'][i]
+        assert recording['localRecipe']['groove'] == {'pattern': pattern, 'downbeatMs': 710}
+        assert recording['localRecipe']['bpm'] == 120
+        folder = data / 'local-jobs' / recording['attemptId'] / 'output'
+        assert lead_hashes[i] == source_hash
+        assert [track['id'] for track in tracks[i]] == ['lead', 'drums']
+        events = tracks[i][1]['notes']
+        expected = grid_onsets(pattern, rate, len(source))
+        actual = sorted((n['pitch'], round(n['start'] * rate)) for n in events)
+        assert len(actual) == len(expected)
+        assert all(a_pitch == e_pitch and abs(a_frame - e_frame) <= 1
+                   for (a_pitch, a_frame), (e_pitch, e_frame) in zip(actual, expected)), pattern
+        drums, drum_rate = sf.read(folder / 'stem-1.raw.wav', dtype='float32', always_2d=True)
+        assert drum_rate == rate and drums.shape == source.shape
+        assert not np.any(drums[:downbeat_frame]), 'Drums played before the reviewed downbeat'
+        assert np.any(drums[downbeat_frame:downbeat_frame + round(.02 * rate)]), 'Missing first beat'
+        mix, mix_rate = sf.read(folder / 'audio.raw.wav', dtype='float32', always_2d=True)
+        assert mix_rate == rate
+        np.testing.assert_array_equal(mix, (source.astype(np.float64) + drums).astype('float32'))
+        groove_checks.append({'pattern': pattern, 'events': len(events), 'pickupFrames': downbeat_frame,
+                             'leadPcmSha256': lead_hashes[i], 'playbackSha256': recording['sha256'],
+                             'drumPcmSha256': hashlib.sha256(drums.astype('<f4').tobytes()).hexdigest()})
+    assert groove_checks[0] == groove_checks[2], 'The restored swing mix must match exactly'
+    for field in ('playbackSha256', 'drumPcmSha256'):
+        assert groove_checks[0][field] != groove_checks[1][field]
+    mix_check['drumGrooves'] = groove_checks
+    print('PASS: both drum grids match the reviewed pickup, preserve the source PCM, and restore swing exactly.')
 assert lead_hashes[0] == lead_hashes[1], 'Backing-only refinement changed the locked lead'
 assert lead_hashes[2] != lead_hashes[1], 'Explicit guitar correction did not change the lead timbre'
 assert len(set(note_hashes)) == 1, 'Refinement or instrument correction changed confirmed notes'

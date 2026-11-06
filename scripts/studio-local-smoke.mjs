@@ -697,8 +697,73 @@ try {
     expect(solo.localRecipe).toMatchObject({instrument: "recorded", bass: false, drums: false});
     await playRow(solo);
     await pause();
+    await useVersion(solo);
+    await direction().fill("Put a swing ride behind my recorded take.");
+    const priorPlannerCalls = plannerRequests.length;
+    await button("Adjust arrangement").click();
+    await page.getByLabel("Drum pattern", {exact: true}).selectOption("swing_ride");
+    const tempoInput = page.getByLabel("Backing tempo", {exact: true});
+    const firstBeatInput = page.getByLabel("First beat (ms)", {exact: true});
+    await button("Tap tempo").click();
+    await expect(tempoInput).toHaveValue("100");
+    await expect(page.getByText("Tap two more beats.", {exact:true})).toBeVisible();
+    // Fixed event timestamps exercise the browser control without tying its
+    // BPM expectation to Playwright, machine load or the backend poll timer.
+    await button("Tap tempo").evaluate((element) => {
+      const first = performance.now() + 3000;
+      for (const stamp of [first, first + 500, first + 1000]) {
+        const tap = new MouseEvent("click", {bubbles:true});
+        Object.defineProperty(tap, "timeStamp", {value:stamp});
+        element.dispatchEvent(tap);
+      }
+    });
+    await expect(tempoInput).toHaveValue("120");
+    await button("Play playback").click();
+    await expect.poll(() => page.locator("audio").evaluate(a => !a.paused && a.currentTime > .1)).toBe(true);
+    const beforeMark = await page.locator("audio").evaluate(a => a.currentTime);
+    await button("Use playhead").click();
+    expect(Number(await firstBeatInput.inputValue())).toBeGreaterThanOrEqual(Math.floor(beforeMark * 1000));
+    await pause();
+    // Pause and seek the loaded element precisely before capturing again.
+    await page.locator("audio").evaluate(a => { a.currentTime = .7102; });
+    await expect.poll(() => page.locator("audio").evaluate(a => !a.seeking && Math.round(a.currentTime * 1000))).toBe(710);
+    await button("Use playhead").click();
+    await expect(firstBeatInput).toHaveValue("710");
+    await button("Review arrangement").click();
+    await expect(button("Create version")).toBeEnabled();
+    const swingPlan = (await local()).plan;
+    const swingRecipe = {
+      ...solo.localRecipe, drums: true, bpm: 120,
+      groove: {pattern: "swing_ride", downbeatMs: 710},
+    };
+    expect(swingPlan.recipe).toEqual(swingRecipe);
+    expect(swingPlan.basisRecordingId).toBe(solo.id);
+    expect(plannerRequests.length).toBe(priorPlannerCalls);
+    const swing = await create(8);
+    expect(swing.localRecipe).toEqual(swingRecipe);
+    expect(swing.sha256).not.toBe(solo.sha256);
+    await useVersion(swing);
+    const straightPlan = await interpret("edit: use four on the floor at 120 bpm from 710 ms");
+    expect(straightPlan.model).toMatchObject({origin: "GUIDED_COMMANDS", inferenceAttempts: 0});
+    expect(straightPlan.basisRecordingId).toBe(swing.id);
+    expect(straightPlan.recipe).toEqual({
+      ...swingRecipe, groove: {pattern: "four_on_the_floor", downbeatMs: 710},
+    });
+    const straight = await create(9);
+    expect(straight.localRecipe).toEqual(straightPlan.recipe);
+    expect(straight.sha256).not.toBe(swing.sha256);
+    await playRow(straight);
+    await pause();
+    await useVersion(straight);
+    const returnPlan = await interpret("edit: use swing ride at 120 bpm from 710 ms");
+    expect(returnPlan.model).toMatchObject({origin: "GUIDED_COMMANDS", inferenceAttempts: 0});
+    expect(returnPlan.basisRecordingId).toBe(straight.id);
+    expect(returnPlan.recipe).toEqual(swingRecipe);
+    const returned = await create(10);
+    expect(returned.localRecipe).toEqual(swingRecipe);
+    expect(returned.sha256).toBe(swing.sha256);
     expect((await exploration()).original.sha256).toBe(source.sha256);
-    extraPlans.push(performancePlan, soloPlan);
+    extraPlans.push(performancePlan, soloPlan, swingPlan, straightPlan, returnPlan);
   }
   expect(errors).toEqual([]);
   expect(external).toEqual([]);
@@ -743,6 +808,7 @@ try {
             "guided drafting preserves the original words and requires explicit review",
             "compound track mix, visible strip changes, and atomic rejection of an unsupported clause",
             "manual mix restoration is byte-identical; a newer melody revision is disclosed before creation",
+            "recorded lead with direct swing drums, guided straight drums, and exact restoration on a 120 BPM pickup grid",
           ] : []),
           "desktop and 390/320 px layouts; mobile refinement controls",
           "no unexpected browser errors or external browser requests",

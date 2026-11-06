@@ -13,6 +13,7 @@ GAIN = re.compile(rf'set {STEM} gain to {NUMBER} db', re.ASCII)
 RELATIVE_GAIN = re.compile(rf'(lower|raise) {STEM} by {NUMBER} db', re.ASCII)
 PAN = re.compile(rf'pan {STEM} {NUMBER}% (left|right)', re.ASCII)
 HARD_PAN = re.compile(rf'pan {STEM} hard (left|right)', re.ASCII)
+GROOVE = re.compile(r'use (swing ride|four on the floor) at (\d{1,3}) bpm from (\d{1,5}) ms', re.ASCII)
 
 
 @dataclass(frozen=True)
@@ -92,6 +93,10 @@ def summarize(before, after):
     for field in ('backingVolume', 'density'):
         if before[field] != after[field]:
             parts.append(f"{after[field]} backing")
+    if (before.get('groove'), before['bpm']) != (after.get('groove'), after['bpm']):
+        grid = after.get('groove')
+        parts.append(f"{grid['pattern'].replace('_', ' ')} at {after['bpm']} BPM from {grid['downbeatMs']} ms"
+                     if grid else 'original pulse at 100 BPM')
     for stem in active_stems(after):
         old = before.get('mix', {}).get(stem, UNITY_STRIP)
         new = after.get('mix', {}).get(stem, UNITY_STRIP)
@@ -124,7 +129,20 @@ def guided_plan(prompt, parent):
             if not raw.isascii() or not raw.strip():
                 raise unsupported('Enter one complete listed command using plain English text.')
             clause = ' '.join(raw.lower().split())
-            apply(parse(clause), state, strips, assigned)
+            grid = GROOVE.fullmatch(clause)
+            if grid or clause == 'restore the original pulse':
+                if ('groove', None) in assigned:
+                    raise unsupported('Choose one drum pattern per edit.')
+                assigned.add(('groove', None))
+                if grid:
+                    if not state['drums'] or ('drums', None) not in assigned:
+                        apply(Assignment('drums', True), state, strips, assigned)
+                    state.update(bpm=int(grid[2]), groove={'pattern': grid[1].replace(' ', '_'), 'downbeatMs': int(grid[3])})
+                else:
+                    state.pop('groove', None)
+                    state['bpm'] = 100
+            else:
+                apply(parse(clause), state, strips, assigned)
         except EngineError as error:
             raise EngineError(error.code, f'Command {index}. {error.message}') from error
     try:
@@ -133,7 +151,7 @@ def guided_plan(prompt, parent):
         raise unsupported(error.message) from error
     if complete == before:
         raise EngineError('LOCAL_NO_CHANGE', 'These commands already match the selected version.')
-    changes = {key: complete.get(key, {}) for key in (*DEFAULT_RECIPE, 'mix')
+    changes = {key: complete.get(key, {} if key == 'mix' else None) for key in (*DEFAULT_RECIPE, 'groove', 'mix')
                if complete.get(key) != before.get(key)}
     return {
         'recipe': complete,

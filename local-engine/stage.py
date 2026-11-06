@@ -25,6 +25,8 @@ def main():
         if operation == 'plan':
             from planner import plan
             fields = plan(request.get('prompt'), request.get('parentRecipe'), output)
+            if 'duration' in request:
+                fields['recipe'] = recipe(fields['recipe'], request['duration'])
         else:
             from audio import render, transcribe
             if operation == 'transcribe':

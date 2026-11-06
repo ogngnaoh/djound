@@ -345,7 +345,9 @@ public class LocalMusic {
                 || command.text().codePointCount(0, command.text().length()) > 1000)
             throw problem("INVALID_REQUEST", "Provide a direction of at most 1000 characters.");
         var e = exploration(id, command.expectedSourceRevision());
-        currentNotes(id, command.expectedSourceRevision(), command.expectedNoteRevision(), true);
+        var confirmed =
+                currentNotes(
+                        id, command.expectedSourceRevision(), command.expectedNoteRevision(), true);
         if (number(e, "draft_revision") != command.expectedDraftRevision())
             throw problem("STALE_DRAFT", "The direction changed. Review the current draft.");
         String basis =
@@ -365,7 +367,10 @@ public class LocalMusic {
         payload.put("schemaVersion", 1);
         payload.put("operation", "plan");
         payload.put("prompt", command.text());
-        payload.put("parentRecipe", basisRecipe(basis));
+        var inherited = basisRecipe(basis);
+        validateDownbeat(inherited, confirmed.durationSeconds());
+        payload.put("parentRecipe", inherited);
+        payload.put("duration", confirmed.durationSeconds());
         payload.put("draftRevision", command.expectedDraftRevision());
         payload.put("basisRecordingId", basis);
         payload.put("sourceRecordingId", e.get("original_id"));
@@ -510,15 +515,18 @@ public class LocalMusic {
                         throw problem(
                                 "NOTES_CHANGED",
                                 "The melody changed. Review the current confirmed notes.");
-                    requirePlan(
-                            explorationId,
-                            new Models.CreateRequestCommand(
-                                    command.text(),
-                                    command.basisRecordingId(),
-                                    command.expectedSourceRevision(),
-                                    command.expectedDraftRevision(),
-                                    null,
-                                    id));
+                    var confirmed =
+                            requirePlanNotes(
+                                    explorationId,
+                                    new Models.CreateRequestCommand(
+                                            command.text(),
+                                            command.basisRecordingId(),
+                                            command.expectedSourceRevision(),
+                                            command.expectedDraftRevision(),
+                                            null,
+                                            id),
+                                    parent);
+                    validateDownbeat(recipe, confirmed.durationSeconds());
                     if (recipe.equals(parent.recipe())) return parent;
                     Map<String, Object> provenance = new LinkedHashMap<>(parent.model());
                     String originalRecipeKey =
@@ -563,6 +571,7 @@ public class LocalMusic {
                                     write(parent.basisRecipe()),
                                     "Your arrangement choices. The confirmed melody notes stay"
                                             + " unchanged."
+                                            + grooveDescription(recipe, parent.recipe())
                                             + LocalMix.describe(recipe, parent.recipe()),
                                     write(
                                             List.of(
@@ -593,6 +602,13 @@ public class LocalMusic {
                     "PLAN_REQUIRED",
                     "Preview and confirm the proposed changes before creating a version.");
         Plan p = plan(command.localPlanId());
+        var confirmed = requirePlanNotes(explorationId, command, p);
+        validateDownbeat(p.recipe(), confirmed.durationSeconds());
+        return p;
+    }
+
+    private Notes requirePlanNotes(
+            String explorationId, Models.CreateRequestCommand command, Plan p) {
         var e = exploration(explorationId, command.expectedSourceRevision());
         boolean owned =
                 db.sql("SELECT EXISTS(SELECT 1 FROM local_plan WHERE id=? AND exploration_id=?)")
@@ -613,8 +629,7 @@ public class LocalMusic {
                     "PLAN_CHANGED",
                     "The source, direction or selected basis changed. Preview the proposed changes"
                             + " again.");
-        currentNotes(explorationId, p.sourceRevision(), p.noteRevision(), true);
-        return p;
+        return currentNotes(explorationId, p.sourceRevision(), p.noteRevision(), true);
     }
 
     public Map<String, Object> renderRequest(String planId, String exploration) {
@@ -635,6 +650,7 @@ public class LocalMusic {
                         .stream()
                         .findFirst()
                         .orElseThrow(() -> problem("PLAN_CHANGED", "The reviewed melody and recording do not match."));
+        validateDownbeat(p.recipe(), ((Number) source.get("duration_seconds")).doubleValue());
         Map<String, Object> request = new LinkedHashMap<>();
         request.put("schemaVersion", 1);
         request.put("operation", "render");
@@ -674,6 +690,7 @@ public class LocalMusic {
                 + " backing; "
                 + recipe.get("bpm")
                 + " BPM backing pulse."
+                + grooveDescription(recipe, plan.basisRecipe())
                 + LocalMix.describe(recipe, plan.basisRecipe());
     }
 
@@ -813,7 +830,12 @@ public class LocalMusic {
                                     .params(jobId, exploration, n.revision())
                                     .update();
                         } else {
-                            currentNotes(exploration, source, number(row, "note_revision"), true);
+                            var confirmed =
+                                    currentNotes(
+                                            exploration,
+                                            source,
+                                            number(row, "note_revision"),
+                                            true);
                             if (number(e, "draft_revision")
                                     != ((Number) payload.get("draftRevision")).longValue())
                                 throw problem(
@@ -822,6 +844,7 @@ public class LocalMusic {
                                                 + " Review it and try again.");
                             Map<String, Object> recipe =
                                     validateRecipe(map(result.path("recipe").toString()));
+                            validateDownbeat(recipe, confirmed.durationSeconds());
                             db.sql(
                                             "INSERT INTO"
                                                 + " local_plan(id,exploration_id,source_recording_id,source_revision,note_revision,draft_revision,basis_recording_id,submitted_text,recipe_json,basis_recipe_json,summary,warnings_json,can_generate,model_json,preparation_job_id)"
@@ -927,6 +950,7 @@ public class LocalMusic {
     public static Map<String, Object> validateRecipe(Map<String, Object> input) {
         Map<String, Object> r = new LinkedHashMap<>(input == null ? Map.of() : input);
         r.remove("mix");
+        Object grid = r.remove("groove");
         if (!r.keySet()
                         .equals(
                                 Set.of(
@@ -942,14 +966,53 @@ public class LocalMusic {
                 || !(r.get("drums") instanceof Boolean)
                 || !Set.of("sparse", "steady").contains(String.valueOf(r.get("density")))
                 || !Set.of("soft", "normal").contains(String.valueOf(r.get("backingVolume")))
-                || !(r.get("bpm") instanceof Integer)
-                || ((Integer) r.get("bpm")) != 100)
+                || !(r.get("bpm") instanceof Integer tempo)
+                || tempo < 40
+                || tempo > 200
+                || (grid == null && tempo != 100))
             throw problem(
                     "PLAN_INVALID",
                     "The proposed changes are outside the supported instrument/backing controls.");
+        if (input.containsKey("groove")) {
+            if (!(grid instanceof Map<?, ?> fields)
+                    || !fields.keySet().equals(Set.of("pattern", "downbeatMs"))
+                    || !Set.of("swing_ride", "four_on_the_floor")
+                            .contains(String.valueOf(fields.get("pattern")))
+                    || !(fields.get("downbeatMs") instanceof Integer firstBeat)
+                    || firstBeat < 0)
+                throw problem(
+                        "PLAN_INVALID",
+                        "Choose a supported drum pattern and a first beat in milliseconds.");
+            Map<String, Object> groove = new TreeMap<>();
+            groove.put("pattern", fields.get("pattern"));
+            groove.put("downbeatMs", firstBeat);
+            r.put("groove", groove);
+            validateDownbeat(r, 12);
+        }
         var mix = LocalMix.canonical(input);
         if (!mix.isEmpty()) r.put("mix", mix);
         return r;
+    }
+
+    private static void validateDownbeat(Map<String, Object> recipe, double seconds) {
+        if (recipe.get("groove") instanceof Map<?, ?> grid
+                && (Integer) grid.get("downbeatMs") + 10L > seconds * 1000 + 1e-7)
+            throw problem(
+                    "PLAN_INVALID",
+                    "Place the first beat inside the recording with at least 10 ms left to play.");
+    }
+
+    private static String grooveDescription(
+            Map<String, Object> recipe, Map<String, Object> previous) {
+        if (recipe.get("groove") instanceof Map<?, ?> grid)
+            return " Drum pattern: "
+                    + grid.get("pattern").toString().replace('_', ' ')
+                    + ", "
+                    + recipe.get("bpm")
+                    + " BPM, first beat at "
+                    + grid.get("downbeatMs")
+                    + " ms.";
+        return previous.containsKey("groove") ? " Restored the original 100 BPM pulse." : "";
     }
 
     private List<Note> readNotes(String value) {

@@ -796,6 +796,8 @@ components:
         muted: { type: boolean }
     LocalRecipe:
       type: object
+      if: { not: { required: [groove] } }
+      then: { properties: { bpm: { const: 100 } } }
       additionalProperties: false
       required: [instrument, bass, drums, density, backingVolume, bpm]
       properties:
@@ -804,7 +806,14 @@ components:
         drums: { type: boolean }
         density: { type: string, enum: [sparse, steady] }
         backingVolume: { type: string, enum: [soft, normal] }
-        bpm: { type: integer, const: 100, description: Backing-only pulse; does not retime melody notes. }
+        bpm: { type: integer, minimum: 40, maximum: 200, description: "Backing tempo. The original pulse without a groove uses 100 BPM. Lead timing is preserved." }
+        groove:
+          type: object
+          additionalProperties: false
+          required: [pattern, downbeatMs]
+          properties:
+            pattern: { type: string, enum: [swing_ride, four_on_the_floor] }
+            downbeatMs: { type: integer, minimum: 0, maximum: 11990, description: "First backing beat in milliseconds. Leave at least 10 ms before the end of the clip." }
         mix:
           type: object
           additionalProperties: false

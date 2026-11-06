@@ -45,12 +45,14 @@
 .studio-app select,
 .studio-app textarea,
 .workspace-options select,
+.recipe-fields input,
 .recipe-fields select {
   font: inherit;
 }
 .studio-app input:not([type="range"]),
 .studio-app select,
 .workspace-options select,
+.recipe-fields input,
 .recipe-fields select {
   min-height: 44px;
   background: var(--background);
@@ -558,8 +560,11 @@
   gap: 12px;
   font-size: 14px;
 }
-.recipe-fields select {
+.recipe-fields select,
+.recipe-fields input {
   width: 150px;
+  max-width: 55%;
+  min-width: 0;
 }
 .creation-state,
 .result-state {

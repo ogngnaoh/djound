@@ -31,6 +31,7 @@ type AudioState = {
   loading: boolean;
   error: string;
   position: number;
+  playhead: (projectId: string) => number | null;
   duration: number;
   volume: number;
   choose: (t: Track, play?: boolean) => void;
@@ -116,6 +117,26 @@ export function AudioProvider({
       setPosition(a.currentTime);
     }
   }, []);
+  const playhead = useCallback((projectId: string) => {
+    const element = audio.current;
+    if (
+      !element ||
+      current.current?.projectId !== projectId ||
+      element.error ||
+      element.readyState < HTMLMediaElement.HAVE_METADATA ||
+      !element.currentSrc ||
+      element.currentSrc !== element.src ||
+      !Number.isFinite(element.duration) ||
+      element.duration <= 0
+    )
+      return null;
+    const position = element.currentTime;
+    return Number.isFinite(position) &&
+      position >= 0 &&
+      position <= element.duration
+      ? position
+      : null;
+  }, []);
   const restart = useCallback(() => seek(0), [seek]);
   const setVolume = useCallback((n: number) => {
     if (audio.current) audio.current.volume = n;
@@ -149,6 +170,7 @@ export function AudioProvider({
         loading,
         error,
         position,
+        playhead,
         duration,
         volume,
         choose,

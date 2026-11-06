@@ -13,6 +13,14 @@ const GROUPS = [
     edits: ["add bass", "remove bass", "add drums", "remove drums"],
   },
   {
+    label: "Drum pattern",
+    edits: [
+      "use swing ride at 100 bpm from 0 ms",
+      "use four on the floor at 100 bpm from 0 ms",
+      "restore the original pulse",
+    ],
+  },
+  {
     label: "Backing pattern and volume",
     edits: [
       "make the backing sparse",

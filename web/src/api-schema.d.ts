@@ -742,11 +742,14 @@ export interface components {
             density: "sparse" | "steady";
             /** @enum {string} */
             backingVolume: "soft" | "normal";
-            /**
-             * @description Backing-only pulse; does not retime melody notes.
-             * @constant
-             */
-            bpm: 100;
+            /** @description Backing tempo. The original pulse without a groove uses 100 BPM. Lead timing is preserved. */
+            bpm: number;
+            groove?: {
+                /** @enum {string} */
+                pattern: "swing_ride" | "four_on_the_floor";
+                /** @description First backing beat in milliseconds. Leave at least 10 ms before the end of the clip. */
+                downbeatMs: number;
+            };
             /** @description Complete strip settings for active tracks only. Omitted tracks play at 0 dB, centered and unmuted. At least one active track must be unmuted. */
             mix?: {
                 lead?: components["schemas"]["LocalMixStrip"];

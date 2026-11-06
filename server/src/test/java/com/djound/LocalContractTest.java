@@ -71,6 +71,62 @@ class LocalContractTest {
     }
 
     @Test
+    void grooveRequiresACompletePatternAndIntegerTimingWhileLegacyRecipesRetainTheirTempo() {
+        var recipe =
+                new HashMap<String, Object>(
+                        Map.of(
+                                "instrument",
+                                "recorded",
+                                "bass",
+                                false,
+                                "drums",
+                                true,
+                                "density",
+                                "steady",
+                                "backingVolume",
+                                "normal",
+                                "bpm",
+                                40));
+        assertThrows(ApiProblem.class, () -> LocalMusic.validateRecipe(recipe));
+        var latest = Map.of("pattern", "swing_ride", "downbeatMs", 11990);
+        recipe.put("groove", latest);
+        assertEquals(recipe, LocalMusic.validateRecipe(recipe));
+        recipe.put("bpm", 200);
+        assertEquals(recipe, LocalMusic.validateRecipe(recipe));
+        for (Object invalidTempo : List.of(39, 201, 80.0, "125")) {
+            recipe.put("bpm", invalidTempo);
+            assertEquals(
+                    "PLAN_INVALID",
+                    assertThrows(ApiProblem.class, () -> LocalMusic.validateRecipe(recipe)).code());
+        }
+        recipe.put("bpm", 100);
+        for (Object invalid :
+                List.of(
+                        Map.of("pattern", "swing_ride"),
+                        Map.of("pattern", "unknown", "downbeatMs", 0),
+                        Map.of("pattern", "swing_ride", "downbeatMs", -1),
+                        Map.of("pattern", "swing_ride", "downbeatMs", 11991),
+                        Map.of("pattern", "swing_ride", "downbeatMs", Integer.MAX_VALUE),
+                        Map.of("pattern", "swing_ride", "downbeatMs", 0.5),
+                        Map.of(
+                                "pattern",
+                                "swing_ride",
+                                "downbeatMs",
+                                0,
+                                "sourceAudio",
+                                "/tmp/other"))) {
+            recipe.put("groove", invalid);
+            assertEquals(
+                    "PLAN_INVALID",
+                    assertThrows(ApiProblem.class, () -> LocalMusic.validateRecipe(recipe)).code());
+        }
+        recipe.put("groove", null);
+        assertThrows(ApiProblem.class, () -> LocalMusic.validateRecipe(recipe));
+        recipe.remove("groove");
+        assertEquals(recipe, LocalMusic.validateRecipe(recipe));
+    }
+
+    @Test
     void mixerAcceptsOnlyCompleteActiveFiniteStripsAndDropsUnitySettings() {
         var recipe =
                 new HashMap<String, Object>(

@@ -90,8 +90,8 @@ def validate_mix(value, available):
     return result
 
 
-def recipe(value):
-    if not isinstance(value, dict) or (set(value) - {'mix'}) != set(DEFAULT_RECIPE):
+def recipe(value, duration=12):
+    if not isinstance(value, dict) or (set(value) - {'mix', 'groove'}) != set(DEFAULT_RECIPE):
         raise EngineError('LOCAL_INVALID_RECIPE', 'The proposed arrangement is incomplete or has unsupported fields.')
     if value['instrument'] not in ('piano', 'electric_piano', 'guitar', 'recorded'):
         raise EngineError('LOCAL_INVALID_RECIPE', 'Choose the uploaded recording, piano, electric piano, or guitar.')
@@ -99,11 +99,20 @@ def recipe(value):
         raise EngineError('LOCAL_INVALID_RECIPE', 'Bass and drums must be explicit on/off choices.')
     if value['density'] not in ('sparse', 'steady') or value['backingVolume'] not in ('soft', 'normal'):
         raise EngineError('LOCAL_INVALID_RECIPE', 'Use sparse or steady backing and soft or normal backing volume.')
-    if type(value['bpm']) is not int or value['bpm'] != 100:
-        raise EngineError('LOCAL_INVALID_RECIPE', 'This version uses a fixed 100 BPM backing; melody timing stays unchanged.')
     # Equivalent Java/JSON maps may arrive in different key orders. The model
     # consumes tokens, not an abstract map: use one stable prompt representation.
     result = arrangement_settings(value)
+    if type(value['bpm']) is not int or not 40 <= value['bpm'] <= 200:
+        raise EngineError('LOCAL_INVALID_RECIPE', 'Choose a backing tempo from 40 to 200 BPM.')
+    if 'groove' in value:
+        grid = value['groove']
+        if not isinstance(grid, dict) or set(grid) != {'pattern', 'downbeatMs'} or grid['pattern'] not in ('swing_ride', 'four_on_the_floor'):
+            raise EngineError('LOCAL_INVALID_RECIPE', 'Choose swing ride or four on the floor with an explicit first beat.')
+        if type(grid['downbeatMs']) is not int or not 0 <= grid['downbeatMs'] <= duration * 1000 - 10 + 1e-7:
+            raise EngineError('LOCAL_INVALID_RECIPE', 'Place the first beat inside the recording with at least 10 ms left to play.')
+        result['groove'] = dict(grid)
+    elif value['bpm'] != 100:
+        raise EngineError('LOCAL_INVALID_RECIPE', 'Choose a drum pattern to set a backing tempo. The original pulse uses 100 BPM.')
     if 'mix' in value:
         strips = validate_mix(value['mix'], active_stems(result))
         if strips:

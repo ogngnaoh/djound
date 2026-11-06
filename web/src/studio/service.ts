@@ -668,6 +668,7 @@ function backendProject(e: Exploration, local?: LocalState): Project {
     tracks,
     notes: local?.notes?.notes ?? [],
     confirmed: local?.notes?.status === "CONFIRMED",
+    melodyDuration: local?.notes?.durationSeconds,
     noteRevision: local?.notes?.revision ?? 0,
     sourceRevision: e.sourceRevision,
     draftRevision: e.draft.revision,

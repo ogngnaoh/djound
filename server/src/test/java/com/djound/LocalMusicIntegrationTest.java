@@ -209,6 +209,105 @@ else:
     }
 
     @Test
+    void grooveEditsUseTheWholeConfirmedClipAndFreezeTheReviewedSourceAndPattern()
+            throws Exception {
+        String id = source();
+        var n = confirmed(id);
+        var controls = new PlanCommand(1L, n.revision(), 1L, "electric piano", null);
+        var initial = local().manual(id, controls);
+        assertEquals(1.0, n.durationSeconds());
+        var recipe = new LinkedHashMap<>(initial.recipe());
+        recipe.put("instrument", "recorded");
+        recipe.put("drums", true);
+        recipe.put("bpm", 132);
+        recipe.put("groove", Map.of("pattern", "swing_ride", "downbeatMs", 991));
+        var correction = new CorrectionCommand(1L, n.revision(), 1L, initial.text(), null, recipe);
+        assertEquals(
+                "PLAN_INVALID",
+                assertThrows(ApiProblem.class, () -> local().correct(initial.id(), correction))
+                        .code());
+        var json = new tools.jackson.databind.ObjectMapper();
+        var fixture = root.resolve("plan-result.json");
+        Files.writeString(fixture, json.writeValueAsString(Map.of("recipe", recipe)));
+        var rejected = completed(local().propose(id, controls));
+        assertEquals("PLAN_INVALID", rejected.outcomeCode());
+        assertEquals(initial, local().state(id).plan());
+
+        // The last confirmed melody note ends at 800 ms. The clip supports a beat at 990 ms.
+        recipe.put("groove", Map.of("pattern", "swing_ride", "downbeatMs", 990));
+        Files.writeString(fixture, json.writeValueAsString(Map.of("recipe", recipe)));
+        var accepted = completed(local().propose(id, controls));
+        assertEquals("SUCCEEDED", accepted.state());
+        var swing = local().result(accepted.id()).plan();
+        assertEquals(recipe, swing.recipe());
+        assertEquals(swing, local().correct(swing.id(), correction));
+        var workerInput =
+                json.readTree(
+                        Files.readString(
+                                root.resolve("local-jobs")
+                                        .resolve(accepted.id())
+                                        .resolve("request.json")));
+        assertEquals(n.durationSeconds(), workerInput.path("duration").asDouble());
+
+        recipe.put("groove", Map.of("pattern", "four_on_the_floor", "downbeatMs", 250));
+        var straight = local().correct(swing.id(), correction);
+        assertNotEquals(swing.id(), straight.id());
+        assertEquals(recipe, straight.recipe());
+        assertEquals(
+                Map.of("pattern", "swing_ride", "downbeatMs", 990),
+                local().plan(swing.id()).recipe().get("groove"));
+        var request = local().renderRequest(straight.id(), id);
+        assertEquals(n.notes(), request.get("notes"));
+        assertEquals(n.durationSeconds(), request.get("duration"));
+        assertEquals(ex().get(id).original().sha256(), request.get("sourceSha256"));
+        assertEquals(straight.recipe(), request.get("recipe"));
+        var saved = finished(gen().create(id, command(straight), "groove-version-key").attemptId());
+        assertEquals("SUCCEEDED", saved.state());
+        var recording = ex().recording(saved.resultRecordingId());
+        assertEquals(recipe, recording.localRecipe());
+        assertTrue(
+                recording.direction().contains("four on the floor, 132 BPM, first beat at 250 ms"));
+        assertEquals(
+                "STALE_DRAFT",
+                assertThrows(ApiProblem.class, () -> local().correct(swing.id(), correction))
+                        .code());
+
+        var draft =
+                ex().saveDraft(
+                                id,
+                                new Models.DraftUpdate(
+                                        "Restore the original pulse",
+                                        recording.id(),
+                                        ex().get(id).draft().revision()));
+        var child =
+                local().manual(
+                                id,
+                                new PlanCommand(
+                                        1L,
+                                        n.revision(),
+                                        draft.revision(),
+                                        draft.text(),
+                                        recording.id()));
+        assertEquals(straight.recipe(), child.basisRecipe());
+        var reset = new LinkedHashMap<>(child.recipe());
+        reset.remove("groove");
+        reset.put("bpm", 100);
+        var restored =
+                local().correct(
+                                child.id(),
+                                new CorrectionCommand(
+                                        1L,
+                                        n.revision(),
+                                        draft.revision(),
+                                        draft.text(),
+                                        recording.id(),
+                                        reset));
+        assertTrue(restored.summary().contains("Restored the original 100 BPM pulse."));
+        assertFalse(restored.recipe().containsKey("groove"));
+        assertEquals(straight.recipe(), ex().recording(recording.id()).localRecipe());
+    }
+
+    @Test
     void coreAudioCanRenderDirectSettingsWhenOnlyTheOptionalPlannerIsUnavailable()
             throws Exception {
         Files.writeString(

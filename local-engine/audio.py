@@ -14,6 +14,7 @@ import soundfile as sf
 from common import HOME, DEFAULT_RECIPE, EngineError, canonical_hash, digest, notes as validate_notes, recipe as validate_recipe, validate_mix, write_json
 from safe_export import save_safe_wav
 from stem_mixer import Strip, mix
+from grooves import groove_notes
 from validate_audio import validate
 
 
@@ -66,7 +67,8 @@ def arrangement(notes, duration, recipe):
     programs = {'piano': 0, 'electric_piano': 4, 'guitar': 24, 'recorded': 0}
     tracks = [{'id': 'lead', 'program': programs[recipe['instrument']], 'bank': 0, 'notes': deepcopy(notes)}]
     beat = 60 / recipe['bpm']
-    origin = min(note['start'] for note in notes)
+    grid = recipe.get('groove')
+    origin = grid['downbeatMs'] / 1000 if grid else min(note['start'] for note in notes)
     sparse, soft = recipe['density'] == 'sparse', recipe['backingVolume'] == 'soft'
     bass, drums = [], []
     step = 0
@@ -75,6 +77,8 @@ def arrangement(notes, duration, recipe):
     while step == 0 or origin + step * beat < duration - .12:
         start = origin + step * beat
         active = [note for note in notes if note['start'] <= start < note['end']]
+        if grid and not active and recipe['bass']:
+            active = [min(notes, key=lambda n: min(abs(n['start'] - start), abs(n['end'] - start)))]
         if active and step % (4 if sparse else 2) == 0:
             chosen = max(active, key=lambda note: note['velocity'])
             bass.append({'start': start, 'end': min(duration, start + beat * .65),
@@ -86,6 +90,8 @@ def arrangement(notes, duration, recipe):
         step += 1
     if recipe['bass'] and bass:
         tracks.append({'id': 'bass', 'program': 32, 'bank': 0, 'notes': bass})
+    if grid and recipe['drums']:
+        drums = groove_notes(grid['pattern'], recipe['bpm'], origin, duration, sparse, soft)
     if recipe['drums'] and drums:
         tracks.append({'id': 'drums', 'program': 0, 'bank': 128, 'notes': drums})
     return tracks
@@ -139,7 +145,7 @@ def synthesized_stems(tracks, duration, output):
 
 def render(notes, duration, recipe, output, status='provided_notes', source=None, source_sha=None):
     notes = validate_notes(notes, duration)
-    recipe = validate_recipe(recipe)
+    recipe = validate_recipe(recipe, duration)
     anchor = canonical_hash(notes)
     tracks = arrangement(notes, duration, recipe)
     if canonical_hash(tracks[0]['notes']) != anchor:
@@ -203,5 +209,5 @@ def render(notes, duration, recipe, output, status='provided_notes', source=None
                            **({'leadSource': {'type': 'original_recording', 'sourceSha256': source_sha,
                                                'notesRole': 'MIDI guide and backing arrangement'}} if recorded else {}),
                            'export': export, 'audioValidation': integrity, 'seconds': time.monotonic() - started,
-                           'arrangement': 'Explicit backing recipes; fixed backing BPM, unchanged lead timing.',
+                           'arrangement': 'Explicit backing recipes; unchanged lead timing.',
                            'tailPolicy': 'Final 20ms fade on synthesized stems; recorded performances keep their ending.'}}

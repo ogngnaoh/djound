@@ -522,7 +522,8 @@ function Studio({
               {mode === "prototype"
                 ? "Prototype recordings use authored sample audio."
                 : "Recordings are stored in your local workspace."}{" "}
-              Melody timing is preserved. Backing uses a fixed 100 BPM.
+              Melody timing is preserved.{" "}
+              {track.recipeKnown && `Backing tempo: ${track.recipe.bpm} BPM.`}
             </p>
             <Link className="text-action" to={`/remix/${project.id}/melody`}>
               Review melody notes <ArrowRight size={15} />

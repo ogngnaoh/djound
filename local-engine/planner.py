@@ -81,6 +81,8 @@ def validate_patch(value, parent):
     # The text model can edit arrangement slots only. Inherit the selected
     # version's existing strips for still-active parts, with unity for new parts.
     arrangement = arrangement_settings(parent)
+    if 'groove' in parent:
+        arrangement['groove'] = parent['groove']
     arrangement.update(value['changes'])
     complete = recipe(arrangement)
     inherited = {name: strip for name, strip in parent.get('mix', {}).items()

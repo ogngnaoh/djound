@@ -17,7 +17,8 @@ export type Recipe = {
   drums: boolean;
   density: "sparse" | "steady";
   backingVolume: "soft" | "normal";
-  bpm: 100;
+  bpm: number;
+  groove?: components["schemas"]["LocalRecipe"]["groove"];
   mix?: Partial<Record<Stem, MixStrip>>;
 };
 export type Note = {
@@ -49,6 +50,7 @@ export type Project = {
   tracks: Track[];
   notes: Note[];
   confirmed: boolean;
+  melodyDuration?: number;
   noteRevision: number;
   sourceRevision: number;
   draftRevision: number;
