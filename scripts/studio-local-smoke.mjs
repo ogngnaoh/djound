@@ -350,18 +350,25 @@ try {
   await shot("04-refinement-result");
 
   await useVersion(second);
-  await direction().fill("Use guitar for this version.");
+  const recoveryDraft = audioOnly
+    ? "Give the rhythm the hush of a room after closing time."
+    : "Use guitar for this version.";
+  await direction().fill(recoveryDraft);
   if (audioOnly) {
-    await expect(button("Review changes")).toBeDisabled();
+    await expect(button("Review changes")).toBeEnabled();
     await expect(button("Adjust arrangement")).toBeEnabled();
-    await expect(page.getByText(state.freeformUnavailableReason, {exact:true})).toBeVisible();
+    await button("Review changes").click();
+    await expect(page.getByRole("alert")).toContainText(state.freeformUnavailableReason, {timeout: 20000});
+    expect((await local()).latestJob).toMatchObject({state: "FAILED", outcomeCode: "LOCAL_PLANNER_UNAVAILABLE"});
+    expect((await exploration()).renditions).toHaveLength(2);
+    await expect(button("Create version")).toHaveCount(0);
     await page.reload();
-    await expect(direction()).toHaveValue("Use guitar for this version.");
-    await expect(button("Review changes")).toBeDisabled();
+    await expect(direction()).toHaveValue(recoveryDraft);
+    await expect(button("Review changes")).toBeEnabled();
     const panel = await openGuidedEdits();
     await button("Compose guided edit").click();
     await page.getByLabel("Add a guided edit").selectOption("use guitar");
-    await expect(panel.getByText("Use guitar for this version.", {exact:true})).toBeVisible();
+    await expect(panel.getByText(recoveryDraft, {exact:true})).toBeVisible();
     await expect(button("Review changes")).toBeEnabled();
   }
   const recoveryText = await direction().inputValue();
@@ -427,7 +434,7 @@ try {
   expect(third.direction).toContain("Guitar");
   expect((await local()).notes).toEqual(confirmed);
   expect((await exploration()).original).toEqual(source);
-  expect(plannerRequests).toHaveLength(3); // Two actual plans and one simulated unavailable response.
+  expect(plannerRequests).toHaveLength(audioOnly ? 4 : 3);
   expect(submissions).toHaveLength(4); // Third receipt replay does not create a fourth version.
   expect(new Set(submissions.map((s) => s.key)).size).toBe(3);
   expect(submissions[3]).toEqual(submissions[2]);
@@ -865,8 +872,19 @@ try {
     expect(removedChart.localRecipe).toEqual(neutral.localRecipe);
     expect(removedChart.sha256).toBe(neutral.sha256);
     expect((await exploration()).original.sha256).toBe(source.sha256);
+
+    await useVersion(removedChart);
+    const compound = await interpret("Switch to guitar and lower the drums by 6 dB.");
+    expect(compound.model).toMatchObject({origin: "GUIDED_COMMANDS", inferenceAttempts: 0});
+    expect(compound.basisRecordingId).toBe(removedChart.id);
+    expect(compound.recipe).toEqual({...removedChart.localRecipe, instrument: "guitar",
+      mix: {drums: {gainDb: -6, pan: 0, muted: false}}});
+    const mixedGuitar = await create(18);
+    expect(mixedGuitar.localRecipe).toEqual(compound.recipe);
+    await playRow(mixedGuitar);
+    await pause();
     extraPlans.push(performancePlan, soloPlan, swingPlan, straightPlan, returnPlan, brightPlan, warmPlan,
-      neutralPlan, chartPlan, barPlan, undoBarPlan, removeChartPlan);
+      neutralPlan, chartPlan, barPlan, undoBarPlan, removeChartPlan, compound);
   }
   expect(errors).toEqual([]);
   expect(external).toEqual([]);
@@ -893,7 +911,7 @@ try {
             }
           : {}),
         checks: [
-          ...(audioOnly ? ["audio engine ready with optional language planner absent; freeform review disabled, original words retained, guided and direct renders available"] : []),
+          ...(audioOnly ? ["unsupported wording reaches the server with weights absent; no rendition is created and the original words survive reload for guided or direct editing"] : []),
           "real upload, actual transcription and listening review without opening optional editor",
           "confirmed notes unchanged across successive real local renders",
           guidedWalkthrough
@@ -914,6 +932,7 @@ try {
             "recorded lead with direct swing drums, guided straight drums, and exact restoration on a 120 BPM pickup grid",
             "natural bright and neutral tone phrases and direct warm adjustment preserve the grid; resetting restores the served WAV exactly",
             "actual confirmed-note chord suggestion, direct one-bar correction, exact restoration and complete chart removal",
+            "one plain text request switches the lead to guitar and lowers only the drums by 6 dB",
           ] : []),
           "desktop and 390/320 px layouts; mobile refinement controls",
           "no unexpected browser errors or external browser requests",

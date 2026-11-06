@@ -5,5 +5,7 @@
   {"pattern":"^(mute|unmute|center) (?:the )?(lead|bass|drums|chords)$","command":"$1 $2"},
   {"pattern":"^(lower|raise) (?:the )?(lead|bass|drums|chords) by ([0-9]+(?:\\.[0-9]{1,3})?) (?:db|decibels?)$","command":"$1 $2 by $3 db"},
   {"pattern":"^pan (?:the )?(lead|bass|drums|chords) ([0-9]+(?:\\.[0-9]{1,3})?) ?(?:%|percent) (left|right)$","command":"pan $1 $2% $3"},
-  {"pattern":"^pan (?:the )?(lead|bass|drums|chords) hard (left|right)$","command":"pan $1 hard $2"}
+  {"pattern":"^pan (?:the )?(lead|bass|drums|chords) hard (left|right)$","command":"pan $1 hard $2"},
+  {"pattern":"^set (?:the )?(lead|bass|drums|chords) gain to ([+-]?(?:[0-9]+(?:\\.[0-9]{1,3})?|\\.[0-9]{1,3})) (?:db|decibels?)$","command":"set $1 gain to $2 db"},
+  {"pattern":"^set (?:the )?(lead|bass|drums|chords) tone to (neutral|warm|bright)$","command":"set $1 tone to $2"}
 ]

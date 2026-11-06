@@ -160,14 +160,20 @@ def guided_plan(prompt, parent, notes=None, duration=None):
         return None
     if len(prompt) > 1000:
         raise EngineError('LOCAL_INVALID_REQUEST', 'Keep the guided edit within 1000 characters.')
-    before = recipe(DEFAULT_RECIPE if parent is None else parent, duration)
+    return reviewed_plan(text[prefix.end():].split(';'), parent, notes, duration)
+
+
+def execute_actions(before, actions, notes=None, duration=None):
+    """Apply the whole edit to a copy. Only publishable recipes leave this boundary."""
     state = dict(before)
     strips = {stem: dict(strip) for stem, strip in state.pop('mix', {}).items()}
     assigned = set()
     annotations = {}
-    clauses = text[prefix.end():].split(';')
-    for index, raw in enumerate(clauses, 1):
+    for index, raw in enumerate(actions, 1):
         try:
+            if isinstance(raw, Assignment):
+                apply(raw, state, strips, assigned)
+                continue
             if not raw.strip():
                 raise unsupported('Enter one complete listed command using plain English text.')
             clause = ' '.join(raw.lower().split())
@@ -195,18 +201,28 @@ def guided_plan(prompt, parent, notes=None, duration=None):
                 apply(parse(clause), state, strips, assigned)
         except EngineError as error:
             raise EngineError(error.code, f'Command {index}. {error.message}') from error
-    try:
-        # A removed or resting chart may retire prior strips, but never discard a
-        # mixer change that the listener explicitly requested in this same plan.
-        for stem in strips.keys() - set(active_stems(state)):
-            if any(track == stem for track, _ in assigned):
-                raise unsupported(f'The requested mix needs an audible {stem} track.')
-            del strips[stem]
-        complete = recipe({**state, 'mix': strips}, duration)
-    except EngineError as error:
-        raise unsupported(error.message) from error
+    # Remove inherited strips for parts that stopped playing, preserving any explicit request
+    # for an inaudible stem as an error instead of silently skipping it.
+    for stem in strips.keys() - set(active_stems(state)):
+        if any(track == stem for track, _ in assigned):
+            raise unsupported(f'The requested mix needs an audible {stem} track.')
+        del strips[stem]
+    complete = recipe({**state, 'mix': strips}, duration)
     if complete == before:
-        raise EngineError('LOCAL_NO_CHANGE', 'These commands already match the selected version.')
+        raise EngineError('LOCAL_NO_CHANGE', 'These settings already match the selected version.')
+    return complete, annotations
+
+
+def reviewed_plan(commands, parent, notes=None, duration=None, syntax=None):
+    before = recipe(DEFAULT_RECIPE if parent is None else parent, duration)
+    try:
+        complete, annotations = execute_actions(before, commands, notes, duration)
+    except EngineError as error:
+        if error.code == 'LOCAL_INVALID_RECIPE':
+            raise unsupported(error.message) from error
+        raise
+    if syntax:
+        annotations['syntax'] = syntax
     changes = {key: complete.get(key, {} if key == 'mix' else None) for key in (*DEFAULT_RECIPE, 'groove', 'harmony', 'mix')
                if complete.get(key) != before.get(key)}
     return {

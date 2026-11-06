@@ -7,7 +7,6 @@ import {
   chordSuggestions,
   removeChart,
 } from "./harmony.ts";
-import { isOfflineRequest } from "./chartPhrases.ts";
 import {
   activeStems,
   allTracksMuted,
@@ -647,28 +646,6 @@ test("suggestion evidence must match the grid and cannot change the reviewed cha
   assert.equal(
     chordSuggestions(chart, [raw[0], { ...raw[1], alternatives: ["H"] }]),
     undefined,
-  );
-});
-
-test("audio-only availability accepts chart politeness per clause and requires every clause", () => {
-  assert.equal(
-    isOfflineRequest("warm the lead and please suggest chords"),
-    true,
-  );
-  assert.equal(
-    isOfflineRequest(
-      "please suggest chords.; change bar 2 to E♭ minor. and warm the lead",
-    ),
-    true,
-  );
-  assert.equal(isOfflineRequest("warm the lead and please add bass"), false);
-  assert.equal(
-    isOfflineRequest("suggest chords.; please warm the lead"),
-    false,
-  );
-  assert.equal(
-    isOfflineRequest("warm the lead and please suggest chords with reverb"),
-    false,
   );
 });
 

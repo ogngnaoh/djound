@@ -4,10 +4,12 @@ import re
 
 from chart_phrases import chart_action
 from common import ROOT, EngineError
+from edit_commands import parse
 
 
-MIX = [(re.compile(row['pattern']), row['command'])
-       for row in json.loads((ROOT / 'contracts/mix-phrases.json').read_text())]
+COMMAND_TEMPLATES = [(re.compile(row['pattern']), row['command'], kind)
+                     for kind in ('mix', 'arrangement')
+                     for row in json.loads((ROOT / f'contracts/{kind}-phrases.json').read_text())]
 TONES = json.loads((ROOT / 'contracts/tone-phrases.json').read_text())
 PHRASES = {
     pattern.format(track=article + name): (stem, tone)
@@ -29,9 +31,9 @@ def compile_clause(clause):
         return f'set {stem} tone to {tone}', 'tone'
     if chart_action(clause):
         return clause, 'chart'
-    for pattern, template in MIX:
+    for pattern, template, kind in COMMAND_TEMPLATES:
         if match := pattern.fullmatch(clause):
-            return re.sub(r'\$(\d)', lambda group: match[int(group[1])], template), 'mix'
+            return re.sub(r'\$(\d)', lambda group: match[int(group[1])], template), kind
     return None
 
 
@@ -51,7 +53,7 @@ def reviewed_phrases(text):
         syntax = 'chart-phrases-v1'
     else:
         syntax = 'reviewed-phrases-v1'
-    return '; '.join(commands), syntax
+    return commands, syntax
 
 
 # The model has one shared backing-volume control and no track mixer fields.
@@ -72,9 +74,13 @@ def freeform_requirements(text):
     all_clauses_known = True
     for clause in clauses(text):
         matched = compile_clause(clause)
-        if matched and matched[0] in ('add bass', 'remove bass', 'add drums', 'remove drums'):
-            verb, field = matched[0].split()
-            value = verb == 'add'
+        if matched and (matched[1] == 'arrangement' or matched[0] in ('add bass', 'remove bass', 'add drums', 'remove drums')):
+            # Only ordinary slot assignments can become obligations on the six-slot model.
+            # A groove or the recorded lead can only go through the complete command path.
+            action = parse(matched[0])
+            if action.value == 'recorded':
+                raise EngineError('LOCAL_UNSUPPORTED_REQUEST', 'Review the complete uploaded-lead request in Guided edits.')
+            field, value = action.field, action.value
         elif volume := _VOLUME.fullmatch(clause):
             field, value = 'backingVolume', 'normal' if 'normal' in volume.groups() else 'soft'
         else:
@@ -86,6 +92,9 @@ def freeform_requirements(text):
         if field in required and required[field] != value:
             raise EngineError('LOCAL_UNSUPPORTED_REQUEST', 'Choose one change for each arrangement setting.')
         required[field] = value
+    if required and not all_clauses_known:
+        raise EngineError('LOCAL_UNSUPPORTED_REQUEST',
+                          'Only part of this request matched an arrangement control. Review the complete edit in Guided edits.')
     return required, all_clauses_known
 
 

@@ -1,0 +1,9 @@
+[
+  {"pattern":"^(?:use |switch to |put the lead on )(piano|electric piano|guitar)$","command":"use $1"},
+  {"pattern":"^(?:use|switch to) the uploaded recording$","command":"use the uploaded recording"},
+  {"pattern":"^make (?:the )?backing (soft|normal|sparse|steady)$","command":"make the backing $1"},
+  {"pattern":"^set (?:the )?backing density to (sparse|steady)$","command":"make the backing $1"},
+  {"pattern":"^set (?:the )?backing volume to (soft|normal)$","command":"make the backing $1"},
+  {"pattern":"^use (swing ride|four on the floor) at ([0-9]{1,3}) bpm from ([0-9]{1,5}) ms$","command":"use $1 at $2 bpm from $3 ms"},
+  {"pattern":"^restore the original pulse$","command":"restore the original pulse"}
+]

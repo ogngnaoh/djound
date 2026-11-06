@@ -79,20 +79,9 @@ def validate_patch(value, parent):
         raise EngineError('LOCAL_UNSUPPORTED_REQUEST', value['explanation'])
     if set(value['changes']) - (set(DEFAULT_RECIPE) - {'bpm'}):
         raise EngineError('LOCAL_PLAN_INVALID', 'The local model proposed an unsupported control.')
-    # The text model can edit arrangement slots only. Inherit the selected
-    # version's existing strips for still-active parts, with unity for new parts.
-    arrangement = arrangement_settings(parent)
-    for key in ('groove', 'harmony'):
-        if key in parent:
-            arrangement[key] = parent[key]
-    arrangement.update(value['changes'])
-    complete = recipe(arrangement)
-    inherited = {name: strip for name, strip in parent.get('mix', {}).items()
-                 if name in active_stems(complete)}
-    if inherited:
-        complete = recipe({**complete, 'mix': inherited})
-    if complete == parent:
-        raise EngineError('LOCAL_NO_CHANGE', 'The planner found no changes to the current arrangement. Try a guided edit or adjust the controls directly.')
+    from edit_commands import Assignment, execute_actions
+    actions = [Assignment(field, desired) for field, desired in value['changes'].items()]
+    complete, _ = execute_actions(parent, actions)
     return complete
 
 
@@ -132,14 +121,12 @@ def plan(prompt, parent, output, notes=None, duration=None):
     parent = recipe(DEFAULT_RECIPE if parent is None else parent, duration)
     if 'harmony' in parent and duration is None:
         raise EngineError('LOCAL_INVALID_REQUEST', 'A chord chart plan needs the confirmed clip duration.')
-    from edit_commands import guided_plan
+    from edit_commands import guided_plan, reviewed_plan
     from reviewed_phrases import freeform_requirements, reviewed_phrases
     native = reviewed_phrases(prompt)
     if native is not None:
         commands, syntax = native
-        result = guided_plan('edit: ' + commands, parent, notes=notes, duration=duration)
-        result['provenance']['syntax'] = syntax
-        return result
+        return reviewed_plan(commands, parent, notes, duration, syntax)
     guided = guided_plan(prompt, parent, notes=notes, duration=duration)
     if guided is not None:
         return guided

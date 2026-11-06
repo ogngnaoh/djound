@@ -21,7 +21,6 @@ import {
   normalizeMix,
 } from "./mixState";
 import { ChordChart } from "./ChordChart";
-import { isOfflineRequest } from "./chartPhrases";
 import { GuidedEdits, isGuided } from "./GuidedEdits";
 import { DrumGroove, grooveLabel, validGrid } from "./DrumGroove";
 import {
@@ -435,8 +434,6 @@ export function Refinement({
     mode === "backend" &&
     project.available &&
     project.freeformAvailable === false;
-  const needsLanguageModel =
-    !isGuided(direction) && !isOfflineRequest(direction);
   return (
     <div className="refinement">
       <header>
@@ -499,10 +496,10 @@ export function Refinement({
             }}
             disabled={busy}
           />
-          {guidedOnly && needsLanguageModel && (
+          {guidedOnly && (
             <p className="notice" role="status">
-              {project.freeformUnavailableReason ||
-                "Choose a guided edit or adjust the arrangement directly while the local language planner is unavailable."}
+              The language model is offline. You can still type a specific edit,
+              choose a guided edit, or adjust the tracks directly.
             </p>
           )}
           {mode === "backend" && (
@@ -558,7 +555,6 @@ export function Refinement({
               disabled ||
               busy ||
               !direction.trim() ||
-              (guidedOnly && needsLanguageModel) ||
               (mode === "backend" && /^edit:$/i.test(direction.trim()))
             }
             onClick={() => void review()}
