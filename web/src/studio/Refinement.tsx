@@ -172,15 +172,17 @@ export function Refinement({
   );
   useEffect(() => {
     if (previousBasis.current !== basisId) {
+      // A workspace refresh can publish the next playable version before the
+      // creation receipt settles. Honor a basis chosen during that window.
+      if (view === "creating") return;
       previousBasis.current = basisId;
-      if (operation.current === "create") return;
       if (operation.current === "review") controller.current?.abort();
       setRecipe(basis?.recipe ?? DEFAULT_RECIPE);
       setProposal(null);
       setView("request");
       setError("Review your request for the new refinement basis.");
     }
-  }, [basisId, basis]);
+  }, [basisId, basis, view]);
   useEffect(() => {
     if (
       proposal &&

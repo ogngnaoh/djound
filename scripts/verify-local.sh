@@ -5,7 +5,9 @@ source "$(dirname "$0")/env.sh"
 cd "$DJOUND_ROOT"
 case "${1:-studio}" in
   studio) browser_check=scripts/studio-local-smoke.mjs ;;
-  *) echo 'Usage: verify-local.sh [studio]' >&2; exit 2 ;;
+  playback) browser_check=benchmarks/playback/measure.cjs ;;
+  planner) ;;
+  *) echo 'Usage: verify-local.sh [studio|playback|planner]' >&2; exit 2 ;;
 esac
 mkdir -p .runtime/checks
 run_dir="$(mktemp -d "$DJOUND_ROOT/.runtime/checks/local.XXXXXX")"
@@ -49,6 +51,26 @@ start_app() {
   exit 1
 }
 start_app
+if [[ "${1:-studio}" == planner ]]; then
+  python3 benchmarks/planner/verify_api.py
+  exit 0
+fi
+if [[ "${1:-studio}" == playback ]]; then
+  mkdir -p "$DJOUND_SCREENSHOT_DIR"
+  python3 - "$DJOUND_SCREENSHOT_DIR" <<'PYTHON'
+from pathlib import Path
+import sys
+import wave
+
+for seconds in (4, 8, 12):
+    path = Path(sys.argv[1]) / f"source-{seconds}.wav"
+    with wave.open("fixtures/audio/local-demo-source.wav") as source, wave.open(str(path), "wb") as clip:
+        clip.setparams(source.getparams())
+        clip.writeframes(source.readframes(seconds * source.getframerate()))
+PYTHON
+  node "$browser_check"
+  exit 0
+fi
 node "$browser_check" | tee "$run_dir/result.json"
 "${DJOUND_LOCAL_PYTHON:-$DJOUND_ROOT/.runtime/local-engine/venv/bin/python}" tests/local_audio_acceptance.py "$run_dir/result.json" "$DJOUND_DATA_DIR"
 kill "$app_pid"
