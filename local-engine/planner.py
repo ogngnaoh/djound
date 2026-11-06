@@ -39,6 +39,8 @@ def slot_patch(value, parent):
         desired = value[field]
         if desired == 'KEEP':
             continue
+        if field == 'instrument' and desired not in ('piano', 'electric_piano', 'guitar'):
+            raise EngineError('LOCAL_PLAN_INVALID', 'Use the guided lead choice for the uploaded recording.')
         if field in ('bass', 'drums'):
             # Exact JSON-boolean spellings are a representation variant, not
             # intent inference. No other strings or truthy values are coerced.

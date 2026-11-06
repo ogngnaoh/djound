@@ -33,6 +33,7 @@ const ARRANGEMENT_FIELDS = [
     key: "instrument",
     label: "Lead",
     options: [
+      { value: "recorded", text: instrumentName("recorded") },
       { value: "piano", text: instrumentName("piano") },
       { value: "electric_piano", text: instrumentName("electric_piano") },
       { value: "guitar", text: instrumentName("guitar") },
@@ -83,12 +84,14 @@ export function RecipeDetails({ recipe }: { recipe: Recipe }) {
 }
 
 export function RecipeFields({
+  recordedAvailable,
   recipe,
   before,
   onChange,
 }: {
   recipe: Recipe;
   before?: Recipe;
+  recordedAvailable: boolean;
   onChange: (r: Recipe) => void;
 }) {
   function control({
@@ -108,11 +111,13 @@ export function RecipeFields({
             onChange(normalizeMix({ ...recipe, [key]: selected.value }));
         }}
       >
-        {options.map((o) => (
-          <option key={optionValue(o.value)} value={optionValue(o.value)}>
-            {o.text}
-          </option>
-        ))}
+        {options
+          .filter((o) => recordedAvailable || o.value !== "recorded")
+          .map((o) => (
+            <option key={optionValue(o.value)} value={optionValue(o.value)}>
+              {o.text}
+            </option>
+          ))}
       </select>
     );
     if (!before)
@@ -534,6 +539,7 @@ export function Refinement({
           </p>
           <fieldset disabled={busy}>
             <RecipeFields
+              recordedAvailable={mode === "backend"}
               recipe={recipe}
               onChange={(r) => {
                 setRecipe(r);
@@ -586,6 +592,7 @@ export function Refinement({
             </div>
           ))}
           <RecipeFields
+            recordedAvailable={mode === "backend"}
             recipe={recipe}
             before={proposal.before}
             onChange={changeReviewedRecipe}
@@ -608,6 +615,12 @@ export function Refinement({
           ) : (
             <p className="small subtle proposal-note">
               Your confirmed melody stays the same.
+            </p>
+          )}
+          {recipe.instrument === "recorded" && (
+            <p className="small subtle">
+              The lead plays your uploaded audio. Confirmed notes guide the
+              added backing.
             </p>
           )}
           {proposal.warnings.map((w, i) => (

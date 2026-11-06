@@ -10,6 +10,7 @@ import { createHash } from "node:crypto";
 const require = createRequire(new URL("../web/package.json", import.meta.url));
 const { chromium, expect } = require("@playwright/test");
 const base = process.env.DJOUND_TEST_BASE_URL;
+const guidedWalkthrough = process.env.DJOUND_CHECK_GUIDED === "1";
 if (
   !/^http:\/\/(127\.0\.0\.1|localhost):\d+$/.test(base || "") ||
   process.env.DJOUND_TEST_ALLOW_WRITE !== "1"
@@ -298,8 +299,9 @@ try {
   expect(confirmed.notes).toEqual(state.notes.notes);
 
   const firstPlan = await interpret(
-    "Use electric piano, add bass and a steady drum beat.",
+    guidedWalkthrough ? "edit: use electric piano; add bass; add drums" : "Use electric piano, add bass and a steady drum beat.",
   );
+  if (guidedWalkthrough) expect(firstPlan.model.origin).toBe("GUIDED_COMMANDS");
   expect(firstPlan.recipe).toMatchObject({
     instrument: "electric_piano",
     bass: true,
@@ -313,8 +315,9 @@ try {
   await shot("03-first-result");
   await useVersion(first);
   const secondPlan = await interpret(
-    "Remove drums and make the backing quieter.",
+    guidedWalkthrough ? "edit: remove drums; make the backing soft" : "Remove drums and make the backing quieter.",
   );
+  if (guidedWalkthrough) expect(secondPlan.model.origin).toBe("GUIDED_COMMANDS");
   expect(secondPlan.recipe).toMatchObject({
     instrument: "electric_piano",
     bass: true,
@@ -652,6 +655,22 @@ try {
     await expect(page.locator(".change-row").filter({hasText:"Lead pan"})).toContainText("0.001% left");
     await expect(page.getByText(`This uses your current melody (revision ${newMelody.revision}).`, {exact:false})).toContainText(`Version 1 used revision ${first.localNoteRevision}`);
     expect((await exploration()).renditions).toHaveLength(5);
+
+    // Render the uploaded performance with the existing accompaniment, then isolate it again.
+    await button("Edit request").click();
+    const performancePlan = await interpret("edit: use the uploaded recording");
+    await expect(page.getByText("The lead plays your uploaded audio.", {exact:false})).toBeVisible();
+    const performance = await create(6);
+    expect(performance.localRecipe).toEqual({...first.localRecipe, instrument: "recorded"});
+    expect(performance.sha256).not.toBe(first.sha256);
+    await useVersion(performance);
+    const soloPlan = await interpret("edit: remove bass; remove drums");
+    const solo = await create(7);
+    expect(solo.localRecipe).toMatchObject({instrument: "recorded", bass: false, drums: false});
+    await playRow(solo);
+    await pause();
+    expect((await exploration()).original.sha256).toBe(source.sha256);
+    extraPlans.push(performancePlan, soloPlan);
   }
   expect(errors).toEqual([]);
   expect(external).toEqual([]);
@@ -680,7 +699,9 @@ try {
         checks: [
           "real upload, actual transcription and listening review without opening optional editor",
           "confirmed notes unchanged across successive real local renders",
-          "two actual text LLM plans with authoritative per-version recipes",
+          guidedWalkthrough
+            ? "two guided text plans with authoritative per-version recipes"
+            : "two freeform text plans with authoritative per-version recipes",
           "simulated planner HTTP failure preserves text and direct controls inherit chosen version",
           "manual guitar render without another model preparation job",
           "accepted manual render survives lost receipt; explicit recovery replays exact command once",

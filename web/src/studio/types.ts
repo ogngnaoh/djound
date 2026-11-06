@@ -12,7 +12,7 @@ export type Scenario =
 export type Stem = "lead" | "bass" | "drums";
 export type MixStrip = components["schemas"]["LocalMixStrip"];
 export type Recipe = {
-  instrument: "piano" | "electric_piano" | "guitar";
+  instrument: components["schemas"]["LocalRecipe"]["instrument"];
   bass: boolean;
   drums: boolean;
   density: "sparse" | "steady";
@@ -118,9 +118,12 @@ export const LOCAL_SOURCE_RECIPE: Recipe = {
   bpm: 100,
 };
 export function instrumentName(value: Recipe["instrument"]) {
-  return { piano: "Piano", electric_piano: "Electric piano", guitar: "Guitar" }[
-    value
-  ];
+  return {
+    piano: "Piano",
+    recorded: "Uploaded recording",
+    electric_piano: "Electric piano",
+    guitar: "Guitar",
+  }[value];
 }
 export function describeRecipe(r: Recipe) {
   return `${instrumentName(r.instrument)}${r.bass ? (r.backingVolume === "soft" ? ", softer bass" : ", bass") : ", no bass"}${r.drums ? " and drums" : ", no drums"}`;

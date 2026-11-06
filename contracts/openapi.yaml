@@ -799,7 +799,7 @@ components:
       additionalProperties: false
       required: [instrument, bass, drums, density, backingVolume, bpm]
       properties:
-        instrument: { type: string, enum: [piano, electric_piano, guitar] }
+        instrument: { type: string, enum: [piano, electric_piano, guitar, recorded], description: "Recorded uses the complete uploaded performance as the lead. Confirmed notes guide the added backing." }
         bass: { type: boolean }
         drums: { type: boolean }
         density: { type: string, enum: [sparse, steady] }

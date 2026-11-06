@@ -731,8 +731,11 @@ export interface components {
             muted: boolean;
         };
         LocalRecipe: {
-            /** @enum {string} */
-            instrument: "piano" | "electric_piano" | "guitar";
+            /**
+             * @description Recorded uses the complete uploaded performance as the lead. Confirmed notes guide the added backing.
+             * @enum {string}
+             */
+            instrument: "piano" | "electric_piano" | "guitar" | "recorded";
             bass: boolean;
             drums: boolean;
             /** @enum {string} */

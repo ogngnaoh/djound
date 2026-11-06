@@ -35,7 +35,7 @@ for index, recording in enumerate(result['snapshot']['renditions'], 1):
                     'rms': float(np.sqrt(np.mean(samples ** 2))), 'clippedSamples': 0,
                     'leadPcmSha256': lead_hashes[-1], 'notesSha256': note_hashes[-1],
                     'worker': manifest['provenance']['supervisor']})
-if len(reports) == 5:
+if len(reports) in (5, 7):
     # The fourth rendition mixes the first version's dry stems on the same timeline.
     # Compare serialized samples to an independent stereo matrix and gain equation.
     parent = data / 'local-jobs' / result['snapshot']['renditions'][0]['attemptId'] / 'output'
@@ -56,6 +56,25 @@ if len(reports) == 5:
     print('PASS: actual text-to-mix samples match the stereo matrix; direct controls restore the original WAV byte for byte.')
 else:
     assert len(reports) == 3
+if len(reports) == 7:
+    uploaded = Path(__file__).resolve().parents[1] / 'fixtures/audio/local-demo-source.wav'
+    source, _ = sf.read(uploaded, dtype='float32', always_2d=True)
+    source_hash = hashlib.sha256(source.astype('<f4').tobytes()).hexdigest()
+    assert lead_hashes[5] == lead_hashes[6] == source_hash
+    assert source_hash != lead_hashes[0], 'The test must distinguish the uploaded take from a synthesized lead'
+    first_backing = data / 'local-jobs' / result['snapshot']['renditions'][0]['attemptId'] / 'output'
+    expected = source.astype(np.float64)
+    for stem in (1, 2):
+        backing, _ = sf.read(first_backing / f'stem-{stem}.raw.wav', always_2d=True)
+        expected += backing
+    for i, reference in ((5, expected), (6, source)):
+        folder = data / 'local-jobs' / result['snapshot']['renditions'][i]['attemptId'] / 'output'
+        saved, _ = sf.read(folder / 'audio.raw.wav', dtype='float32', always_2d=True)
+        np.testing.assert_array_equal(saved, reference.astype('float32'))
+        proof = json.loads((folder/'result.json').read_text())['provenance']['leadSource']
+        assert proof['sourceSha256'] == result['snapshot']['original']['sha256']
+    mix_check['uploadedLeadPcmSha256'] = source_hash
+    print('PASS: recorded-lead mix equals the original samples plus backing; isolating the lead restores its source PCM exactly.')
 assert lead_hashes[0] == lead_hashes[1], 'Backing-only refinement changed the locked lead'
 assert lead_hashes[2] != lead_hashes[1], 'Explicit guitar correction did not change the lead timbre'
 assert len(set(note_hashes)) == 1, 'Refinement or instrument correction changed confirmed notes'

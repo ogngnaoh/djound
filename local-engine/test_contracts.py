@@ -61,6 +61,15 @@ class Contracts(unittest.TestCase):
             slot_patch(dict(value, drums=False), muted_lead)
         self.assertIn('Unmute at least one', caught.exception.message)
 
+    def test_later_model_edit_can_keep_the_uploaded_lead(self):
+        parent = dict(DEFAULT_RECIPE, instrument='recorded')
+        output = {'supported': True, 'instrument': 'KEEP', 'bass': True, 'drums': 'KEEP',
+                  'density': 'KEEP', 'backingVolume': 'KEEP'}
+        complete, _ = slot_patch(output, parent)
+        self.assertEqual(complete, dict(parent, bass=True))
+        with self.assertRaises(EngineError):
+            slot_patch(dict(output, instrument='recorded'), DEFAULT_RECIPE)
+
     def test_slots_preserve_keep_and_normalize_only_exact_boolean_spellings(self):
         parent = {**DEFAULT_RECIPE, 'instrument': 'guitar', 'bass': True, 'drums': True}
         value = {'supported': True, 'instrument': 'KEEP', 'bass': 'KEEP', 'drums': 'false',

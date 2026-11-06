@@ -28,6 +28,8 @@ def unsupported(reason):
 
 
 def parse(clause):
+    if clause == 'use the uploaded recording':
+        return Assignment('instrument', 'recorded')
     if match := re.fullmatch(r'use (piano|electric piano|guitar)', clause):
         return Assignment('instrument', match[1].replace(' ', '_'))
     if match := re.fullmatch(r'(add|remove) (bass|drums)', clause):
@@ -82,7 +84,8 @@ def apply(assignment, state, strips, assigned):
 def summarize(before, after):
     parts = []
     if before['instrument'] != after['instrument']:
-        parts.append(f"lead on {after['instrument'].replace('_', ' ')}")
+        name = "uploaded recording" if after['instrument'] == "recorded" else after['instrument'].replace('_', ' ')
+        parts.append(f"lead on {name}")
     for stem in ('bass', 'drums'):
         if before[stem] != after[stem]:
             parts.append(f"{stem} {'on' if after[stem] else 'off'}")

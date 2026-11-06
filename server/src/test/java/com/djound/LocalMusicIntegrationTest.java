@@ -116,6 +116,10 @@ else:
     }
 
     String source() throws Exception {
+        return source("local-source-key");
+    }
+
+    String source(String commandKey) throws Exception {
         return ex().create(
                         new MockMultipartFile(
                                 "file",
@@ -123,7 +127,7 @@ else:
                                 "audio/wav",
                                 BackendIntegrationTest.wave(44100, 1, 16, 1)),
                         "electric piano",
-                        "local-source-key")
+                        commandKey)
                 .explorationId();
     }
 
@@ -178,6 +182,28 @@ else:
                 p.draftRevision(),
                 null,
                 p.id());
+    }
+
+    @Test
+    void recordedLeadReadsOnlyTheOriginalOwnedByTheFrozenPlan() throws Exception {
+        String id = source();
+        var notes = confirmed(id);
+        var initial = local().manual(id, new PlanCommand(1L, notes.revision(), 1L, "electric piano", null));
+        var ordinary = local().renderRequest(initial.id(), id);
+        assertFalse(ordinary.containsKey("sourceAudio"));
+        var recipe = new LinkedHashMap<>(initial.recipe());
+        recipe.put("instrument", "recorded");
+        var reviewed = local().correct(initial.id(),
+                new CorrectionCommand(1L, notes.revision(), 1L, initial.text(), null, recipe));
+        var request = local().renderRequest(reviewed.id(), id);
+        var original = ex().get(id).original();
+        assertEquals(original.sha256(), request.get("sourceSha256"));
+        assertTrue(Files.isRegularFile(Path.of((String) request.get("sourceAudio"))));
+        String other = source("other-upload-key");
+        assertNotEquals(id, other);
+        confirmed(other);
+        assertEquals("PLAN_CHANGED", assertThrows(ApiProblem.class,
+                () -> local().renderRequest(reviewed.id(), other)).code());
     }
 
     @Test

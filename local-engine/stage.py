@@ -33,7 +33,9 @@ def main():
                 duration = request['duration']
                 validated = notes(request['notes'], duration)
                 specification = DEFAULT_RECIPE if operation == 'preview' else recipe(request['recipe'])
-                fields = render(validated, duration, specification, output)
+                source = (inside(request['sourceAudio'], data_root(), True)
+                          if specification['instrument'] == 'recorded' else None)
+                fields = render(validated, duration, specification, output, source=source, source_sha=request.get('sourceSha256'))
         result.update(status='succeeded', **fields)
     except EngineError as error:
         result.update(status='failed', error={'code': error.code, 'message': error.message})

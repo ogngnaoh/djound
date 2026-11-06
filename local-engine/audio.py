@@ -20,7 +20,7 @@ from validate_audio import validate
 def transcribe(source, output):
     normalized = output / 'source.wav'
     subprocess.run(['ffmpeg', '-nostdin', '-v', 'error', '-protocol_whitelist', 'file,pipe',
-                    '-i', str(source), '-map_metadata', '-1',
+                    '-i', str(source), '-map', '0:a:0', '-map_metadata', '-1',
                     '-t', '13', '-ar', '44100', '-ac', '2', '-c:a', 'pcm_s16le', str(normalized)], check=True, timeout=20)
     data, rate = sf.read(normalized, always_2d=True)
     duration = len(data) / rate
@@ -62,7 +62,8 @@ def transcribe(source, output):
 
 
 def arrangement(notes, duration, recipe):
-    programs = {'piano': 0, 'electric_piano': 4, 'guitar': 24}
+    # For a recorded lead this program is only the MIDI transcription guide.
+    programs = {'piano': 0, 'electric_piano': 4, 'guitar': 24, 'recorded': 0}
     tracks = [{'id': 'lead', 'program': programs[recipe['instrument']], 'bank': 0, 'notes': deepcopy(notes)}]
     beat = 60 / recipe['bpm']
     origin = min(note['start'] for note in notes)
@@ -106,19 +107,11 @@ def schedule(tracks, duration):
     return '\n'.join(lines) + '\n', frames
 
 
-def render(notes, duration, recipe, output, status='provided_notes'):
-    notes = validate_notes(notes, duration)
-    recipe = validate_recipe(recipe)
-    anchor = canonical_hash(notes)
-    tracks = arrangement(notes, duration, recipe)
-    if canonical_hash(tracks[0]['notes']) != anchor:
-        raise EngineError('LOCAL_INTERNAL', 'The locked melody changed before rendering.')
-    controls = validate_mix(recipe.get('mix', {}), [track['id'] for track in tracks])
+def synthesized_stems(tracks, duration, output):
     event_text, frames = schedule(tracks, duration)
     events = output / 'events.txt'
     events.write_text(event_text)
     raw = output / 'render.f32'
-    started = time.monotonic()
     with (output / 'render.log').open('w') as log:
         subprocess.run([str(HOME / 'renderer'), str(HOME / 'FluidR3_GM.sf2'), str(events), str(raw)],
                        stdout=log, stderr=subprocess.STDOUT, check=True, timeout=20)
@@ -126,7 +119,6 @@ def render(notes, duration, recipe, output, status='provided_notes'):
     if samples.size != frames * 2 or not np.isfinite(samples).all():
         raise EngineError('LOCAL_AUDIO_INVALID', 'The rendered audio is incomplete or invalid.')
     samples = samples.reshape(-1, 2)
-    stems = []
     dry_audio = {}
     accumulated = np.zeros_like(samples, dtype=np.float64)
     for index, track in enumerate(tracks):
@@ -137,19 +129,40 @@ def render(notes, duration, recipe, output, status='provided_notes'):
         if track['id'] != 'lead' and not np.any(stem):
             raise EngineError('LOCAL_INVALID_RECIPE', 'The backing produced no audio. Choose an earlier melody onset or turn off that backing track.')
         accumulated += stem
-        if controls:
-            dry_audio[track['id']] = stem
-        stem_path = output / f'stem-{index}.raw.wav'
-        sf.write(stem_path, stem, 44100, subtype='FLOAT')
-        stems.append({'id': track['id'], 'path': str(stem_path),
-                      'pcmSha256': hashlib.sha256(np.ascontiguousarray(stem, dtype='<f4').tobytes()).hexdigest()})
+        dry_audio[track['id']] = stem
         path.unlink()
+    raw.unlink()
     if not np.array_equal(accumulated.astype('<f4'), samples):
         raise EngineError('LOCAL_AUDIO_INVALID', 'Instrument stems do not reconstruct the rendered mix.')
-    if controls:
-        strips = {name: Strip(gain_db=strip['gainDb'], pan=strip['pan'], mute=strip['muted'])
-                  for name, strip in controls.items()}
-        samples = mix(dry_audio, strips)
+    return dry_audio
+
+
+def render(notes, duration, recipe, output, status='provided_notes', source=None, source_sha=None):
+    notes = validate_notes(notes, duration)
+    recipe = validate_recipe(recipe)
+    anchor = canonical_hash(notes)
+    tracks = arrangement(notes, duration, recipe)
+    if canonical_hash(tracks[0]['notes']) != anchor:
+        raise EngineError('LOCAL_INTERNAL', 'The locked melody changed before rendering.')
+    controls = validate_mix(recipe.get('mix', {}), [track['id'] for track in tracks])
+    started = time.monotonic()
+    recorded = recipe['instrument'] == 'recorded'
+    if recorded:
+        from recorded_lead import decode_recording
+        dry_audio = {'lead': decode_recording(source, source_sha, round(duration * 44100), output)}
+        if tracks[1:]:
+            dry_audio.update(synthesized_stems(tracks[1:], duration, output))
+    else:
+        dry_audio = synthesized_stems(tracks, duration, output)
+    stems = []
+    for index, (name, samples) in enumerate(dry_audio.items()):
+        stem_path = output / f'stem-{index}.raw.wav'
+        sf.write(stem_path, samples, 44100, subtype='FLOAT')
+        stems.append({'id': name, 'path': str(stem_path),
+                      'pcmSha256': hashlib.sha256(np.ascontiguousarray(samples, dtype='<f4').tobytes()).hexdigest()})
+    strips = {name: Strip(gain_db=strip['gainDb'], pan=strip['pan'], mute=strip['muted'])
+              for name, strip in controls.items()}
+    samples = mix(dry_audio, strips)
     audio = output / 'audio.wav'
     export = save_safe_wav(audio, samples.T, 44100)
     try:
@@ -160,10 +173,10 @@ def render(notes, duration, recipe, output, status='provided_notes'):
         raise
     if integrity['clipped_fraction'] or integrity['rms'] < 1e-6:
         raise EngineError('LOCAL_AUDIO_INVALID', 'The rendered audio is clipped or silent.')
-    raw.unlink()
     midi = pretty_midi.PrettyMIDI(resolution=960, initial_tempo=recipe['bpm'])
     for track in tracks:
-        part = pretty_midi.Instrument(program=track['program'], is_drum=track['bank'] == 128, name=track['id'])
+        name = 'lead transcription guide' if recorded and track['id'] == 'lead' else track['id']
+        part = pretty_midi.Instrument(program=track['program'], is_drum=track['bank'] == 128, name=name)
         part.notes = [pretty_midi.Note(**note) for note in track['notes']]
         midi.instruments.append(part)
     midi_path = output / 'arrangement.mid'
@@ -178,12 +191,17 @@ def render(notes, duration, recipe, output, status='provided_notes'):
     note_path = output / 'notes.json'
     write_json(note_path, {'schemaVersion': 1, 'status': status, 'notes': notes, 'duration': duration, 'notesSha256': anchor})
     write_json(output / 'tracks.json', tracks)
+    renderer = 'TinySoundFont isolated-track v2 / FluidR3'
+    if recorded:
+        renderer = 'Uploaded performance + TinySoundFont backing / FluidR3' if tracks[1:] else 'Uploaded performance'
     return {'notes': notes, 'duration': duration, 'notesPath': str(note_path), 'audioPath': str(audio),
             'midiPath': str(midi_path), 'recipe': recipe,
-            'provenance': {'renderer': 'TinySoundFont isolated-track v2 / FluidR3', 'notesSha256': anchor,
+            'provenance': {'renderer': renderer, 'notesSha256': anchor,
                            'audioSha256': digest(audio), 'midiSha256': digest(midi_path), 'stems': stems,
                            **({'mix': {'method': 'isolated stereo stem mixer v1', 'strips': controls,
                                        'stemFiles': 'dry pre-fader audio', 'masterGainDb': export['gain_db']}} if controls else {}),
+                           **({'leadSource': {'type': 'original_recording', 'sourceSha256': source_sha,
+                                               'notesRole': 'MIDI guide and backing arrangement'}} if recorded else {}),
                            'export': export, 'audioValidation': integrity, 'seconds': time.monotonic() - started,
                            'arrangement': 'Explicit backing recipes; fixed backing BPM, unchanged lead timing.',
-                           'tailPolicy': 'Same final 20ms fade per independent stem; later tails trimmed.'}}
+                           'tailPolicy': 'Final 20ms fade on synthesized stems; recorded performances keep their ending.'}}

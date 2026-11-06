@@ -1,5 +1,13 @@
 const GROUPS = [
-  { label: "Lead", edits: ["use piano", "use electric piano", "use guitar"] },
+  {
+    label: "Lead",
+    edits: [
+      "use piano",
+      "use electric piano",
+      "use guitar",
+      "use the uploaded recording",
+    ],
+  },
   {
     label: "Backing parts",
     edits: ["add bass", "remove bass", "add drums", "remove drums"],

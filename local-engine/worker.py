@@ -58,7 +58,7 @@ def request_values(path):
     if path.stat().st_size > 2 * 1024 ** 2:
         raise EngineError('LOCAL_INVALID_REQUEST', 'The local request is too large.')
     request = json.loads(path.read_text())
-    allowed = {'schemaVersion', 'operation', 'sourceAudio', 'notes', 'duration', 'prompt', 'parentRecipe', 'recipe'}
+    allowed = {'schemaVersion', 'operation', 'sourceAudio', 'sourceSha256', 'notes', 'duration', 'prompt', 'parentRecipe', 'recipe'}
     if not isinstance(request, dict) or set(request) - allowed or type(request.get('schemaVersion')) is not int or request.get('schemaVersion') != 1 or request.get('operation') not in OPERATIONS:
         raise EngineError('LOCAL_INVALID_REQUEST', 'The local operation contract is invalid.')
     operation = request['operation']
@@ -74,7 +74,13 @@ def request_values(path):
     else:
         notes(request.get('notes'), request.get('duration'))
         if operation == 'render':
-            recipe(request.get('recipe'))
+            validated_recipe = recipe(request.get('recipe'))
+            if validated_recipe['instrument'] == 'recorded':
+                source = inside(request.get('sourceAudio', ''), data_root(), True)
+                if source.stat().st_size > 64 * 1024 ** 2:
+                    raise EngineError('LOCAL_AUDIO_LIMIT', 'The audio file exceeds the local upload size limit.')
+                if not re.fullmatch(r'[0-9a-f]{64}', str(request.get('sourceSha256', ''))):
+                    raise EngineError('LOCAL_INVALID_REQUEST', 'A recorded lead requires the original audio digest.')
     return request
 
 

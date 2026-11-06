@@ -93,8 +93,8 @@ def validate_mix(value, available):
 def recipe(value):
     if not isinstance(value, dict) or (set(value) - {'mix'}) != set(DEFAULT_RECIPE):
         raise EngineError('LOCAL_INVALID_RECIPE', 'The proposed arrangement is incomplete or has unsupported fields.')
-    if value['instrument'] not in ('piano', 'electric_piano', 'guitar'):
-        raise EngineError('LOCAL_INVALID_RECIPE', 'Choose piano, electric piano, or guitar.')
+    if value['instrument'] not in ('piano', 'electric_piano', 'guitar', 'recorded'):
+        raise EngineError('LOCAL_INVALID_RECIPE', 'Choose the uploaded recording, piano, electric piano, or guitar.')
     if type(value['bass']) is not bool or type(value['drums']) is not bool:
         raise EngineError('LOCAL_INVALID_RECIPE', 'Bass and drums must be explicit on/off choices.')
     if value['density'] not in ('sparse', 'steady') or value['backingVolume'] not in ('soft', 'normal'):

@@ -616,24 +616,33 @@ public class LocalMusic {
 
     public Map<String, Object> renderRequest(String planId, String exploration) {
         Plan p = plan(planId);
-        var r =
+        var source =
                 db.sql(
-                                "SELECT * FROM local_note_revision WHERE exploration_id=? AND"
-                                        + " revision=? AND status='CONFIRMED'")
-                        .params(exploration, p.noteRevision())
+                                """
+                                SELECT n.notes_json, n.duration_seconds, r.storage_key, r.sha256
+                                FROM local_note_revision n
+                                JOIN recording r ON r.id=n.source_recording_id AND r.exploration_id=n.exploration_id
+                                JOIN local_plan p ON p.exploration_id=n.exploration_id AND p.note_revision=n.revision
+                                    AND p.source_recording_id=r.id AND p.source_revision=n.source_revision
+                                WHERE p.id=? AND p.exploration_id=? AND n.status='CONFIRMED'
+                                """)
+                        .params(planId, exploration)
                         .query()
-                        .singleRow();
-        return Map.of(
-                "schemaVersion",
-                1,
-                "operation",
-                "render",
-                "notes",
-                readNotes((String) r.get("notes_json")),
-                "duration",
-                r.get("duration_seconds"),
-                "recipe",
-                p.recipe());
+                        .listOfRows()
+                        .stream()
+                        .findFirst()
+                        .orElseThrow(() -> problem("PLAN_CHANGED", "The reviewed melody and recording do not match."));
+        Map<String, Object> request = new LinkedHashMap<>();
+        request.put("schemaVersion", 1);
+        request.put("operation", "render");
+        request.put("notes", readNotes((String) source.get("notes_json")));
+        request.put("duration", source.get("duration_seconds"));
+        request.put("recipe", p.recipe());
+        if ("recorded".equals(p.recipe().get("instrument"))) {
+            request.put("sourceAudio", media.path((String) source.get("storage_key")).toAbsolutePath().toString());
+            request.put("sourceSha256", source.get("sha256"));
+        }
+        return request;
     }
 
     public String reviewedDirection(Plan plan) {
@@ -641,6 +650,7 @@ public class LocalMusic {
         String instrument =
                 switch ((String) recipe.get("instrument")) {
                     case "piano" -> "Piano";
+                    case "recorded" -> "Uploaded recording";
                     case "electric_piano" -> "Electric piano";
                     case "guitar" -> "Guitar";
                     default ->
@@ -923,7 +933,7 @@ public class LocalMusic {
                                         "density",
                                         "backingVolume",
                                         "bpm"))
-                || !Set.of("piano", "electric_piano", "guitar")
+                || !Set.of("piano", "electric_piano", "guitar", "recorded")
                         .contains(String.valueOf(r.get("instrument")))
                 || !(r.get("bass") instanceof Boolean)
                 || !(r.get("drums") instanceof Boolean)
