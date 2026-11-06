@@ -794,6 +794,7 @@ components:
         gainDb: { type: number, minimum: -60, maximum: 12 }
         pan: { type: number, minimum: -1, maximum: 1, description: Left to right. Zero is centered. }
         muted: { type: boolean }
+        tone: { type: string, enum: [neutral, warm, bright], description: A bounded two-shelf EQ on this dry track. Neutral or omitted bypasses the EQ. }
     LocalRecipe:
       type: object
       if: { not: { required: [groove] } }

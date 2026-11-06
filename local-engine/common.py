@@ -74,7 +74,8 @@ def validate_mix(value, available):
         if name not in value:
             continue
         strip = value[name]
-        if not isinstance(strip, dict) or strip.keys() != UNITY_STRIP.keys() or type(strip['muted']) is not bool:
+        if (not isinstance(strip, dict) or strip.keys() - {'tone'} != UNITY_STRIP.keys()
+                or type(strip['muted']) is not bool):
             raise EngineError('LOCAL_INVALID_RECIPE', 'Each track needs gain in dB, stereo pan and a mute setting.')
         normalized = {}
         for field, low, high in (('gainDb', -60, 12), ('pan', -1, 1)):
@@ -83,6 +84,11 @@ def validate_mix(value, available):
                 raise EngineError('LOCAL_INVALID_RECIPE', f'{field} must be a finite number from {low} to {high}.')
             normalized[field] = int(number) if number == int(number) else number
         normalized['muted'] = strip['muted']
+        tone = strip.get('tone', 'neutral')
+        if tone not in ('neutral', 'warm', 'bright'):
+            raise EngineError('LOCAL_INVALID_RECIPE', 'Choose neutral, warm or bright track tone.')
+        if tone != 'neutral':
+            normalized['tone'] = tone
         if normalized != UNITY_STRIP:
             result[name] = normalized
     if all(result.get(name, UNITY_STRIP)['muted'] for name in available):

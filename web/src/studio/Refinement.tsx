@@ -13,7 +13,7 @@ import {
 import { Button } from "../components/ui/button";
 import { useAudio } from "./Player";
 import { allTracksMuted, mixChanges, normalizeMix, TrackMix } from "./TrackMix";
-import { GuidedEdits, isGuided } from "./GuidedEdits";
+import { GuidedEdits, isGuided, isToneRequest } from "./GuidedEdits";
 import { DrumGroove, grooveLabel, validGrid } from "./DrumGroove";
 import {
   DEFAULT_RECIPE,
@@ -411,6 +411,7 @@ export function Refinement({
     mode === "backend" &&
     project.available &&
     project.freeformAvailable === false;
+  const needsLanguageModel = !isGuided(text) && !isToneRequest(text);
   return (
     <div className="refinement">
       <header>
@@ -458,7 +459,7 @@ export function Refinement({
             id="refinement-request"
             placeholder={
               guidedOnly
-                ? "Choose a guided edit below."
+                ? "Try “warm the bass” or choose a guided edit below."
                 : "Try “Remove drums and make the backing quieter.”"
             }
             value={text}
@@ -466,7 +467,7 @@ export function Refinement({
             onChange={(e) => changeText(e.target.value)}
             disabled={busy}
           />
-          {guidedOnly && !isGuided(text) && (
+          {guidedOnly && needsLanguageModel && (
             <p className="notice" role="status">
               {project.freeformUnavailableReason ||
                 "Choose a guided edit or adjust the arrangement directly while the local language planner is unavailable."}
@@ -488,7 +489,7 @@ export function Refinement({
               disabled ||
               busy ||
               !text.trim() ||
-              (guidedOnly && !isGuided(text)) ||
+              (guidedOnly && needsLanguageModel) ||
               (mode === "backend" && /^edit:$/i.test(text.trim()))
             }
             onClick={() => void review()}

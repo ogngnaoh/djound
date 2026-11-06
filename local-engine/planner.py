@@ -1,5 +1,6 @@
 """A pretrained local text model proposes a schema-limited arrangement patch."""
 import json
+import re
 import time
 
 from common import DEFAULT_RECIPE, HOME, HERE, EngineError, active_stems, arrangement_settings, canonical_hash, recipe, write_json
@@ -117,9 +118,17 @@ def plan(prompt, parent, output):
         raise EngineError('LOCAL_INVALID_REQUEST', 'Describe a concrete arrangement change in 1000 characters or fewer.')
     parent = recipe(DEFAULT_RECIPE if parent is None else parent)
     from edit_commands import guided_plan
+    from tone_phrases import tone_commands
+    commands = tone_commands(prompt)
+    if commands is not None:
+        result = guided_plan('edit: ' + commands, parent)
+        result['provenance']['syntax'] = 'tone-phrases-v1'
+        return result
     guided = guided_plan(prompt, parent)
     if guided is not None:
         return guided
+    if re.search(r'\b(?:warm(?:er)?|bright(?:er|en)?|tone)\b', prompt, re.I):
+        raise EngineError('LOCAL_UNSUPPORTED_REQUEST', 'Review a complete tone change such as “warm the bass”, or combine tone and other changes in Guided edits.')
     from stereo_scope import requests_stereo_change
     if requests_stereo_change(prompt):
         raise EngineError('LOCAL_UNSUPPORTED_REQUEST', 'Use the track mix controls for stereo positioning. You can review the arrangement and mix together before creating a version.')

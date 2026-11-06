@@ -55,6 +55,8 @@ def parse(clause):
         return Assignment('pan', Decimal(0), match[1])
     if match := re.fullmatch(rf'(mute|unmute) {STEM}', clause):
         return Assignment('muted', match[1] == 'mute', match[2])
+    if match := re.fullmatch(rf'set {STEM} tone to (neutral|warm|bright)', clause):
+        return Assignment('tone', match[2], match[1])
     raise unsupported('Choose a listed command and separate each change with a semicolon.')
 
 
@@ -108,6 +110,8 @@ def summarize(before, after):
             parts.append(f'{stem} pan {pan}')
         if old['muted'] != new['muted']:
             parts.append(f"{stem} {'muted' if new['muted'] else 'unmuted'}")
+        if old.get('tone', 'neutral') != new.get('tone', 'neutral'):
+            parts.append(f"{stem} tone {new.get('tone', 'neutral')}")
     sentence = ', '.join(parts)
     return sentence[:1].upper() + sentence[1:] + '.'
 

@@ -16,6 +16,7 @@ import zipfile
 
 from common import HERE, HOME, ROOT, EngineError, data_root, digest, inside, notes, recipe, write_json
 from edit_commands import PREFIX
+from tone_phrases import tone_commands
 from setup_assets import is_planner_asset, verify
 
 OPERATIONS = ['transcribe', 'preview', 'plan', 'render']
@@ -71,7 +72,8 @@ def readiness(*, check_freeform=True):
 
 
 def needs_freeform(request):
-    return request['operation'] == 'plan' and not PREFIX.match(request['prompt'].lstrip())
+    return (request['operation'] == 'plan' and not PREFIX.match(request['prompt'].lstrip())
+            and tone_commands(request['prompt']) is None)
 
 
 def request_values(path):

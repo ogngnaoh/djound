@@ -9,6 +9,8 @@ import java.util.*;
 final class LocalMix {
     private static final List<String> TRACKS = List.of("lead", "bass", "drums");
     private static final Set<String> CONTROLS = Set.of("gainDb", "pan", "muted");
+    private static final Set<String> CONTROLS_WITH_TONE = Set.of("gainDb", "pan", "muted", "tone");
+    private static final Set<String> TONES = Set.of("neutral", "warm", "bright");
 
     private LocalMix() {}
 
@@ -26,13 +28,19 @@ final class LocalMix {
             }
             if (!active) throw invalid("Enable " + track + " before changing its mix.");
             if (!(mix.get(track) instanceof Map<?, ?> strip)
-                    || !strip.keySet().equals(CONTROLS)
+                    || !(strip.keySet().equals(CONTROLS)
+                            || strip.keySet().equals(CONTROLS_WITH_TONE))
                     || !(strip.get("muted") instanceof Boolean muted))
                 throw invalid("Each mix strip needs gainDb, pan and a boolean muted value.");
             Number gain = bounded(strip.get("gainDb"), -60, 12, "gainDb");
             Number pan = bounded(strip.get("pan"), -1, 1, "pan");
+            Object value = strip.containsKey("tone") ? strip.get("tone") : "neutral";
+            if (!(value instanceof String tone) || !TONES.contains(tone))
+                throw invalid("Choose neutral, warm or bright track tone.");
             audible |= !muted;
-            if (gain.doubleValue() != 0 || pan.doubleValue() != 0 || muted)
+            if (!tone.equals("neutral"))
+                strips.put(track, Map.of("gainDb", gain, "pan", pan, "muted", muted, "tone", tone));
+            else if (gain.doubleValue() != 0 || pan.doubleValue() != 0 || muted)
                 strips.put(track, Map.of("gainDb", gain, "pan", pan, "muted", muted));
         }
         if (!audible) throw invalid("Unmute at least one active track before creating a version.");
@@ -77,12 +85,23 @@ final class LocalMix {
                                 + position
                                 + (Boolean.TRUE.equals(strip.get("muted"))
                                         ? ", muted"
-                                        : ", unmuted"));
+                                        : ", unmuted")
+                                + describeTone(strip, prior.get(track)));
             } else if (prior.containsKey(track) && active(recipe, track)) {
-                settings.add(track + " reset to 0 dB, centered and unmuted");
+                settings.add(
+                        track
+                                + " reset to 0 dB, centered and unmuted"
+                                + describeTone(Map.of(), prior.get(track)));
             }
         }
         return settings.isEmpty() ? "" : " Reviewed mix: " + String.join("; ", settings) + ".";
+    }
+
+    private static String describeTone(Map<?, ?> strip, Object previous) {
+        if (strip.containsKey("tone")) return ", " + strip.get("tone") + " tone";
+        if (previous instanceof Map<?, ?> prior && prior.containsKey("tone"))
+            return ", tone reset to neutral";
+        return "";
     }
 
     private static ApiProblem invalid(String detail) {

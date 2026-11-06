@@ -729,6 +729,11 @@ export interface components {
             /** @description Left to right. Zero is centered. */
             pan: number;
             muted: boolean;
+            /**
+             * @description A bounded two-shelf EQ on this dry track. Neutral or omitted bypasses the EQ.
+             * @enum {string}
+             */
+            tone?: "neutral" | "warm" | "bright";
         };
         LocalRecipe: {
             /**

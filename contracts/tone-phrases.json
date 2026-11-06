@@ -1,0 +1,8 @@
+{
+  "tracks": { "lead": "lead", "melody": "lead", "bass": "bass", "drums": "drums" },
+  "tones": {
+    "bright": ["brighten {track}", "make {track} brighter"],
+    "warm": ["warm {track}", "warm up {track}", "make {track} warmer"],
+    "neutral": ["reset {track} tone", "restore {track} tone"]
+  }
+}

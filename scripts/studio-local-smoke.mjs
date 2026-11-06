@@ -762,8 +762,48 @@ try {
     const returned = await create(10);
     expect(returned.localRecipe).toEqual(swingRecipe);
     expect(returned.sha256).toBe(swing.sha256);
+    await useVersion(returned);
+    const brightPlan = await interpret("make the lead brighter");
+    const toneOrigin = {origin: "GUIDED_COMMANDS", syntax: "tone-phrases-v1", inferenceAttempts: 0};
+    expect(brightPlan.model).toMatchObject(toneOrigin);
+    expect(brightPlan.basisRecordingId).toBe(returned.id);
+    const brightRecipe = {...swingRecipe, mix: {lead: {gainDb: 0, pan: 0, muted: false, tone: "bright"}}};
+    expect(brightPlan.recipe).toEqual(brightRecipe);
+    const bright = await create(11);
+    expect(bright.localRecipe).toEqual(brightRecipe);
+    expect(bright.sha256).not.toBe(returned.sha256);
+
+    await useVersion(bright);
+    await direction().fill("Choose a warm tone on the lead.");
+    const beforeToneControl = plannerRequests.length;
+    await button("Adjust arrangement").click();
+    await page.getByText("Track mix", {exact: true}).click();
+    await page.getByLabel("Mix track", {exact: true}).selectOption("lead");
+    const toneControl = page.getByLabel("Track tone", {exact: true});
+    await expect(toneControl).toHaveValue("bright");
+    await toneControl.selectOption("warm");
+    await button("Review arrangement").click();
+    await expect(button("Create version")).toBeEnabled();
+    const warmPlan = (await local()).plan;
+    const warmRecipe = {...swingRecipe, mix: {lead: {...brightRecipe.mix.lead, tone: "warm"}}};
+    expect(warmPlan.recipe).toEqual(warmRecipe);
+    expect(warmPlan.basisRecordingId).toBe(bright.id);
+    expect(plannerRequests.length).toBe(beforeToneControl);
+    const warm = await create(12);
+    expect(warm.localRecipe).toEqual(warmRecipe);
+    expect(warm.sha256).not.toBe(bright.sha256);
+    expect(warm.sha256).not.toBe(returned.sha256);
+
+    await useVersion(warm);
+    const neutralPlan = await interpret("reset the lead tone");
+    expect(neutralPlan.model).toMatchObject(toneOrigin);
+    expect(neutralPlan.basisRecordingId).toBe(warm.id);
+    expect(neutralPlan.recipe).toEqual(swingRecipe);
+    const neutral = await create(13);
+    expect(neutral.localRecipe).toEqual(swingRecipe);
+    expect(neutral.sha256).toBe(returned.sha256);
     expect((await exploration()).original.sha256).toBe(source.sha256);
-    extraPlans.push(performancePlan, soloPlan, swingPlan, straightPlan, returnPlan);
+    extraPlans.push(performancePlan, soloPlan, swingPlan, straightPlan, returnPlan, brightPlan, warmPlan, neutralPlan);
   }
   expect(errors).toEqual([]);
   expect(external).toEqual([]);
@@ -809,6 +849,7 @@ try {
             "compound track mix, visible strip changes, and atomic rejection of an unsupported clause",
             "manual mix restoration is byte-identical; a newer melody revision is disclosed before creation",
             "recorded lead with direct swing drums, guided straight drums, and exact restoration on a 120 BPM pickup grid",
+            "natural bright and neutral tone phrases and direct warm adjustment preserve the grid; resetting restores the served WAV exactly",
           ] : []),
           "desktop and 390/320 px layouts; mobile refinement controls",
           "no unexpected browser errors or external browser requests",

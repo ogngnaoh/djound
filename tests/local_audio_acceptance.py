@@ -33,6 +33,21 @@ def grid_onsets(pattern, sample_rate, frame_count):
     return sorted(expected)
 
 
+def spectral_balance_db(samples, sample_rate):
+    """Treble/body energy across channels, using an independent block spectrum."""
+    size = 8192
+    window = np.hanning(size)[:, None]
+    frequencies = np.fft.rfftfreq(size, 1 / sample_rate)
+    power = np.zeros(len(frequencies))
+    for start in range(0, len(samples) - size + 1, size // 2):
+        spectrum = np.fft.rfft(samples[start:start + size] * window, axis=0)
+        power += np.sum(np.abs(spectrum) ** 2, axis=1)
+    body = power[(frequencies >= 150) & (frequencies <= 800)].sum()
+    treble = power[(frequencies >= 2000) & (frequencies <= 8000)].sum()
+    assert body > 0 and treble > 0, 'The fixture must contain measurable body and treble'
+    return 10 * np.log10(treble / body)
+
+
 result = json.loads(Path(sys.argv[1]).read_text())
 data = Path(sys.argv[2])
 evidence = Path(result['evidence'])
@@ -60,7 +75,7 @@ for index, recording in enumerate(result['snapshot']['renditions'], 1):
                     'rms': float(np.sqrt(np.mean(samples ** 2))), 'clippedSamples': 0,
                     'leadPcmSha256': lead_hashes[-1], 'notesSha256': note_hashes[-1],
                     'worker': manifest['provenance']['supervisor']})
-if len(reports) in (5, 7, 10):
+if len(reports) in (5, 7, 10, 13):
     # The fourth rendition mixes the first version's dry stems on the same timeline.
     # Compare serialized samples to an independent stereo matrix and gain equation.
     parent = data / 'local-jobs' / result['snapshot']['renditions'][0]['attemptId'] / 'output'
@@ -81,7 +96,7 @@ if len(reports) in (5, 7, 10):
     print('PASS: actual text-to-mix samples match the stereo matrix; direct controls restore the original WAV byte for byte.')
 else:
     assert len(reports) == 3
-if len(reports) in (7, 10):
+if len(reports) in (7, 10, 13):
     uploaded = Path(__file__).resolve().parents[1] / 'fixtures/audio/local-demo-source.wav'
     source, _ = sf.read(uploaded, dtype='float32', always_2d=True)
     source_hash = hashlib.sha256(source.astype('<f4').tobytes()).hexdigest()
@@ -100,7 +115,7 @@ if len(reports) in (7, 10):
         assert proof['sourceSha256'] == result['snapshot']['original']['sha256']
     mix_check['uploadedLeadPcmSha256'] = source_hash
     print('PASS: recorded-lead mix equals the original samples plus backing; isolating the lead restores its source PCM exactly.')
-if len(reports) == 10:
+if len(reports) in (10, 13):
     groove_checks = []
     downbeat_frame = round(.710 * rate)
     assert np.any(source[:downbeat_frame]), 'The fixture must have audible lead before the first drum beat'
@@ -132,6 +147,41 @@ if len(reports) == 10:
         assert groove_checks[0][field] != groove_checks[1][field]
     mix_check['drumGrooves'] = groove_checks
     print('PASS: both drum grids match the reviewed pickup, preserve the source PCM, and restore swing exactly.')
+if len(reports) == 13:
+    tone_checks = []
+    target = source.astype(np.float64)
+    reference_rms = np.sqrt(np.mean(target ** 2))
+    reference_balance = spectral_balance_db(target, rate)
+    expected_drum_sha = groove_checks[-1]['drumPcmSha256']
+    for i, tone in ((10, 'bright'), (11, 'warm'), (12, 'neutral')):
+        recording = result['snapshot']['renditions'][i]
+        folder = data / 'local-jobs' / recording['attemptId'] / 'output'
+        assert tracks[i] == tracks[9] and lead_hashes[i] == source_hash
+        drums, drum_rate = sf.read(folder / 'stem-1.raw.wav', dtype='float32', always_2d=True)
+        assert drum_rate == rate and hashlib.sha256(drums.astype('<f4').tobytes()).hexdigest() == expected_drum_sha
+        mix, mix_rate = sf.read(folder / 'audio.raw.wav', dtype='float64', always_2d=True)
+        assert mix_rate == rate and mix.shape == target.shape and np.isfinite(mix).all()
+        # No other stems or fader changes. Subtraction measures the signal that was
+        # actually mixed, independently of the worker's effect settings or metrics.
+        isolated = mix - drums
+        rms_delta = 20 * np.log10(np.sqrt(np.mean(isolated ** 2)) / reference_rms)
+        ratio_delta = spectral_balance_db(isolated, rate) - reference_balance
+        assert abs(rms_delta) < .01, 'Tone also moved the lead level'
+        if tone == 'neutral':
+            assert abs(ratio_delta) < .001
+            assert (evidence / 'version-13.wav').read_bytes() == (evidence / 'version-10.wav').read_bytes()
+        else:
+            assert ratio_delta * (1 if tone == 'bright' else -1) > .5, f'{tone} failed the physical tone direction'
+        manifest = json.loads((folder / 'result.json').read_text())
+        master_gain = manifest['provenance']['export']['gain']
+        served, served_rate = sf.read(evidence / f'version-{i + 1}.wav', always_2d=True)
+        assert served_rate == rate and served.shape == mix.shape
+        assert np.max(np.abs(served - mix * master_gain)) <= 1 / 32768 + 1e-7
+        tone_checks.append({'version': i + 1, 'tone': tone, 'trebleToBodyChangeDb': float(ratio_delta),
+                            'leadRmsChangeDb': float(rms_delta), 'sourcePcmSha256': source_hash,
+                            'drumPcmSha256': expected_drum_sha, 'playbackSha256': recording['sha256']})
+    mix_check['trackTone'] = tone_checks
+    print('PASS: bright and warm change isolated lead spectra at matched RMS; served PCM matches the master and neutral restores the original WAV.')
 assert lead_hashes[0] == lead_hashes[1], 'Backing-only refinement changed the locked lead'
 assert lead_hashes[2] != lead_hashes[1], 'Explicit guitar correction did not change the lead timbre'
 assert len(set(note_hashes)) == 1, 'Refinement or instrument correction changed confirmed notes'

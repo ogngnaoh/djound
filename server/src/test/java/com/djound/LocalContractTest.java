@@ -151,11 +151,32 @@ class LocalContractTest {
         var bass = Map.of("gainDb", 12, "pan", 1, "muted", false);
         recipe.put("mix", Map.of("lead", lead, "bass", bass));
         assertEquals(recipe, LocalMusic.validateRecipe(recipe));
+        var explicitNeutral = Map.of("gainDb", 0, "pan", 0, "muted", false, "tone", "neutral");
+        recipe.put("mix", Map.of("lead", explicitNeutral));
+        assertFalse(LocalMusic.validateRecipe(recipe).containsKey("mix"));
+        var unchangedBass = new LinkedHashMap<String, Object>(bass);
+        unchangedBass.put("tone", "neutral");
+        recipe.put("mix", Map.of("bass", unchangedBass));
+        assertEquals(Map.of("bass", bass), LocalMusic.validateRecipe(recipe).get("mix"));
+        for (var tone : List.of("warm", "bright")) {
+            var colored = Map.of("gainDb", 0, "pan", 0, "muted", false, "tone", tone);
+            recipe.put("mix", Map.of("bass", colored));
+            assertEquals(recipe, LocalMusic.validateRecipe(recipe));
+        }
+        for (Object invalidTone : Arrays.asList(null, false, 1, List.of("warm"), "dark")) {
+            var strip = new HashMap<String, Object>(neutral);
+            strip.put("tone", invalidTone);
+            recipe.put("mix", Map.of("lead", strip));
+            assertEquals(
+                    "PLAN_INVALID",
+                    assertThrows(ApiProblem.class, () -> LocalMusic.validateRecipe(recipe)).code());
+        }
         for (Object invalid :
                 List.of(
                         List.of(),
                         Map.of("vocals", neutral),
                         Map.of("drums", neutral),
+                        Map.of("drums", explicitNeutral),
                         Map.of("lead", Map.of("gainDb", 0, "pan", 0)),
                         Map.of("lead", Map.of("gainDb", 0, "pan", 0, "muted", false, "reverb", 1)),
                         Map.of("lead", Map.of("gainDb", "0", "pan", 0, "muted", false)),

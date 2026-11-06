@@ -9,7 +9,12 @@ function activeStems(recipe: Recipe) {
   return STEMS.filter((stem) => stem === "lead" || recipe[stem]);
 }
 function isUnity(s: MixStrip) {
-  return s.gainDb === 0 && s.pan === 0 && !s.muted;
+  return (
+    s.gainDb === 0 &&
+    s.pan === 0 &&
+    !s.muted &&
+    (s.tone ?? "neutral") === "neutral"
+  );
 }
 
 export function normalizeMix(recipe: Recipe): Recipe {
@@ -19,6 +24,10 @@ export function normalizeMix(recipe: Recipe): Recipe {
     const strip = mix[stem];
     if (!strip || (stem !== "lead" && !recipe[stem]) || isUnity(strip))
       delete mix[stem];
+    else if (strip.tone === "neutral") {
+      const { tone, ...flat } = strip;
+      mix[stem] = flat;
+    }
   }
   const result: Recipe = { ...recipe, mix };
   if (!Object.keys(mix).length) delete result.mix;
@@ -40,6 +49,12 @@ export function mixChanges(recipe: Recipe, before?: Recipe) {
     const now = recipe.mix?.[stem] ?? UNITY;
     const was = before?.mix?.[stem] ?? UNITY;
     const changes: { label: string; previous: string; value: string }[] = [];
+    if ((now.tone ?? "neutral") !== (was.tone ?? "neutral"))
+      changes.push({
+        label: `${NAMES[stem]} tone`,
+        previous: was.tone ?? "neutral",
+        value: now.tone ?? "neutral",
+      });
     if (now.gainDb !== was.gainDb)
       changes.push({
         label: `${NAMES[stem]} gain`,
@@ -123,6 +138,23 @@ export function TrackMix({
               update({ ...strip, pan: e.currentTarget.valueAsNumber / 100 })
             }
           />
+        </label>
+        <label>
+          Tone
+          <select
+            aria-label="Track tone"
+            value={strip.tone ?? "neutral"}
+            onChange={(e) =>
+              update({
+                ...strip,
+                tone: e.currentTarget.value as MixStrip["tone"],
+              })
+            }
+          >
+            <option value="neutral">Neutral</option>
+            <option value="warm">Warm</option>
+            <option value="bright">Bright</option>
+          </select>
         </label>
         <label className="mix-mute">
           <input

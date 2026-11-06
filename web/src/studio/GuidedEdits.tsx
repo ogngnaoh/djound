@@ -1,3 +1,26 @@
+import phrases from "../../../contracts/tone-phrases.json";
+
+const tones = new Set<string>();
+for (const patterns of Object.values(phrases.tones)) {
+  for (const pattern of patterns) {
+    for (const track of Object.keys(phrases.tracks)) {
+      tones.add(pattern.replace("{track}", track));
+      tones.add(pattern.replace("{track}", `the ${track}`));
+    }
+  }
+}
+
+export function isToneRequest(text: string) {
+  return text
+    .toLowerCase()
+    .trim()
+    .replace(/\s+/g, " ")
+    .replace(/^please /, "")
+    .replace(/\.$/, "")
+    .split(/\s*;\s*| and /)
+    .every((clause) => tones.has(clause));
+}
+
 const GROUPS = [
   {
     label: "Lead",
@@ -40,6 +63,9 @@ const GROUPS = [
       `center ${stem}`,
       `mute ${stem}`,
       `unmute ${stem}`,
+      `set ${stem} tone to bright`,
+      `set ${stem} tone to warm`,
+      `set ${stem} tone to neutral`,
     ],
   })),
 ];
