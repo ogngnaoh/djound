@@ -46,6 +46,8 @@ public final class LocalModels {
     public record State(
             boolean available,
             String unavailableReason,
+            boolean freeformAvailable,
+            String freeformUnavailableReason,
             Job activeJob,
             Job latestJob,
             Notes notes,

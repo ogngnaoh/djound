@@ -11,6 +11,9 @@ const require = createRequire(new URL("../web/package.json", import.meta.url));
 const { chromium, expect } = require("@playwright/test");
 const base = process.env.DJOUND_TEST_BASE_URL;
 const guidedWalkthrough = process.env.DJOUND_CHECK_GUIDED === "1";
+const audioOnly = process.env.DJOUND_CHECK_AUDIO_ONLY === "1";
+if (audioOnly && !guidedWalkthrough)
+  throw new Error("Use DJOUND_CHECK_GUIDED=1 for the audio-only walkthrough.");
 if (
   !/^http:\/\/(127\.0\.0\.1|localhost):\d+$/.test(base || "") ||
   process.env.DJOUND_TEST_ALLOW_WRITE !== "1"
@@ -97,6 +100,13 @@ async function get(route) {
 }
 const local = () => get(`/api/explorations/${id}/local`);
 const exploration = () => get(`/api/explorations/${id}`);
+async function openGuidedEdits() {
+  const panel = page.locator("details.guided-edits");
+  await expect(panel).toBeVisible();
+  if ((await panel.getAttribute("open")) === null)
+    await panel.locator("summary").click();
+  return panel;
+}
 async function settled(label, started) {
   await expect
     .poll(async () => (await local()).activeJob, { timeout: 180000 })
@@ -265,6 +275,11 @@ try {
     page.getByRole("link", { name: "Edit notes", exact: true }),
   ).toBeVisible({ timeout: 180000 });
   const state = await settled("transcribe", started);
+  if (audioOnly) {
+    expect(state.available).toBe(true);
+    expect(state.freeformAvailable).toBe(false);
+    expect(state.freeformUnavailableReason).toBeTruthy();
+  }
   expect(state.notes.notes.length).toBeGreaterThan(10);
   await expect(
     page.getByLabel("Selected note pitch", { exact: true }),
@@ -336,6 +351,20 @@ try {
 
   await useVersion(second);
   await direction().fill("Use guitar for this version.");
+  if (audioOnly) {
+    await expect(button("Review changes")).toBeDisabled();
+    await expect(button("Adjust arrangement")).toBeEnabled();
+    await expect(page.getByText(state.freeformUnavailableReason, {exact:true})).toBeVisible();
+    await page.reload();
+    await expect(direction()).toHaveValue("Use guitar for this version.");
+    await expect(button("Review changes")).toBeDisabled();
+    const panel = await openGuidedEdits();
+    await button("Compose guided edit").click();
+    await page.getByLabel("Add a guided edit").selectOption("use guitar");
+    await expect(panel.getByText("Use guitar for this version.", {exact:true})).toBeVisible();
+    await expect(button("Review changes")).toBeEnabled();
+  }
+  const recoveryText = await direction().inputValue();
   const preparationJob = (await local()).latestJob.id;
   const plannerPattern = `**/api/explorations/${id}/local/plans`;
   expectedPlannerFailure = true;
@@ -356,7 +385,7 @@ try {
   await expect(page.getByRole("alert")).toContainText(
     "Planner unavailable for this recovery check.",
   );
-  await expect(direction()).toHaveValue("Use guitar for this version.");
+  await expect(direction()).toHaveValue(recoveryText);
   await page.unroute(plannerPattern);
   await shot("05-planner-unavailable");
   await button("Adjust arrangement").click();
@@ -500,7 +529,7 @@ try {
     "true",
   );
   // Readiness changes must refresh without a reload or another inference attempt.
-  await direction().fill("Use piano.");
+  await direction().fill(audioOnly ? "edit: use piano" : "Use piano.");
   await expect(button("Review changes")).toBeEnabled();
   const localPattern = `**/api/explorations/${id}/local`;
   await page.route(localPattern, async (route) => {
@@ -578,8 +607,7 @@ try {
     await useVersion(first);
     const wording = "Let the drums sit this one out and move the bass a bit left.";
     await direction().fill(wording);
-    const guided = page.locator("details.guided-edits");
-    await guided.locator("summary").click();
+    const guided = await openGuidedEdits();
     const reviewCount = plannerRequests.length;
     const renderCount = submissions.length;
     await button("Compose guided edit").click();
@@ -588,7 +616,7 @@ try {
     const picker = page.getByLabel("Add a guided edit");
     await picker.selectOption("lower bass by 3 dB");
     await page.reload();
-    await guided.locator("summary").click();
+    await openGuidedEdits();
     await expect(guided.getByText(wording, {exact: true})).toBeVisible();
     await expect(direction()).toHaveValue("edit: lower bass by 3 dB");
     await button("Restore original wording").click();
@@ -697,6 +725,7 @@ try {
             }
           : {}),
         checks: [
+          ...(audioOnly ? ["audio engine ready with optional language planner absent; freeform review disabled, original words retained, guided and direct renders available"] : []),
           "real upload, actual transcription and listening review without opening optional editor",
           "confirmed notes unchanged across successive real local renders",
           guidedWalkthrough

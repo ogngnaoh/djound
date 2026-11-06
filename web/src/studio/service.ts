@@ -675,6 +675,8 @@ function backendProject(e: Exploration, local?: LocalState): Project {
     basisId: e.draft.basisRecordingId ?? e.original.id,
     previewUrl: local?.notes?.previewUrl ?? undefined,
     available: local?.available ?? false,
+    freeformAvailable: local?.freeformAvailable ?? local?.available ?? false,
+    freeformUnavailableReason: local?.freeformUnavailableReason ?? undefined,
     processing: Boolean(
       local?.activeJob ||
       (e.latestAttempt &&

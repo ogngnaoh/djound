@@ -44,17 +44,19 @@ export function GuidedEdits({
   onChange,
   onSwitch,
   disabled,
+  initiallyOpen,
 }: {
   text: string;
   alternate: string;
   onChange: (value: string) => void;
   onSwitch: (value: string) => void;
   disabled: boolean;
+  initiallyOpen: boolean;
 }) {
   const clean = text.trim();
   const guided = isGuided(text);
   return (
-    <details className="guided-edits">
+    <details className="guided-edits" open={initiallyOpen || undefined}>
       <summary>Guided edits</summary>
       {clean && !guided ? (
         <>

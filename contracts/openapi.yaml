@@ -835,6 +835,8 @@ components:
       properties:
         available: { type: boolean }
         unavailableReason: { type: [string, 'null'] }
+        freeformAvailable: { type: boolean, description: Availability of the optional local language planner. Older servers report only available. }
+        freeformUnavailableReason: { type: [string, 'null'] }
         activeJob: { anyOf: [{ $ref: '#/components/schemas/LocalJob' }, { type: 'null' }] }
         latestJob: { anyOf: [{ $ref: '#/components/schemas/LocalJob' }, { type: 'null' }] }
         notes: { anyOf: [{ $ref: '#/components/schemas/LocalNotes' }, { type: 'null' }] }

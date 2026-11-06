@@ -56,6 +56,8 @@ export type Project = {
   basisId: string;
   previewUrl?: string;
   available: boolean;
+  freeformAvailable?: boolean;
+  freeformUnavailableReason?: string;
   /** An active preparation or creation for this project, separate from engine readiness. */
   processing?: boolean;
   unavailableReason?: string;

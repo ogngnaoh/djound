@@ -7,6 +7,7 @@ import json
 import os
 from pathlib import Path
 import re
+import shutil
 import signal
 import subprocess
 import sys
@@ -14,28 +15,33 @@ import time
 import zipfile
 
 from common import HERE, HOME, ROOT, EngineError, data_root, digest, inside, notes, recipe, write_json
-from setup_assets import verify
+from edit_commands import PREFIX
+from setup_assets import is_planner_asset, verify
 
 OPERATIONS = ['transcribe', 'preview', 'plan', 'render']
 OWNER_PID = os.getppid()
 
 
-def readiness():
+def verify_dependencies(lockfile):
+    for line in (HERE / lockfile).read_text().splitlines():
+        if '==' in line:
+            name, expected = line.split('==', 1)
+            if importlib.metadata.version(name) != expected:
+                raise EngineError('LOCAL_SETUP_REQUIRED', f'The local engine dependency {name} needs setup.')
+
+
+def readiness(*, check_freeform=True):
     manifest = json.loads((HERE / 'assets.json').read_text())
     result = {'schemaVersion': 1, 'ready': False, 'model': manifest['model'], 'revision': manifest['revision'],
-              'operations': OPERATIONS, 'maxDurationSeconds': 12}
+              'operations': OPERATIONS, 'maxDurationSeconds': 12, 'freeformAvailable': False}
     try:
         if sys.platform != 'darwin' or os.uname().machine != 'arm64':
             raise EngineError('LOCAL_PLATFORM', 'This local engine is qualified for Apple Silicon macOS.')
-        for line in (HERE / 'requirements.lock').read_text().splitlines():
-            if '==' in line:
-                name, expected = line.split('==', 1)
-                if importlib.metadata.version(name) != expected:
-                    raise EngineError('LOCAL_SETUP_REQUIRED', f'The local engine dependency {name} needs setup.')
+        verify_dependencies('requirements-audio.lock')
         setup = json.loads((HOME / 'setup.json').read_text())
         for item in manifest['assets']:
-            if not verify(HOME / item['path'], item):
-                raise EngineError('LOCAL_SETUP_REQUIRED', 'A pinned local model or renderer asset is missing or changed.')
+            if not is_planner_asset(manifest, item) and not verify(HOME / item['path'], item):
+                raise EngineError('LOCAL_SETUP_REQUIRED', 'A pinned transcription or renderer asset is missing or changed.')
         if setup['rendererSha256'] != digest(HOME / 'renderer') or setup['rendererSourceSha256'] != digest(HERE / 'renderer.c'):
             raise EngineError('LOCAL_SETUP_REQUIRED', 'The local renderer needs rebuilding with setup_localengine.sh.')
         with zipfile.ZipFile(HOME / 'downloads/basic_pitch-0.4.0-py2.py3-none-any.whl') as package:
@@ -43,15 +49,29 @@ def readiness():
                 extracted = HOME / 'basic-pitch' / item.filename
                 if not item.is_dir() and (not extracted.is_file() or extracted.read_bytes() != package.read(item)):
                     raise EngineError('LOCAL_SETUP_REQUIRED', 'The extracted transcription runtime differs from its pinned package.')
-        import shutil
         if not shutil.which('ffmpeg'):
             raise EngineError('LOCAL_SETUP_REQUIRED', 'Install ffmpeg to decode local audio.')
         result['ready'] = True
     except EngineError as error:
         result['error'] = {'code': error.code, 'message': error.message}
-    except (OSError, ValueError, KeyError, importlib.metadata.PackageNotFoundError):
+    except (OSError, ValueError, KeyError, zipfile.BadZipFile, importlib.metadata.PackageNotFoundError):
         result['error'] = {'code': 'LOCAL_SETUP_REQUIRED', 'message': 'Run local-engine/setup_localengine.sh to prepare the local engine.'}
+    if not result['ready']:
+        result['freeformUnavailableReason'] = result['error']['message']
+    elif check_freeform:
+        try:
+            verify_dependencies('requirements.lock')
+            result['freeformAvailable'] = all(verify(HOME / item['path'], item) for item in manifest['assets']
+                                              if is_planner_asset(manifest, item))
+        except (EngineError, OSError, importlib.metadata.PackageNotFoundError):
+            pass
+        result['freeformUnavailableReason'] = (None if result['freeformAvailable'] else
+            'The freeform language planner needs setup. Use a guided edit or the direct controls.')
     return result
+
+
+def needs_freeform(request):
+    return request['operation'] == 'plan' and not PREFIX.match(request['prompt'].lstrip())
 
 
 def request_values(path):
@@ -163,13 +183,14 @@ def supervise(request_path, output, operation):
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--check', action='store_true')
+    parser.add_argument('--require-freeform', action='store_true', help='Also require the optional language planner during --check')
     parser.add_argument('--request', type=Path)
     parser.add_argument('--output', type=Path)
     args = parser.parse_args()
     if args.check:
         value = readiness()
         print(json.dumps(value))
-        return 0 if value['ready'] else 1
+        return 0 if value['ready'] and (not args.require_freeform or value['freeformAvailable']) else 1
     def cancel(signum, frame):
         raise EngineError('LOCAL_CANCELLED', 'The local operation was cancelled.')
     signal.signal(signal.SIGTERM, cancel)
@@ -199,10 +220,13 @@ def main():
                 fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
             except BlockingIOError as error:
                 raise EngineError('LOCAL_BUSY', 'Another local engine job is running. Wait for it to finish.') from error
-            checked = readiness()
+            freeform = needs_freeform(request)
+            checked = readiness(check_freeform=freeform)
             if not checked['ready']:
                 failure = checked['error']
                 raise EngineError(failure['code'], failure['message'])
+            if freeform and not checked['freeformAvailable']:
+                raise EngineError('LOCAL_PLANNER_UNAVAILABLE', checked['freeformUnavailableReason'])
             result = supervise(frozen, output, operation)
     except EngineError as error:
         result = {'schemaVersion': 1, 'status': 'failed', 'operation': operation,

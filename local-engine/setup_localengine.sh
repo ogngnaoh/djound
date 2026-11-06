@@ -1,6 +1,11 @@
 #!/usr/bin/env bash
 # Explicit setup downloads weights; worker inference never downloads anything.
 set -euo pipefail
+case "${1:-}" in
+  ""|--audio-only) ;;
+  *) echo 'usage: setup_localengine.sh [--audio-only]' >&2; exit 2 ;;
+esac
+if (( $# > 1 )); then echo 'usage: setup_localengine.sh [--audio-only]' >&2; exit 2; fi
 ENGINE_CODE="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd -- "$ENGINE_CODE/.." && pwd)"
 ENGINE_HOME="${DJOUND_LOCAL_ENGINE_HOME:-$REPO_ROOT/.runtime/local-engine}"
@@ -15,6 +20,13 @@ if [[ ! -x "$ENGINE_HOME/venv/bin/python" ]]; then
   uv venv --python "${DJOUND_PYTHON:-python3.11}" "$ENGINE_HOME/venv"
 fi
 "$ENGINE_HOME/venv/bin/python" -c 'import sys; assert sys.version_info[:2] == (3, 11), "Use Python 3.11 for this pinned environment"'
-uv pip sync --python "$ENGINE_HOME/venv/bin/python" "$ENGINE_CODE/requirements.lock"
-"$ENGINE_HOME/venv/bin/python" "$ENGINE_CODE/setup_assets.py"
-"$ENGINE_HOME/venv/bin/python" "$ENGINE_CODE/worker.py" --check
+if [[ "${1:-}" == --audio-only ]]; then
+  # Installing the audio subset in an existing full setup preserves its planner.
+  uv pip install --python "$ENGINE_HOME/venv/bin/python" -r "$ENGINE_CODE/requirements-audio.lock"
+  "$ENGINE_HOME/venv/bin/python" "$ENGINE_CODE/setup_assets.py" --audio-only
+  "$ENGINE_HOME/venv/bin/python" "$ENGINE_CODE/worker.py" --check
+else
+  uv pip sync --python "$ENGINE_HOME/venv/bin/python" "$ENGINE_CODE/requirements.lock"
+  "$ENGINE_HOME/venv/bin/python" "$ENGINE_CODE/setup_assets.py"
+  "$ENGINE_HOME/venv/bin/python" "$ENGINE_CODE/worker.py" --check --require-freeform
+fi

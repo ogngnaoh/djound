@@ -773,6 +773,9 @@ export interface components {
         LocalState: {
             available: boolean;
             unavailableReason: string | null;
+            /** @description Availability of the optional local language planner. Older servers report only available. */
+            freeformAvailable?: boolean;
+            freeformUnavailableReason?: string | null;
             activeJob: components["schemas"]["LocalJob"] | null;
             latestJob: components["schemas"]["LocalJob"] | null;
             notes: components["schemas"]["LocalNotes"] | null;

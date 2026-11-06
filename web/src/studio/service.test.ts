@@ -376,12 +376,18 @@ test("backend history uses immutable recipes, never request text or the latest p
     ],
   };
   let preparationActive = false;
+  let freeformAvailable: boolean | undefined;
   let attemptState: string | null = null;
   try {
     api.GET = (async (path: string) => ({
       data: path.endsWith("/local")
         ? {
             available: true,
+            freeformAvailable,
+            freeformUnavailableReason:
+              freeformAvailable === false
+                ? "Install the optional model."
+                : null,
             activeJob: preparationActive
               ? { id: "active-preparation", state: "RUNNING" }
               : null,
@@ -419,7 +425,20 @@ test("backend history uses immutable recipes, never request text or the latest p
     assert.equal(project.tracks[0].recipeKnown, true);
     assert.equal(project.tracks[0].title, "Original");
     assert.equal(project.processing, false);
+    assert.equal(
+      project.freeformAvailable,
+      true,
+      "An older server qualified core and planner together",
+    );
     const service = createStudioService("backend", "normal");
+    freeformAvailable = false;
+    const coreOnly = await service.get("project");
+    assert.equal(coreOnly.available, true);
+    assert.equal(coreOnly.freeformAvailable, false);
+    assert.equal(
+      coreOnly.freeformUnavailableReason,
+      "Install the optional model.",
+    );
     preparationActive = true;
     assert.equal((await service.get("project")).processing, true);
     preparationActive = false;

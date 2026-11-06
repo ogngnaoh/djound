@@ -50,7 +50,9 @@ class LocalMusicIntegrationTest {
 """
 import argparse,json,pathlib,sys,wave,math,struct,time,subprocess,os
 p=argparse.ArgumentParser();p.add_argument('--check',action='store_true');p.add_argument('--request');p.add_argument('--output');a=p.parse_args()
-if a.check: print(json.dumps({'schemaVersion':1,'ready':True}));sys.exit()
+if a.check:
+ readiness=pathlib.Path(__file__).with_name('readiness.json')
+ print(readiness.read_text() if readiness.exists() else json.dumps({'schemaVersion':1,'ready':True}));sys.exit()
 r=json.loads(pathlib.Path(a.request).read_text());out=pathlib.Path(a.output);out.mkdir();op=r['operation'];base=pathlib.Path(os.environ['DJOUND_LOCAL_DATA_ROOT'])
 if (base/('fail-'+op)).exists():
  (out/'result.json').write_text(json.dumps({'schemaVersion':1,'status':'failed','operation':op,'error':{'code':'LOCAL_ENGINE_FAILED','message':'Explicit worker failure test'}}));sys.exit(2)
@@ -207,9 +209,34 @@ else:
     }
 
     @Test
+    void coreAudioCanRenderDirectSettingsWhenOnlyTheOptionalPlannerIsUnavailable()
+            throws Exception {
+        Files.writeString(
+                root.resolve("readiness.json"),
+                """
+                {"schemaVersion":1,"ready":true,"freeformAvailable":false,"freeformUnavailableReason":"Install the optional model."}
+                """);
+        String id = source();
+        var state = local().state(id);
+        assertTrue(state.available());
+        assertFalse(state.freeformAvailable());
+        assertEquals("Install the optional model.", state.freeformUnavailableReason());
+        var notes = confirmed(id);
+        var direct =
+                local().manual(id, new PlanCommand(1L, notes.revision(), 1L, "Direct piano", null));
+        assertEquals(
+                "SUCCEEDED",
+                finished(gen().create(id, command(direct), "optional-planner-key").attemptId())
+                        .state());
+    }
+
+    @Test
     void mixedRecordingKeepsFrozenNotesAndControlsWhenTheNextVersionReturnsToUnity()
             throws Exception {
         String id = source();
+        assertTrue(
+                local().state(id).freeformAvailable(),
+                "Legacy workers qualified core and planner together");
         var notes = confirmed(id);
         var direct =
                 local().manual(

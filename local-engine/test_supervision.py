@@ -49,6 +49,40 @@ class Supervision(unittest.TestCase):
                 worker.request_values(request)
             self.assertEqual(failure.exception.code, 'LOCAL_INVALID_REQUEST')
 
+    def test_model_readiness_follows_the_guided_prefix(self):
+        for prompt in ['edit: add drums', '  EDit: bad command']:
+            self.assertFalse(worker.needs_freeform({'operation': 'plan', 'prompt': prompt}))
+        for prompt in ['add drums', 'editing: add drums', 'use the words edit: here']:
+            self.assertTrue(worker.needs_freeform({'operation': 'plan', 'prompt': prompt}))
+        for operation in ['transcribe', 'render', 'preview']:
+            self.assertFalse(worker.needs_freeform({'operation': operation}))
+
+    def test_audio_readiness_is_independent_of_optional_planner_weights(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            home = Path(temporary)
+            wheel = home / 'downloads/basic_pitch-0.4.0-py2.py3-none-any.whl'
+            wheel.parent.mkdir()
+            with worker.zipfile.ZipFile(wheel, 'w') as package:
+                package.writestr('transcriber.py', 'pinned')
+            (home / 'basic-pitch').mkdir()
+            (home / 'basic-pitch/transcriber.py').write_text('pinned')
+            (home / 'setup.json').write_text('{"rendererSha256":"hash","rendererSourceSha256":"hash"}')
+            with patch.object(worker, 'HOME', home), patch.object(worker.sys, 'platform', 'darwin'), \
+                    patch.object(worker.os, 'uname', return_value=SimpleNamespace(machine='arm64')), \
+                    patch.object(worker, 'digest', return_value='hash'), patch.object(worker.shutil, 'which', return_value='ffmpeg'), \
+                    patch.object(worker, 'verify_dependencies') as pins, \
+                    patch.object(worker, 'verify', side_effect=lambda path, item: 'qwen35' not in path.parts) as assets:
+                core = worker.readiness(check_freeform=False)
+                self.assertTrue(core['ready'])
+                pins.assert_called_once_with('requirements-audio.lock')
+                self.assertFalse(any('qwen35' in call.args[0].parts for call in assets.call_args_list))
+                status = worker.readiness()
+                self.assertTrue(status['ready'])
+                self.assertFalse(status['freeformAvailable'])
+                self.assertIn('guided edit', status['freeformUnavailableReason'])
+                (home / 'basic-pitch/transcriber.py').write_text('modified')
+                self.assertFalse(worker.readiness(check_freeform=False)['ready'])
+
     def test_terminate_escalates_and_reaps_process_group(self):
         child = Mock(pid=123456)
         child.wait.side_effect = [subprocess.TimeoutExpired('child', 1), 0]

@@ -399,6 +399,10 @@ export function Refinement({
     !project.available ||
     project.processing ||
     !supportedBasis;
+  const guidedOnly =
+    mode === "backend" &&
+    project.available &&
+    project.freeformAvailable === false;
   return (
     <div className="refinement">
       <header>
@@ -444,12 +448,22 @@ export function Refinement({
           </label>
           <textarea
             id="refinement-request"
-            placeholder="Try “Remove drums and make the backing quieter.”"
+            placeholder={
+              guidedOnly
+                ? "Choose a guided edit below."
+                : "Try “Remove drums and make the backing quieter.”"
+            }
             value={text}
             maxLength={1000}
             onChange={(e) => changeText(e.target.value)}
             disabled={busy}
           />
+          {guidedOnly && !isGuided(text) && (
+            <p className="notice" role="status">
+              {project.freeformUnavailableReason ||
+                "Choose a guided edit or adjust the arrangement directly while the local language planner is unavailable."}
+            </p>
+          )}
           {mode === "backend" && (
             <GuidedEdits
               alternate={alternate}
@@ -457,6 +471,7 @@ export function Refinement({
               onSwitch={(next) => changeText(next, text)}
               onChange={changeText}
               disabled={disabled || busy}
+              initiallyOpen={guidedOnly}
             />
           )}
           <Button
@@ -465,6 +480,7 @@ export function Refinement({
               disabled ||
               busy ||
               !text.trim() ||
+              (guidedOnly && !isGuided(text)) ||
               (mode === "backend" && /^edit:$/i.test(text.trim()))
             }
             onClick={() => void review()}

@@ -16,12 +16,17 @@ import java.util.function.BooleanSupplier;
 /** Only server-owned JSON/files cross this boundary. No shell, downloads or remote fallback. */
 @Component
 public class LocalWorker implements AutoCloseable {
+    public record Readiness(
+            boolean ready, boolean freeformAvailable, String freeformUnavailableReason) {}
+
+    private static final Readiness UNAVAILABLE = new Readiness(false, false, null);
+
     private final ObjectMapper json = new ObjectMapper();
     private final Path root, python, script;
     private final Map<String, Process> processes = new ConcurrentHashMap<>();
     private volatile boolean closing;
-    private volatile long checkedAt;
-    private volatile boolean ready;
+    private long checkedAt;
+    private Readiness readiness = UNAVAILABLE;
 
     public LocalWorker(
             @Value("${djound.data-dir}") String data,
@@ -32,10 +37,14 @@ public class LocalWorker implements AutoCloseable {
         this.script = Path.of(script).toAbsolutePath().normalize();
     }
 
-    public synchronized boolean available() {
-        if (closing || !Files.isExecutable(python) || !Files.isRegularFile(script)) return false;
-        if (System.nanoTime() - checkedAt < TimeUnit.SECONDS.toNanos(ready ? 300 : 5)) return ready;
-        ready = false;
+    public synchronized Readiness readiness() {
+        if (closing || !Files.isExecutable(python) || !Files.isRegularFile(script))
+            return UNAVAILABLE;
+        int cacheSeconds = readiness.freeformAvailable() ? 300 : readiness.ready() ? 30 : 5;
+        if (checkedAt != 0
+                && System.nanoTime() - checkedAt < TimeUnit.SECONDS.toNanos(cacheSeconds))
+            return readiness;
+        readiness = UNAVAILABLE;
         Process process = null;
         Path output = null;
         try {
@@ -49,10 +58,16 @@ public class LocalWorker implements AutoCloseable {
                     && process.exitValue() == 0
                     && Files.size(output) < 65536) {
                 var check = json.readTree(Files.readString(output));
-                ready = check.path("schemaVersion").asInt() == 1 && check.path("ready").asBoolean();
+                if (check.path("schemaVersion").asInt() == 1 && check.path("ready").asBoolean()) {
+                    // Older workers verified the planner as part of their single readiness check.
+                    var flag = check.path("freeformAvailable");
+                    boolean planner = flag.isMissingNode() || flag.isBoolean() && flag.asBoolean();
+                    String reason = check.path("freeformUnavailableReason").asText(null);
+                    readiness = new Readiness(true, planner, planner ? null : reason);
+                }
             }
         } catch (Exception ignored) {
-            ready = false;
+            readiness = UNAVAILABLE;
         } finally {
             if (process != null) stop(process);
             if (output != null)
@@ -62,7 +77,7 @@ public class LocalWorker implements AutoCloseable {
                 }
             checkedAt = System.nanoTime();
         }
-        return ready;
+        return readiness;
     }
 
     public Path directory(String id) {
@@ -73,7 +88,7 @@ public class LocalWorker implements AutoCloseable {
 
     public JsonNode execute(String id, Map<String, Object> request, BooleanSupplier cancelled)
             throws Exception {
-        if (!available())
+        if (!readiness().ready())
             throw new ApiProblem(
                     503,
                     "LOCAL_ENGINE_UNAVAILABLE",

@@ -163,9 +163,12 @@ public class LocalMusic {
                             .list();
             if (!plans.isEmpty()) p = plan(plans.getFirst());
         }
+        var capabilities = worker.readiness();
         return new State(
-                worker.available(),
-                worker.available() ? null : "Set up the local music engine before continuing.",
+                capabilities.ready(),
+                capabilities.ready() ? null : "Set up the local music engine before continuing.",
+                capabilities.freeformAvailable(),
+                capabilities.freeformUnavailableReason(),
                 active.map(this::job).orElse(null),
                 latest.map(this::job).orElse(null),
                 n,

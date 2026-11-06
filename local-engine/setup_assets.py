@@ -11,6 +11,10 @@ import zipfile
 from common import HERE, HOME, digest, write_json
 
 
+def is_planner_asset(manifest, item):
+    return Path(item['path']).parts[0] == manifest['modelDirectory']
+
+
 def verify(path, item):
     if not path.is_file() or path.stat().st_size != item['bytes']:
         return False
@@ -23,11 +27,14 @@ def verify(path, item):
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--reuse-cache', type=Path, help='Optional existing verified asset directory; never required at runtime')
+    parser.add_argument('--audio-only', action='store_true', help='Skip the optional freeform planner weights')
     args = parser.parse_args()
     manifest = json.loads((HERE / 'assets.json').read_text())
     HOME.mkdir(parents=True, exist_ok=True)
     records = []
     for item in manifest['assets']:
+        if args.audio_only and is_planner_asset(manifest, item):
+            continue
         target = HOME / item['path']
         target.parent.mkdir(parents=True, exist_ok=True)
         if target.exists():
