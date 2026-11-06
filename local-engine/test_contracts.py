@@ -4,10 +4,20 @@ import tempfile
 import unittest
 
 from common import DEFAULT_RECIPE, EngineError, inside, notes, recipe
-from planner import decode_plan, slot_patch, validate_patch
+from planner import decode_plan, plan, slot_patch, validate_patch
+from stereo_scope import requests_stereo_change
 
 
 class Contracts(unittest.TestCase):
+    def test_stereo_request_does_not_publish_only_the_instrument_edit(self):
+        with self.assertRaises(EngineError) as failure:
+            plan('Put piano on the melody and split the bass over the left speaker.', DEFAULT_RECIPE, None)
+        self.assertEqual(failure.exception.code, 'LOCAL_UNSUPPORTED_REQUEST')
+        for text in ("Don't pan the bass. Switch to guitar.", "Only change the instrument to piano.",
+                     "The drums sound right. Remove the bass."):
+            with self.subTest(text=text):
+                self.assertFalse(requests_stereo_change(text))
+
     def test_recipe_has_stable_model_prompt_order_across_json_map_orders(self):
         shuffled = dict(reversed(list(DEFAULT_RECIPE.items())))
         self.assertEqual(json.dumps(recipe(shuffled)), json.dumps(recipe(DEFAULT_RECIPE)))

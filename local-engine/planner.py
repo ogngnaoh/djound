@@ -33,7 +33,7 @@ def slot_patch(value, parent):
     if type(value['supported']) is not bool:
         raise EngineError('LOCAL_PLAN_INVALID', 'The local model returned an invalid scope decision.')
     if not value['supported']:
-        raise EngineError('LOCAL_UNSUPPORTED_REQUEST', 'This request includes an unavailable control. Choose piano, electric piano, guitar, bass/drums, backing density or backing volume.')
+        raise EngineError('LOCAL_UNSUPPORTED_REQUEST', 'The planner couldn\'t map the full request. Try one instrument or backing change at a time, or adjust the controls directly.')
     changes = {}
     for field in fields:
         desired = value[field]
@@ -105,6 +105,9 @@ def plan(prompt, parent, output):
     if not isinstance(prompt, str) or not prompt.strip() or len(prompt) > 1000:
         raise EngineError('LOCAL_INVALID_REQUEST', 'Describe a concrete arrangement change in 1000 characters or fewer.')
     parent = recipe(DEFAULT_RECIPE if parent is None else parent)
+    from stereo_scope import requests_stereo_change
+    if requests_stereo_change(prompt):
+        raise EngineError('LOCAL_UNSUPPORTED_REQUEST', 'Stereo positioning is unavailable. Leave panning out of your request or adjust the arrangement controls directly.')
     import mlx.core as mx
     from mlx_lm import load, generate
     from mlx_lm.sample_utils import make_sampler

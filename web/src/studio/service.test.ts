@@ -444,3 +444,56 @@ test("backend history uses immutable recipes, never request text or the latest p
     api.GET = originalGet;
   }
 });
+
+test("a completed language review uses its own plan when another tab has created a newer plan", async () => {
+  storage();
+  const { api } = await import("../api.ts");
+  const project = await createStudioService("prototype", "normal").get(
+    "evening",
+  );
+  const basis = project.tracks.at(-1)!;
+  const plan = {
+    id: "submitted-plan",
+    text: project.draft,
+    basisRecordingId: basis.id,
+    recipe: basis.recipe,
+    basisRecipe: basis.recipe,
+    noteRevision: project.noteRevision,
+    canGenerate: true,
+    warnings: [],
+  };
+  const job = { id: "submitted-job", state: "SUCCEEDED" };
+  const newerPlan = {
+    ...plan,
+    id: "other-plan",
+    text: "another tab's manual review",
+  };
+  const post = api.POST;
+  const get = api.GET;
+  try {
+    api.POST = (async () => ({
+      data: job,
+      response: new Response(null, { status: 202 }),
+    })) as unknown as typeof api.POST;
+    api.GET = (async (
+      path: string,
+      options: { params: { path: { id: string } } },
+    ) => {
+      if (path === "/api/explorations/{id}/local")
+        return { data: { latestJob: job, activeJob: null, plan: newerPlan } };
+      assert.equal(path, "/api/local/jobs/{id}");
+      assert.equal(options.params.path.id, job.id);
+      return { data: { job, plan } };
+    }) as unknown as typeof api.GET;
+    const proposal = await createStudioService("backend", "normal").propose(
+      project,
+      project.draft,
+      basis.id,
+    );
+    assert.equal(proposal.id, plan.id);
+    assert.equal(proposal.text, plan.text);
+  } finally {
+    api.POST = post;
+    api.GET = get;
+  }
+});

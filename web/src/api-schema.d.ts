@@ -118,6 +118,22 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/local/jobs/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["getLocalJobResult"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/local/jobs/{id}/cancel": {
         parameters: {
             query?: never;
@@ -689,6 +705,10 @@ export interface components {
             durationSeconds: number;
             previewUrl: string | null;
         };
+        LocalJobResult: {
+            job: components["schemas"]["LocalJob"];
+            plan: components["schemas"]["LocalPlan"] | null;
+        };
         LocalJob: {
             id: string;
             /** @enum {string} */
@@ -971,6 +991,29 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["LocalJob"];
+                };
+            };
+            default: components["responses"]["Problem"];
+        };
+    };
+    getLocalJobResult: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Status of the named job and its own immutable plan, when available. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["LocalJobResult"];
                 };
             };
             default: components["responses"]["Problem"];

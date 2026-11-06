@@ -190,6 +190,21 @@ public class LocalMusic {
                 .orElseThrow(() -> problem("NOT_FOUND", "This preparation step is unavailable."));
     }
 
+    public JobResult result(String id) {
+        Job j = job(id);
+        Plan p = null;
+        if (j.kind().equals("PLAN") && j.state().equals("SUCCEEDED")) {
+            p =
+                    db.sql("SELECT id FROM local_plan WHERE preparation_job_id=?")
+                            .param(id)
+                            .query(String.class)
+                            .optional()
+                            .map(this::plan)
+                            .orElse(null);
+        }
+        return new JobResult(j, p);
+    }
+
     private Job accept(
             String exp, String kind, long source, Long note, Map<String, Object> payload) {
         String id = "local_" + UUID.randomUUID();
@@ -786,8 +801,8 @@ public class LocalMusic {
                             validateRecipe(recipe);
                             db.sql(
                                             "INSERT INTO"
-                                                + " local_plan(id,exploration_id,source_recording_id,source_revision,note_revision,draft_revision,basis_recording_id,submitted_text,recipe_json,basis_recipe_json,summary,warnings_json,can_generate,model_json)"
-                                                + " VALUES(?,?,?,?,?,?,?,?,?,?,?,?,true,?)")
+                                                + " local_plan(id,exploration_id,source_recording_id,source_revision,note_revision,draft_revision,basis_recording_id,submitted_text,recipe_json,basis_recipe_json,summary,warnings_json,can_generate,model_json,preparation_job_id)"
+                                                + " VALUES(?,?,?,?,?,?,?,?,?,?,?,?,true,?,?)")
                                     .params(
                                             "plan_" + UUID.randomUUID(),
                                             exploration,
@@ -806,7 +821,8 @@ public class LocalMusic {
                                             "[]",
                                             result.path("provenance").isObject()
                                                     ? result.path("provenance").toString()
-                                                    : "{}")
+                                                    : "{}",
+                                            jobId)
                                     .update();
                         }
                         db.sql(

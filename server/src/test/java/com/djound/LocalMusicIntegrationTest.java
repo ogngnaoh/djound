@@ -240,6 +240,22 @@ else:
     }
 
     @Test
+    void completedPlanningJobKeepsItsOwnProposalAfterAnotherReview() throws Exception {
+        String id = source();
+        var notes = confirmed(id);
+        var draft = ex().get(id).draft();
+        var command = new PlanCommand(1L, notes.revision(), draft.revision(), draft.text(), null);
+        var job = completed(local().propose(id, command));
+        assertEquals("SUCCEEDED", job.state());
+        var first = local().state(id).plan();
+        var later = local().manual(id, command);
+        assertNotEquals(first.id(), later.id());
+        assertEquals(later.id(), local().state(id).plan().id());
+        assertEquals(first, local().result(job.id()).plan());
+        assertEquals(job, local().result(job.id()).job());
+    }
+
+    @Test
     void directArrangementWorksAfterPlannerFailureAndInheritsChosenVersion() throws Exception {
         String id = source();
         var n = confirmed(id);

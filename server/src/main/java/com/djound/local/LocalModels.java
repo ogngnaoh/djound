@@ -41,6 +41,8 @@ public final class LocalModels {
             List<String> warnings,
             Map<String, Object> model) {}
 
+    public record JobResult(Job job, Plan plan) {}
+
     public record State(
             boolean available,
             String unavailableReason,

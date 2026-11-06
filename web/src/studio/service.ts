@@ -700,23 +700,21 @@ function backendService(): StudioService {
     ]);
     return backendProject(e, l);
   }
-  async function pollJob(
-    project: Project,
-    jobId: string,
-    signal?: AbortSignal,
-  ) {
+  async function loadJob(jobId: string) {
+    const { data, error } = await api.GET("/api/local/jobs/{id}", {
+      params: { path: { id: jobId } },
+    });
+    if (!data) throw failure(error, "Could not read the local job.");
+    return data;
+  }
+  async function pollJob(jobId: string, signal?: AbortSignal) {
     try {
       for (let i = 0; i < 300; i++) {
         check(signal);
-        const state = await local(project.id);
-        const job =
-          state.activeJob?.id === jobId
-            ? state.activeJob
-            : state.latestJob?.id === jobId
-              ? state.latestJob
-              : null;
-        if (job?.state === "SUCCEEDED") return state;
-        if (job?.state === "FAILED")
+        const state = await loadJob(jobId);
+        const job = state.job;
+        if (job.state === "SUCCEEDED") return state;
+        if (job.state === "FAILED")
           throw new Error(
             job.detail ||
               "The local task did not complete. Your existing recordings are safe.",
@@ -736,7 +734,7 @@ function backendService(): StudioService {
             result.error,
             "Cancellation could not be confirmed. Reload the local task status.",
           );
-        if (result.data.state === "SUCCEEDED") return local(project.id);
+        if (result.data.state === "SUCCEEDED") return loadJob(jobId);
       }
       throw error;
     }
@@ -834,7 +832,7 @@ function backendService(): StudioService {
         },
       );
       if (!data) throw failure(error, "Could not start melody detection.");
-      await pollJob(project, data.id, signal);
+      await pollJob(data.id, signal);
       return get(project.id);
     },
     async saveNotes(project, notes, confirm) {
@@ -867,7 +865,7 @@ function backendService(): StudioService {
         },
       );
       if (!data) throw failure(error, "Could not prepare the melody preview.");
-      await pollJob(project, data.id, signal);
+      await pollJob(data.id, signal);
       return get(project.id);
     },
     async propose(project, text, basisId, recipe, signal) {
@@ -921,7 +919,7 @@ function backendService(): StudioService {
             error,
             "Could not interpret that change. Your request is preserved.",
           );
-        plan = (await pollJob(p, data.id, signal)).plan;
+        plan = (await pollJob(data.id, signal)).plan;
       }
       if (!plan)
         throw new Error(

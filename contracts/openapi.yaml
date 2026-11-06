@@ -122,6 +122,21 @@ paths:
             application/json:
               schema: { $ref: '#/components/schemas/LocalJob' }
         default: { $ref: '#/components/responses/Problem' }
+  /api/local/jobs/{id}:
+    get:
+      operationId: getLocalJobResult
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema: { type: string }
+      responses:
+        '200':
+          description: Status of the named job and its own immutable plan, when available.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/LocalJobResult' }
+        default: { $ref: '#/components/responses/Problem' }
   /api/local/jobs/{id}/cancel:
     post:
       operationId: cancelLocalPreparation
@@ -750,6 +765,12 @@ components:
         notes: { type: array, items: { $ref: '#/components/schemas/LocalNote' } }
         durationSeconds: { type: number }
         previewUrl: { type: [string, 'null'] }
+    LocalJobResult:
+      type: object
+      required: [job, plan]
+      properties:
+        job: { $ref: '#/components/schemas/LocalJob' }
+        plan: { anyOf: [{ $ref: '#/components/schemas/LocalPlan' }, { type: 'null' }] }
     LocalJob:
       type: object
       required: [id, kind, state, sourceRevision, noteRevision, outcomeCode, detail, updatedAt]

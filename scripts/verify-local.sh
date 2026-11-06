@@ -52,7 +52,7 @@ start_app() {
 }
 start_app
 if [[ "${1:-studio}" == planner ]]; then
-  python3 benchmarks/planner/verify_api.py
+  python3 benchmarks/planner/verify_api.py "${@:2}"
   exit 0
 fi
 if [[ "${1:-studio}" == playback ]]; then

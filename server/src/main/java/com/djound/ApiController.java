@@ -162,6 +162,11 @@ public class ApiController {
         return local.correct(id, command);
     }
 
+    @GetMapping("/local/jobs/{id}")
+    public com.djound.local.LocalModels.JobResult localJobResult(@PathVariable String id) {
+        return local.result(id);
+    }
+
     @PostMapping("/local/jobs/{id}/cancel")
     public com.djound.local.LocalModels.Job cancelPreparation(@PathVariable String id) {
         return local.cancel(id);
