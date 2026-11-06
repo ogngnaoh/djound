@@ -104,6 +104,11 @@ def summarize(before, after):
         chart = after.get('harmony')
         parts.append('chords ' + ' / '.join(label or 'rest' for label in chart['chords'])
                      if chart else 'chord chart removed')
+        if chart is None and after['bass']:
+            parts.append('bass follows the melody pulse')
+    if (after['bass'] and after.get('harmony') and not any(after['harmony']['chords'])
+            and (before.get('harmony') != after['harmony'] or not before['bass'])):
+        parts.append('bass rests until a chord is selected')
     for stem in active_stems(after):
         old = before.get('mix', {}).get(stem, UNITY_STRIP)
         new = after.get('mix', {}).get(stem, UNITY_STRIP)

@@ -1,8 +1,19 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { createStudioService } from "./service.ts";
-import { changeBar, chordSuggestions, removeChart } from "./harmony.ts";
-import { activeStems, allTracksMuted } from "./mixState.ts";
+import {
+  changeBar,
+  chartBassNotice,
+  chordSuggestions,
+  removeChart,
+} from "./harmony.ts";
+import { isOfflineRequest } from "./chartPhrases.ts";
+import {
+  activeStems,
+  allTracksMuted,
+  backingTiming,
+  hasActiveBacking,
+} from "./mixState.ts";
 import { DEFAULT_RECIPE, type Recipe } from "./types.ts";
 
 function storage() {
@@ -570,6 +581,45 @@ test("a reviewed chart edit changes one bar; resting all bars drops only the sil
   assert.deepEqual(parent, snapshot);
 });
 
+test("backing notices and version tempos follow the parts scheduled to play", () => {
+  const solo: Recipe = { ...DEFAULT_RECIPE, bass: false, drums: false };
+  const chartOnly: Recipe = {
+    ...solo,
+    harmony: { bpm: 73, downbeatMs: 200, chords: ["Dm", null] },
+  };
+  assert.equal(hasActiveBacking(solo), false);
+  assert.equal(backingTiming(solo), "No backing parts are active.");
+  assert.equal(hasActiveBacking(chartOnly), true);
+  assert.equal(backingTiming(chartOnly), "Chords follow the 73 BPM chart.");
+  const band: Recipe = {
+    ...chartOnly,
+    bass: true,
+    drums: true,
+    bpm: 112,
+    groove: { pattern: "swing_ride", downbeatMs: 0 },
+  };
+  assert.equal(
+    backingTiming(band),
+    "Chords and bass follow the 73 BPM chart. Drums play at 112 BPM.",
+  );
+  const resting = changeBar(band, 0, null);
+  assert.equal(hasActiveBacking(resting), true);
+  assert.equal(
+    backingTiming(resting),
+    "Chords and bass rest in every bar. Drums play at 112 BPM.",
+  );
+  const restingWithoutDrums = { ...resting, drums: false };
+  assert.equal(hasActiveBacking(restingWithoutDrums), false);
+  assert.equal(
+    backingTiming(restingWithoutDrums),
+    "Chords and bass rest in every bar.",
+  );
+  assert.equal(
+    backingTiming(removeChart(restingWithoutDrums)),
+    "Bass plays at 112 BPM.",
+  );
+});
+
 test("suggestion evidence must match the grid and cannot change the reviewed chart", () => {
   const chart: NonNullable<Recipe["harmony"]> = {
     bpm: 120,
@@ -596,6 +646,50 @@ test("suggestion evidence must match the grid and cannot change the reviewed cha
   assert.equal(chordSuggestions({ ...chart, downbeatMs: 0 }, raw), undefined);
   assert.equal(
     chordSuggestions(chart, [raw[0], { ...raw[1], alternatives: ["H"] }]),
+    undefined,
+  );
+});
+
+test("audio-only availability accepts chart politeness per clause and requires every clause", () => {
+  assert.equal(
+    isOfflineRequest("warm the lead and please suggest chords"),
+    true,
+  );
+  assert.equal(
+    isOfflineRequest(
+      "please suggest chords.; change bar 2 to E♭ minor. and warm the lead",
+    ),
+    true,
+  );
+  assert.equal(isOfflineRequest("warm the lead and please add bass"), false);
+  assert.equal(
+    isOfflineRequest("suggest chords.; please warm the lead"),
+    false,
+  );
+  assert.equal(
+    isOfflineRequest("warm the lead and please suggest chords with reverb"),
+    false,
+  );
+});
+
+test("chart review explains enabled bass resting and resuming without a switch change", () => {
+  const chart: Recipe = {
+    ...DEFAULT_RECIPE,
+    bass: false,
+    harmony: { bpm: 73, downbeatMs: 200, chords: [null, null] },
+  };
+  const enabled = { ...chart, bass: true };
+  assert.equal(
+    chartBassNotice(enabled, chart),
+    "Bass stays silent until a bar has a chord.",
+  );
+  assert.equal(
+    chartBassNotice(removeChart(enabled), enabled),
+    "Bass resumes the melody pulse.",
+  );
+  assert.equal(chartBassNotice(removeChart(chart), chart), undefined);
+  assert.equal(
+    chartBassNotice(changeBar(enabled, 0, "Dm"), enabled),
     undefined,
   );
 });

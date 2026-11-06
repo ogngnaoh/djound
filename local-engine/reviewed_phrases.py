@@ -3,7 +3,7 @@ import json
 import re
 
 from chart_phrases import chart_action
-from common import ROOT
+from common import ROOT, EngineError
 
 
 MIX = [(re.compile(row['pattern']), row['command'])
@@ -18,26 +18,33 @@ PHRASES = {
 }
 
 
-def reviewed_phrases(text):
+def clauses(text):
     normalized = ' '.join(text.lower().split()).removeprefix('please ').removesuffix('.')
+    return re.split(r'\s*;\s*|,? (?:and then|and|then) ', normalized)
+
+
+def compile_clause(clause):
+    if clause in PHRASES:
+        stem, tone = PHRASES[clause]
+        return f'set {stem} tone to {tone}', 'tone'
+    if chart_action(clause):
+        return clause, 'chart'
+    for pattern, template in MIX:
+        if match := pattern.fullmatch(clause):
+            return re.sub(r'\$(\d)', lambda group: match[int(group[1])], template), 'mix'
+    return None
+
+
+def reviewed_phrases(text):
     commands = []
     kinds = set()
-    for clause in re.split(r'\s*;\s*|,? (?:and then|and|then) ', normalized):
-        if clause in PHRASES:
-            stem, tone = PHRASES[clause]
-            commands.append(f'set {stem} tone to {tone}')
-            kinds.add('tone')
-        elif chart_action(clause):
-            commands.append(clause)
-            kinds.add('chart')
-        else:
-            for pattern, template in MIX:
-                if match := pattern.fullmatch(clause):
-                    commands.append(re.sub(r'\$(\d)', lambda group: match[int(group[1])], template))
-                    kinds.add('mix')
-                    break
-            else:
-                return None
+    for clause in clauses(text):
+        matched = compile_clause(clause)
+        if matched is None:
+            return None
+        command, kind = matched
+        commands.append(command)
+        kinds.add(kind)
     if kinds == {'tone'}:
         syntax = 'tone-phrases-v1'
     elif kinds == {'chart'}:
@@ -45,3 +52,47 @@ def reviewed_phrases(text):
     else:
         syntax = 'reviewed-phrases-v1'
     return '; '.join(commands), syntax
+
+
+# The model has one shared backing-volume control and no track mixer fields.
+# Check each clause separately so a track removal next to a global backing
+# request stays representable. Exact mixer phrases above keep their own strips.
+_TRACK = re.compile(r'\b(?:bass(?:line)?|drums?|percussion|lead|melody|piano|keys|guitar|chords?|vocals?|instrument)\b')
+_LEVEL = re.compile(r'\b(?:loud(?:er|ness)?|quiet(?:er)?|soft(?:er|en)?|lower|raise|boost|attenuate|volume|level|gain|down|up)\b')
+_MIX_UNITS = re.compile(r'\b(?:gain|decibels?|mute|unmute|muting|unmuting|pan|panning|unpan|cent(?:er|re))\b|(?<![a-z])db\b')
+_GLOBAL_BACKING = re.compile(r'\b(?:backing|accompaniment|rhythm section)\b')
+_VOLUME = re.compile(r'(?:make (?:the )?(?:backing|accompaniment) (quieter|softer|soft|normal)|'
+                     r'set (?:the )?backing volume to (soft|normal)|soften (?:the )?(backing|accompaniment))')
+
+
+def freeform_requirements(text):
+    """Reject track-only instructions and retain explicit obligations for a model proposal."""
+    required = {}
+    for clause in clauses(text):
+        matched = compile_clause(clause)
+        if matched and matched[0] in ('add bass', 'remove bass', 'add drums', 'remove drums'):
+            verb, field = matched[0].split()
+            value = verb == 'add'
+        elif volume := _VOLUME.fullmatch(clause):
+            field, value = 'backingVolume', 'normal' if 'normal' in volume.groups() else 'soft'
+        else:
+            if matched or _MIX_UNITS.search(clause) or (_TRACK.search(clause) and _LEVEL.search(clause)):
+                raise EngineError('LOCAL_UNSUPPORTED_REQUEST',
+                                  'Review the complete track edit in Guided edits or use the track mix controls.')
+            continue
+        if field in required and required[field] != value:
+            raise EngineError('LOCAL_UNSUPPORTED_REQUEST', 'Choose one change for each arrangement setting.')
+        required[field] = value
+    return required
+
+
+def verify_freeform_scope(text, required, parent, complete):
+    if any(complete[field] != value for field, value in required.items()):
+        raise EngineError('LOCAL_UNSUPPORTED_REQUEST', 'The planner could not apply every requested change.')
+    if complete['backingVolume'] != parent['backingVolume']:
+        global_level = any(_GLOBAL_BACKING.search(clause) and
+                           (_LEVEL.search(clause) or re.search(r'\b(?:gentle|gentler|normal)\b', clause))
+                           for clause in clauses(text))
+        if not global_level:
+            raise EngineError('LOCAL_UNSUPPORTED_REQUEST',
+                              'The model can adjust the whole backing. Use track mix controls to change a single track.')

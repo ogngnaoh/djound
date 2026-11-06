@@ -17,6 +17,13 @@ NOTES = [dict(start=.125, end=2.5, pitch=64, velocity=90)]
 
 
 class ChartContractTests(unittest.TestCase):
+    def test_review_explains_dormant_bass_and_return_to_melody(self):
+        rest = dict(DEFAULT_RECIPE, harmony=dict(CHART, chords=[None, None]))
+        armed = plan('add bass', rest, None, NOTES, 3)
+        self.assertIn('bass rests until a chord is selected', armed['explanation'].lower())
+        resumed = plan('remove chords', armed['recipe'], None, NOTES, 3)
+        self.assertIn('bass follows the melody pulse', resumed['explanation'].lower())
+
     def test_duration_and_half_frame_boundaries(self):
         self.assertEqual(len(grid(12, 200, 0)), 10)
         self.assertEqual(len(grid(2, 120, 0)), 1)

@@ -58,6 +58,16 @@ export function removeChart(parent: Recipe): Recipe {
   return normalizeMix(arrangement);
 }
 
+export function chartBassNotice(recipe: Recipe, before?: Recipe) {
+  if (!recipe.bass) return;
+  if (recipe.harmony?.chords.every((chord) => chord === null))
+    return "Bass stays silent until a bar has a chord.";
+  if (!recipe.harmony && before?.harmony && before.bass)
+    return before.harmony.chords.every((chord) => chord === null)
+      ? "Bass resumes the melody pulse."
+      : "Bass returns to the melody pulse.";
+}
+
 export function barStart(chart: Harmony, index: number) {
   return chart.downbeatMs / 1000 + (index * 240) / chart.bpm;
 }

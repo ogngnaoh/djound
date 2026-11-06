@@ -49,6 +49,7 @@ export function DrumGroove({
     !audio.loading &&
     !audio.error &&
     downbeatAt(audio.position, duration) !== null;
+  const tempoLabel = recipe.harmony ? "Drum tempo" : "Backing tempo";
 
   function resetTaps() {
     taps.current = [];
@@ -104,11 +105,11 @@ export function DrumGroove({
         <>
           <div className="flex flex-wrap items-center gap-2">
             <label htmlFor={`${id}-tempo`} className="mr-auto">
-              Backing tempo
+              {tempoLabel}
             </label>
             <input
               id={`${id}-tempo`}
-              aria-label="Backing tempo"
+              aria-label={tempoLabel}
               className="!w-16"
               type="number"
               min={40}

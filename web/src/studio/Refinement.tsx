@@ -13,7 +13,13 @@ import {
 import { Button } from "../components/ui/button";
 import { useAudio } from "./Player";
 import { mixChanges, TrackMix } from "./TrackMix";
-import { allTracksMuted, normalizeMix, activeStems } from "./mixState";
+import {
+  activeStems,
+  allTracksMuted,
+  backingTiming,
+  hasActiveBacking,
+  normalizeMix,
+} from "./mixState";
 import { ChordChart } from "./ChordChart";
 import { isOfflineRequest } from "./chartPhrases";
 import { GuidedEdits, isGuided } from "./GuidedEdits";
@@ -75,7 +81,13 @@ export function RecipeDetails({ recipe }: { recipe: Recipe }) {
         {ARRANGEMENT_FIELDS.map(({ key, label, options }) => (
           <Fragment key={key}>
             <dt>{label}</dt>
-            <dd>{options.find((o) => o.value === recipe[key])?.text}</dd>
+            <dd>
+              {options.find((o) => o.value === recipe[key])?.text}
+              {key === "bass" &&
+                recipe.bass &&
+                !activeStems(recipe).includes("bass") &&
+                " · resting with the chart"}
+            </dd>
           </Fragment>
         ))}
         {mixChanges(recipe).map((change) => (
@@ -86,7 +98,7 @@ export function RecipeDetails({ recipe }: { recipe: Recipe }) {
         ))}
         {recipe.groove && (
           <>
-            <dt>Drum pattern</dt>
+            <dt>{recipe.drums ? "Drum pattern" : "Saved drum pattern"}</dt>
             <dd>{grooveLabel(recipe)}</dd>
           </>
         )}
@@ -596,7 +608,7 @@ export function Refinement({
             </summary>
             <p>
               {supportedBasis
-                ? `Backing is ${basis.recipe.density}, at ${basis.recipe.bpm} BPM.`
+                ? backingTiming(basis.recipe)
                 : "This recording cannot be used for a local arrangement."}{" "}
               Your confirmed melody keeps its own timing.
             </p>
@@ -717,12 +729,11 @@ export function Refinement({
             before={proposal.before}
             onChange={changeReviewedRecipe}
           />
-          {!recipe.bass &&
-            !recipe.drums &&
+          {!hasActiveBacking(recipe) &&
             (recipe.density !== proposal.before.density ||
               recipe.backingVolume !== proposal.before.backingVolume) && (
               <p className="small subtle">
-                The backing settings take effect when you add bass or drums.
+                These settings apply when a backing part plays.
               </p>
             )}
           {basis.noteRevision != null &&

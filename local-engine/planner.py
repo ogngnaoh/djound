@@ -114,6 +114,18 @@ def decode_plan(raw):
     return json.loads(text)
 
 
+def checked_model_patch(value, parent, prompt, required):
+    from reviewed_phrases import verify_freeform_scope
+    try:
+        complete, patch = slot_patch(value, parent)
+    except EngineError as error:
+        if error.code == 'LOCAL_NO_CHANGE':
+            verify_freeform_scope(prompt, required, parent, parent)
+        raise
+    verify_freeform_scope(prompt, required, parent, complete)
+    return complete, patch
+
+
 def plan(prompt, parent, output, notes=None, duration=None):
     if not isinstance(prompt, str) or not prompt.strip() or len(prompt) > 1000:
         raise EngineError('LOCAL_INVALID_REQUEST', 'Describe a concrete arrangement change in 1000 characters or fewer.')
@@ -121,7 +133,7 @@ def plan(prompt, parent, output, notes=None, duration=None):
     if 'harmony' in parent and duration is None:
         raise EngineError('LOCAL_INVALID_REQUEST', 'A chord chart plan needs the confirmed clip duration.')
     from edit_commands import guided_plan
-    from reviewed_phrases import reviewed_phrases
+    from reviewed_phrases import freeform_requirements, reviewed_phrases
     native = reviewed_phrases(prompt)
     if native is not None:
         commands, syntax = native
@@ -131,6 +143,7 @@ def plan(prompt, parent, output, notes=None, duration=None):
     guided = guided_plan(prompt, parent, notes=notes, duration=duration)
     if guided is not None:
         return guided
+    required = freeform_requirements(prompt)
     # The six-slot model cannot create, replace or remove the chord chart. A
     # surviving harmony track also means a lead solo needs an explicit removal.
     if re.search(r'\b(?:chords?|triads?|progressions?|cadences?|bars?|measures?|(?:re)?harmon(?:y|ies|ic|i[sz](?:e|ed|ing|ation)))\b', prompt, re.I):
@@ -155,7 +168,11 @@ def plan(prompt, parent, output, notes=None, duration=None):
     metadata = json.loads((HERE / 'assets.json').read_text())
     print('Loading the pinned local planner.', flush=True)
     model, tokenizer = load(str(HOME / metadata['modelDirectory']), tokenizer_config={'trust_remote_code': False})
-    messages = [{'role': 'system', 'content': SYSTEM}]
+    system = SYSTEM
+    if 'chords' in active_stems(parent):
+        system += ('\nThe selected version also has a chord track. backingVolume affects all backing, '
+                   'including these chords. Return supported=false for any request to change only one track’s level.')
+    messages = [{'role': 'system', 'content': system}]
     messages.append({'role': 'user', 'content': json.dumps({'current_arrangement': arrangement_settings(parent), 'request': prompt}, ensure_ascii=False)})
     encoded = tokenizer.apply_chat_template(messages, tokenize=False, add_generation_prompt=True, enable_thinking=False)
     if len(tokenizer.encode(encoded)) > 3072:
@@ -171,7 +188,7 @@ def plan(prompt, parent, output, notes=None, duration=None):
         value = decode_plan(raw)
     except (ValueError, TypeError) as error:
         raise EngineError('LOCAL_PLAN_INVALID', 'The local model did not return a valid plan. Try a concrete instrument or backing change.') from error
-    complete, value = slot_patch(value, parent)
+    complete, value = checked_model_patch(value, parent, prompt, required)
     metadata = json.loads((HERE / 'assets.json').read_text())
     return {'recipe': complete, 'explanation': value['explanation'],
             'provenance': {'model': metadata['model'], 'revision': metadata['revision'], 'runtime': 'MLX LM 0.32.2',

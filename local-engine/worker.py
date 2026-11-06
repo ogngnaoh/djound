@@ -16,7 +16,7 @@ import zipfile
 
 from common import HERE, HOME, ROOT, EngineError, data_root, digest, inside, notes, recipe, write_json
 from edit_commands import PREFIX
-from reviewed_phrases import reviewed_phrases
+from reviewed_phrases import freeform_requirements, reviewed_phrases
 from setup_assets import is_planner_asset, verify
 
 OPERATIONS = ['transcribe', 'preview', 'plan', 'render']
@@ -72,8 +72,13 @@ def readiness(*, check_freeform=True):
 
 
 def needs_freeform(request):
-    return (request['operation'] == 'plan' and not PREFIX.match(request['prompt'].lstrip())
-            and reviewed_phrases(request['prompt']) is None)
+    if request['operation'] != 'plan':
+        return False
+    text = request['prompt']
+    if PREFIX.match(text.lstrip()) or reviewed_phrases(text) is not None:
+        return False
+    freeform_requirements(text)  # Return a scope error before checking optional weights.
+    return True
 
 
 def request_values(path):

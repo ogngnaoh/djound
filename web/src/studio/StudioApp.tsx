@@ -40,6 +40,7 @@ import {
 import { AudioProvider, Transport, Waveform, clock, useAudio } from "./Player";
 import { Refinement } from "./Refinement";
 import { MelodyEditor } from "./MelodyEditor";
+import { backingTiming } from "./mixState";
 import {
   DEFAULT_RECIPE,
   type Mode,
@@ -523,7 +524,9 @@ function Studio({
                 ? "Prototype recordings use authored sample audio."
                 : "Recordings are stored in your local workspace."}{" "}
               Melody timing is preserved.{" "}
-              {track.recipeKnown && `Backing tempo: ${track.recipe.bpm} BPM.`}
+              {track.recipeKnown &&
+                track.kind === "version" &&
+                backingTiming(track.recipe)}
             </p>
             <Link className="text-action" to={`/remix/${project.id}/melody`}>
               Review melody notes <ArrowRight size={15} />

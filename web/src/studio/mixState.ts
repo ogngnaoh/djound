@@ -14,6 +14,36 @@ export function activeStems(recipe: Recipe) {
   };
   return STEMS.filter((stem) => available[stem]);
 }
+
+export function backingTiming(recipe: Recipe) {
+  const stems = activeStems(recipe);
+  const parts: string[] = [];
+  if (recipe.harmony) {
+    const label = recipe.bass ? "Chords and bass" : "Chords";
+    parts.push(
+      stems.includes("chords")
+        ? `${label} follow the ${recipe.harmony.bpm} BPM chart.`
+        : `${label} rest in every bar.`,
+    );
+    if (recipe.drums) parts.push(`Drums play at ${recipe.bpm} BPM.`);
+  } else if (recipe.bass || recipe.drums) {
+    const label =
+      recipe.bass && recipe.drums
+        ? "Bass and drums play"
+        : recipe.bass
+          ? "Bass plays"
+          : "Drums play";
+    parts.push(`${label} at ${recipe.bpm} BPM.`);
+  } else {
+    parts.push("No backing parts are active.");
+  }
+  return parts.join(" ");
+}
+
+export function hasActiveBacking(recipe: Recipe) {
+  return activeStems(recipe).some((stem) => stem !== "lead");
+}
+
 export function isUnity(s: MixStrip) {
   return (
     s.gainDb === 0 &&

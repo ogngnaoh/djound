@@ -1,4 +1,11 @@
-import { CHORDS, barStart, changeBar, isChord, removeChart } from "./harmony";
+import {
+  CHORDS,
+  barStart,
+  changeBar,
+  chartBassNotice,
+  isChord,
+  removeChart,
+} from "./harmony";
 import type { ChordSuggestion, Harmony, Recipe } from "./types";
 
 function timing(chart: Harmony) {
@@ -18,6 +25,7 @@ export function ChordChart({
 }) {
   const chart = recipe.harmony;
   const prior = before?.harmony;
+  const bassNotice = chartBassNotice(recipe, before);
   if (!chart)
     return prior ? (
       <section className="chord-chart">
@@ -25,6 +33,7 @@ export function ChordChart({
         <p className="small subtle">
           {timing(prior)} · {prior.chords.map((c) => c ?? "Rest").join(" · ")}
         </p>
+        {bassNotice && <p className="small subtle">{bassNotice}</p>}
       </section>
     ) : null;
   const gridChanged =
@@ -107,9 +116,7 @@ export function ChordChart({
       </ol>
       {chart.chords.every((chord) => chord === null) && (
         <p className="small subtle">
-          {recipe.bass
-            ? "The chords and bass rest in every bar."
-            : "The chords rest in every bar."}
+          The chords rest in every bar. {bassNotice}
         </p>
       )}
       {onChange && (

@@ -69,8 +69,11 @@ final class LocalHarmony {
     }
 
     static String describe(Map<String, Object> recipe, Map<String, Object> previous) {
-        if (!(recipe.get("harmony") instanceof Map<?, ?> grid))
-            return previous.containsKey("harmony") ? " Removed the chord chart." : "";
+        if (!(recipe.get("harmony") instanceof Map<?, ?> grid)) {
+            if (!previous.containsKey("harmony")) return "";
+            return " Removed the chord chart."
+                    + (Boolean.TRUE.equals(recipe.get("bass")) ? " Bass follows the melody pulse." : "");
+        }
         String chart =
                 ((List<?>) grid.get("chords"))
                         .stream()
@@ -82,7 +85,10 @@ final class LocalHarmony {
                 + grid.get("bpm")
                 + " BPM, first beat at "
                 + grid.get("downbeatMs")
-                + " ms.";
+                + " ms."
+                + (Boolean.TRUE.equals(recipe.get("bass")) && !sounds(recipe)
+                        ? " Bass rests until a chord is selected."
+                        : "");
     }
 
     private static ApiProblem invalid(String detail) {
