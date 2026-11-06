@@ -12,7 +12,8 @@ const { chromium, expect } = require("@playwright/test");
 const base = process.env.DJOUND_TEST_BASE_URL;
 const guidedWalkthrough = process.env.DJOUND_CHECK_GUIDED === "1";
 const audioOnly = process.env.DJOUND_CHECK_AUDIO_ONLY === "1";
-if (audioOnly && !guidedWalkthrough)
+const jazzWalkthrough = process.env.DJOUND_CHECK_JAZZ === "1";
+if (audioOnly && !guidedWalkthrough && !jazzWalkthrough)
   throw new Error("Use DJOUND_CHECK_GUIDED=1 for the audio-only walkthrough.");
 if (
   !/^http:\/\/(127\.0\.0\.1|localhost):\d+$/.test(base || "") ||
@@ -133,7 +134,7 @@ async function useVersion(recording) {
   await expect(direction()).toBeVisible();
 }
 async function interpret(text) {
-  await direction().fill(text);
+  if (text !== undefined) await direction().fill(text);
   const before = (await local()).latestJob?.id;
   const started = Date.now();
   await button("Review changes").click();
@@ -277,7 +278,7 @@ async function playRow(recording) {
     .poll(() => page.locator("audio").evaluate((a) => a.currentTime))
     .toBeGreaterThan(0.1);
 }
-try {
+async function walkthrough() {
   expect((await get("/api/workspace")).mode).toBe("LOCAL");
   await page.goto(`${base}/remix/new?mode=backend`);
   await expect(page).toHaveTitle(/Djound/);
@@ -289,7 +290,8 @@ try {
     page.waitForEvent("filechooser"),
     button("Choose audio file").and(page.locator("button")).click(),
   ]);
-  const sourcePath = path.join(root, "fixtures/audio/local-demo-source.wav");
+  const sourcePath = (jazzWalkthrough && process.env.DJOUND_JAZZ_SOURCE) ||
+    path.join(root, "fixtures/audio/local-demo-source.wav");
   await chooser.setFiles(sourcePath);
   await button("Continue to melody review").click();
   await expect(page).toHaveURL(/\/remix\/exp_[^/]+\/melody/);
@@ -308,7 +310,7 @@ try {
     expect(state.freeformAvailable).toBe(false);
     expect(state.freeformUnavailableReason).toBeTruthy();
   }
-  expect(state.notes.notes.length).toBeGreaterThan(10);
+  expect(state.notes.notes.length).toBeGreaterThan(jazzWalkthrough ? 0 : 10);
   await expect(
     page.getByLabel("Selected note pitch", { exact: true }),
   ).toHaveCount(0);
@@ -340,6 +342,56 @@ try {
   const confirmed = (await local()).notes;
   expect(confirmed.status).toBe("CONFIRMED");
   expect(confirmed.notes).toEqual(state.notes.notes);
+
+  if (jazzWalkthrough) {
+    const previousWording = "Make this a jazz orchestra with a saxophone solo";
+    await direction().fill(previousWording);
+    await button("Review changes").click();
+    await expect(page.getByRole("alert")).toBeVisible({timeout: 30000});
+    expect((await exploration()).renditions).toHaveLength(0);
+    await button("Try swing combo").click();
+    await expect(direction()).toHaveValue("arrange this melody as a swing combo");
+    const preset = await interpret();
+    await button("Edit request").click();
+    await button("Return to previous draft").click();
+    await expect(direction()).toHaveValue(previousWording);
+    const jazz = await interpret("make this soundtrack jazz like");
+    expect(jazz.recipe).toEqual(preset.recipe);
+    expect(jazz.basisRecordingId).toBe(source.id);
+    expect(jazz.recipe).toMatchObject({
+      instrument: "recorded", bass: true, drums: true,
+      groove: { pattern: "swing_ride" }, accompanimentStyle: "swing_combo",
+    });
+    expect(jazz.recipe.harmony.chords.some(Boolean)).toBe(true);
+    await expect(page.getByLabel("Chart accompaniment")).toHaveValue("swing_combo");
+    await shot("02-jazz-review");
+    const first = await create(1);
+    await playRow(first);
+    await pause();
+    await useVersion(first);
+    const quieter = await interpret("quieter drums");
+    const priorMix = jazz.recipe.mix ?? {};
+    const strip = priorMix.drums ?? {gainDb: 0, pan: 0, muted: false};
+    expect(quieter.recipe).toEqual({...jazz.recipe, mix: {...priorMix,
+      drums: {...strip, gainDb: strip.gainDb - 3}}});
+    expect(quieter.basisRecordingId).toBe(first.id);
+    const second = await create(2);
+    await playRow(second);
+    await pause();
+    await shot("03-refined-combo");
+    expect((await local()).notes).toEqual(confirmed);
+    expect(errors).toEqual([]);
+    expect(external).toEqual([]);
+    expect(submissions).toHaveLength(2);
+    const original = await context.request.get(base + source.mediaUrl);
+    expect(original.ok()).toBe(true);
+    await writeFile(path.join(evidence, "original.wav"), await original.body());
+    console.log(JSON.stringify({result: "PASS", explorationId: id, evidence, timings,
+      plans: [jazz, quieter], snapshot: await exploration(), localSnapshot: await local(),
+      acceptedKey: submissions[1].key, acceptedCommand: submissions[1].body,
+      attemptId: second.attemptId}, null, 2));
+    return;
+  }
 
   const firstPlan = await interpret(
     guidedWalkthrough ? "edit: use electric piano; add bass; add drums" : "Use electric piano, add bass and a steady drum beat.",
@@ -987,6 +1039,9 @@ try {
       2,
     ),
   );
+}
+try {
+  await walkthrough();
 } catch (error) {
   console.error(error.stack || error);
   console.error(

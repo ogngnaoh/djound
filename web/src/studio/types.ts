@@ -28,6 +28,7 @@ export type Recipe = {
   bpm: number;
   groove?: components["schemas"]["LocalRecipe"]["groove"];
   harmony?: Harmony;
+  accompanimentStyle?: components["schemas"]["LocalRecipe"]["accompanimentStyle"];
   mix?: Partial<Record<Stem, MixStrip>>;
 };
 export type Note = {
@@ -157,5 +158,8 @@ export function describeRecipe(r: Recipe) {
       : r.backingVolume === "soft"
         ? "softer bass"
         : "bass";
-  return `${instrumentName(r.instrument)}, ${bass}${r.drums ? " and drums" : ", no drums"}${sounding ? ", chord accompaniment" : ""}`;
+  const chords = r.accompanimentStyle
+    ? ", swing combo accompaniment"
+    : ", chord accompaniment";
+  return `${instrumentName(r.instrument)}, ${bass}${r.drums ? " and drums" : ", no drums"}${sounding ? chords : ""}`;
 }

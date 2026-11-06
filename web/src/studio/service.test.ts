@@ -543,6 +543,7 @@ test("a reviewed chart edit changes one bar; resting all bars drops only the sil
     groove: { pattern: "swing_ride", downbeatMs: 100 },
     bpm: 120,
     harmony: { bpm: 80, downbeatMs: 200, chords: ["C", null, "Ebm"] },
+    accompanimentStyle: "swing_combo",
     mix: {
       lead: { gainDb: 0, pan: 0, muted: true },
       drums: { gainDb: 0, pan: 0.4, muted: true },
@@ -558,6 +559,7 @@ test("a reviewed chart edit changes one bar; resting all bars drops only the sil
     chords: ["C", null, "Dm"],
   });
   assert.deepEqual(minor.mix, parent.mix);
+  assert.equal(minor.accompanimentStyle, "swing_combo");
   assert.equal(allTracksMuted(minor), false);
   const rests = changeBar(changeBar(minor, 0, null), 2, null);
   assert.deepEqual(activeStems(rests), ["lead", "drums"]);
@@ -576,6 +578,7 @@ test("a reviewed chart edit changes one bar; resting all bars drops only the sil
   const removed = removeChart(minor);
   assert.deepEqual(activeStems(removed), ["lead", "bass", "drums"]);
   assert.equal(removed.harmony, undefined);
+  assert.equal(removed.accompanimentStyle, undefined);
   assert.equal(removed.mix?.chords, undefined);
   assert.deepEqual(removed.mix?.bass, parent.mix?.bass);
   assert.deepEqual(parent, snapshot);

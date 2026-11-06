@@ -86,6 +86,7 @@ final class LocalHarmony {
                 + " BPM, first beat at "
                 + grid.get("downbeatMs")
                 + " ms."
+                + (recipe.containsKey("accompanimentStyle") ? " Swing combo accompaniment." : "")
                 + (Boolean.TRUE.equals(recipe.get("bass")) && !sounds(recipe)
                         ? " Bass rests until a chord is selected."
                         : "");

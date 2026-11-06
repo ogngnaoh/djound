@@ -233,7 +233,7 @@ export function Refinement({
       } catch {}
       return "";
     }),
-    [quickChart, setQuickChart] = useState<string | null>(null),
+    [quickDraft, setQuickDraft] = useState<string | null>(null),
     [view, setView] = useState<
       "request" | "adjust" | "review" | "creating" | "result"
     >("request"),
@@ -250,7 +250,7 @@ export function Refinement({
       source: number;
       draft: number;
     } | null>(null);
-  const direction = quickChart ?? text;
+  const direction = quickDraft ?? text;
   const supportedBasis = mode !== "backend" || basis.recipeKnown === true;
   const submittedBasis =
     proposal && (view === "creating" || view === "result")
@@ -269,7 +269,7 @@ export function Refinement({
       // creation receipt settles. Honor a basis chosen during that window.
       if (view === "creating") return;
       previousBasis.current = basisId;
-      setQuickChart(null);
+      setQuickDraft(null);
       if (operation.current === "review") controller.current?.abort();
       setRecipe(basis?.recipe ?? DEFAULT_RECIPE);
       setProposal(null);
@@ -317,6 +317,19 @@ export function Refinement({
     setProposal(null);
     setError("");
   }
+  function selectQuickEdit(value: string | null) {
+    if (value === null) setQuickDraft(null);
+    else if (!text.trim() && !alternate) changeText(value);
+    else {
+      // The standalone suggestion can be reviewed while both existing drafts stay parked.
+      try {
+        localStorage.setItem(`djound.studio.draft.${project.id}`, text);
+      } catch {}
+      setQuickDraft(value);
+    }
+    setError("");
+    setProposal(null);
+  }
   function changeReviewedRecipe(next: Recipe) {
     setRecipe(next);
     setView("adjust");
@@ -336,8 +349,8 @@ export function Refinement({
       const reviewText =
         manual && !direction.trim() ? "Direct arrangement changes" : direction;
       if (reviewText !== direction) {
-        if (quickChart === null) changeText(reviewText);
-        else setQuickChart(reviewText);
+        if (quickDraft === null) changeText(reviewText);
+        else setQuickDraft(reviewText);
       }
       const saved = await service.saveDraft(project, reviewText, basisId);
       onUpdate(saved);
@@ -487,9 +500,9 @@ export function Refinement({
             value={direction}
             maxLength={1000}
             onChange={(e) => {
-              if (quickChart === null) changeText(e.target.value);
+              if (quickDraft === null) changeText(e.target.value);
               else {
-                setQuickChart(e.target.value);
+                setQuickDraft(e.target.value);
                 setProposal(null);
                 setError("");
               }
@@ -504,41 +517,45 @@ export function Refinement({
           )}
           {mode === "backend" && (
             <div className="chord-suggest">
-              <button
-                type="button"
-                className="text-action"
-                disabled={disabled || busy}
-                onClick={() => {
-                  if (quickChart !== null) {
-                    setQuickChart(null);
-                  } else if (!text.trim() && !alternate) {
-                    changeText("edit: suggest chords");
-                  } else {
-                    // Review this standalone command without replacing either saved draft.
-                    try {
-                      localStorage.setItem(
-                        `djound.studio.draft.${project.id}`,
-                        text,
-                      );
-                    } catch {}
-                    setQuickChart("edit: suggest chords");
-                  }
-                  setError("");
-                  setProposal(null);
-                }}
-              >
-                {quickChart !== null
-                  ? "Return to previous draft"
-                  : "Suggest chords"}
-              </button>
-              {quickChart !== null && (
-                <span className="small subtle">
-                  Your previous draft is saved.
-                </span>
+              {quickDraft === null ? (
+                <>
+                  <button
+                    type="button"
+                    className="text-action"
+                    disabled={disabled || busy}
+                    onClick={() => selectQuickEdit("edit: suggest chords")}
+                  >
+                    Suggest chords
+                  </button>
+                  <button
+                    type="button"
+                    className="text-action"
+                    disabled={disabled || busy}
+                    onClick={() =>
+                      selectQuickEdit("arrange this melody as a swing combo")
+                    }
+                  >
+                    Try swing combo
+                  </button>
+                </>
+              ) : (
+                <>
+                  <button
+                    type="button"
+                    className="text-action"
+                    disabled={disabled || busy}
+                    onClick={() => selectQuickEdit(null)}
+                  >
+                    Return to previous draft
+                  </button>
+                  <span className="small subtle">
+                    Your previous draft is saved.
+                  </span>
+                </>
               )}
             </div>
           )}
-          {mode === "backend" && quickChart === null && (
+          {mode === "backend" && quickDraft === null && (
             <GuidedEdits
               chordsAvailable={activeStems(basis.recipe).includes("chords")}
               alternate={alternate}
@@ -834,7 +851,7 @@ export function Refinement({
             className="full"
             onClick={() => {
               onBasis(result.id);
-              setQuickChart(null);
+              setQuickDraft(null);
               setView("request");
               setResult(null);
             }}

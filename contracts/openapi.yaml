@@ -832,6 +832,7 @@ components:
             enum: [C, Cm, Db, Dbm, D, Dm, Eb, Ebm, E, Em, F, Fm, 'F#', 'F#m', G, Gm, Ab, Abm, A, Am, Bb, Bbm, B, Bm, null]
     LocalRecipe:
       type: object
+      dependentRequired: { accompanimentStyle: [harmony] }
       if: { not: { required: [groove] } }
       then: { properties: { bpm: { const: 100 } } }
       additionalProperties: false
@@ -851,6 +852,7 @@ components:
             pattern: { type: string, enum: [swing_ride, four_on_the_floor] }
             downbeatMs: { type: integer, minimum: 0, maximum: 11990, description: "First backing beat in milliseconds. Leave at least 10 ms before the end of the clip." }
         harmony: { $ref: '#/components/schemas/LocalHarmony' }
+        accompanimentStyle: { type: string, enum: [swing_combo], description: "Swing comping and a walking bass when bass is enabled. The chart supplies the chords and timing. Omit for standard backing." }
         mix:
           type: object
           additionalProperties: false

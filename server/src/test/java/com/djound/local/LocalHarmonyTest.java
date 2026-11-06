@@ -60,6 +60,17 @@ class LocalHarmonyTest {
     }
 
     @Test
+    void swingComboNeedsAChartAndKeepsTheDrumGridIndependent() {
+        var recipe = new HashMap<>(legacy);
+        recipe.put("accompanimentStyle", "swing_combo");
+        assertThrows(ApiProblem.class, () -> LocalMusic.validateRecipe(recipe));
+        recipe.put("harmony", chart(90, 125, "Am", "C", null));
+        assertEquals(recipe, LocalMusic.validateRecipe(recipe));
+        recipe.put("accompanimentStyle", "unknown");
+        assertThrows(ApiProblem.class, () -> LocalMusic.validateRecipe(recipe));
+    }
+
+    @Test
     void barAtTheEndSampleIsExcludedAndTenMillisecondsMustRemainAtTheDownbeat() {
         // At 200 BPM the next bar starts 1.2 seconds (52920 samples) later.
         var one = Map.<String, Object>of("harmony", chart(200, 10, "C"));

@@ -54,7 +54,7 @@ export function changeBar(
 
 export function removeChart(parent: Recipe): Recipe {
   if (!parent.harmony) return parent;
-  const { harmony, ...arrangement } = normalizeMix(parent);
+  const { harmony, accompanimentStyle, ...arrangement } = normalizeMix(parent);
   return normalizeMix(arrangement);
 }
 

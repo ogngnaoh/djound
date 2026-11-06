@@ -523,6 +523,7 @@ public class LocalMusic {
         var inherited = basisRecipe(basis);
         validateArrangementTiming(inherited, confirmed.durationSeconds());
         payload.put("parentRecipe", inherited);
+        payload.put("basisKind", basis.equals(e.get("original_id")) ? "original" : "rendition");
         payload.put("notes", confirmed.notes());
         payload.put("duration", confirmed.durationSeconds());
         payload.put("draftRevision", command.expectedDraftRevision());
@@ -936,6 +937,7 @@ public class LocalMusic {
                                     "notes",
                                     "duration",
                                     "prompt",
+                                    "basisKind",
                                     "parentRecipe",
                                     "recipe"));
             JsonNode result = worker.execute(id, input, () -> cancelled(key));
@@ -1108,6 +1110,7 @@ public class LocalMusic {
         r.remove("mix");
         Object grid = r.remove("groove");
         Object harmony = r.remove("harmony");
+        Object style = r.remove("accompanimentStyle");
         if (!r.keySet()
                         .equals(
                                 Set.of(
@@ -1147,6 +1150,11 @@ public class LocalMusic {
             r.put("groove", groove);
         }
         if (input.containsKey("harmony")) r.put("harmony", LocalHarmony.canonical(harmony));
+        if (input.containsKey("accompanimentStyle")) {
+            if (!"swing_combo".equals(style) || !r.containsKey("harmony"))
+                throw problem("PLAN_INVALID", "Swing combo accompaniment needs a chord chart.");
+            r.put("accompanimentStyle", style);
+        }
         var mix = LocalMix.canonical(input);
         if (!mix.isEmpty()) r.put("mix", mix);
         return r;

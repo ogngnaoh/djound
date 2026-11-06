@@ -780,6 +780,11 @@ export interface components {
                 downbeatMs: number;
             };
             harmony?: components["schemas"]["LocalHarmony"];
+            /**
+             * @description Swing comping and a walking bass when bass is enabled. The chart supplies the chords and timing. Omit for standard backing.
+             * @enum {string}
+             */
+            accompanimentStyle?: "swing_combo";
             /** @description Complete strip settings for active tracks only. Omitted tracks play at 0 dB, centered and unmuted. At least one active track must be unmuted. */
             mix?: {
                 lead?: components["schemas"]["LocalMixStrip"];

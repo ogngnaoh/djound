@@ -45,6 +45,35 @@ export function ChordChart({
         {before && !prior && "New chart · "}
         {timing(chart)}
       </p>
+      {onChange ? (
+        <div className="recipe-fields">
+          <label>
+            Chart accompaniment
+            <select
+              value={recipe.accompanimentStyle ?? "standard"}
+              onChange={(event) => {
+                const { accompanimentStyle, ...rest } = recipe;
+                onChange(
+                  event.currentTarget.value === "swing_combo"
+                    ? { ...rest, accompanimentStyle: "swing_combo" }
+                    : rest,
+                );
+              }}
+            >
+              <option value="standard">Standard</option>
+              <option value="swing_combo">Swing combo</option>
+            </select>
+          </label>
+        </div>
+      ) : (
+        (recipe.accompanimentStyle || before?.accompanimentStyle) && (
+          <p className="small subtle">
+            {recipe.accompanimentStyle
+              ? "Swing combo accompaniment"
+              : "Standard accompaniment"}
+          </p>
+        )
+      )}
       {prior &&
         (gridChanged || prior.chords.length !== chart.chords.length) && (
           <details className="unchanged-settings">

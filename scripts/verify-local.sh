@@ -5,9 +5,11 @@ source "$(dirname "$0")/env.sh"
 cd "$DJOUND_ROOT"
 case "${1:-studio}" in
   studio) browser_check=scripts/studio-local-smoke.mjs ;;
+  jazz) browser_check=scripts/studio-local-smoke.mjs
+        export DJOUND_CHECK_JAZZ=1 ;;
   playback) browser_check=benchmarks/playback/measure.cjs ;;
   planner) ;;
-  *) echo 'Usage: verify-local.sh [studio|playback|planner]' >&2; exit 2 ;;
+  *) echo 'Usage: verify-local.sh [studio|jazz|playback|planner]' >&2; exit 2 ;;
 esac
 mkdir -p .runtime/checks
 run_dir="$(mktemp -d "$DJOUND_ROOT/.runtime/checks/local.XXXXXX")"
@@ -72,7 +74,9 @@ PYTHON
   exit 0
 fi
 node "$browser_check" | tee "$run_dir/result.json"
-"${DJOUND_LOCAL_PYTHON:-$DJOUND_ROOT/.runtime/local-engine/venv/bin/python}" tests/local_audio_acceptance.py "$run_dir/result.json" "$DJOUND_DATA_DIR"
+audio_check=tests/local_audio_acceptance.py
+if [[ "${1:-studio}" == jazz ]]; then audio_check=tests/jazz_audio_acceptance.py; fi
+"${DJOUND_LOCAL_PYTHON:-$DJOUND_ROOT/.runtime/local-engine/venv/bin/python}" "$audio_check" "$run_dir/result.json" "$DJOUND_DATA_DIR"
 kill "$app_pid"
 wait "$app_pid" || true
 app_pid=''

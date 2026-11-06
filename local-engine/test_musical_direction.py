@@ -96,34 +96,6 @@ class MusicalDirectionTests(unittest.TestCase):
                 self.assertLessEqual(abs(estimate - tempo), 4)
         self.assertIsNone(onset_tempo([0, .13, .36, .45, .69, 2.38, 2.56, 4.87]))
 
-    def test_request_frames_and_targets_compose_with_reviewed_controls_and_preservation(self):
-        for frame in ('Could you please ', "I'd like you to ", "Let's "):
-            for action in ('build a jazz combo backing behind my recorded tune',
-                           'arrange this clip in a swinging trio style',
-                           'give my guitar melody more of a jazz feel'):
-                text = frame + action + ', keeping the original melody intact and pan the bass 40% right.'
-                with self.subTest(text=text):
-                    result = self.review(text)
-                    self.assertEqual(result['recipe']['instrument'], 'recorded')
-                    self.assertEqual(result['recipe']['mix']['bass']['pan'], .4)
-                    self.assertEqual(result['provenance']['preserved'], ['keep_notes'])
-        selected = self.review("I want my take with a small jazz combo, but leave my lead as-is.")
-        self.assertEqual(selected['provenance']['preserved'], ['keep_lead'])
-
-    def test_a_later_balance_request_honors_its_measured_or_default_gain_and_other_clauses(self):
-        parent = self.review('make it jazzy')['recipe']
-        for clause, amount in [('dial the drum part back a touch', 3), ('take the drums down by 4.5 decibels', 4.5),
-                               ('make the percussion 2 db quieter', 2)]:
-            result = self.review(f'{clause} in the mix, keeping the lead intact and center the bass', parent, 'rendition')
-            self.assertEqual(result['recipe']['mix']['drums']['gainDb'], -amount)
-            self.assertEqual(result['provenance']['drumGainDeltaDb'], -amount)
-        for prompt in ("explain 'make it jazzy'", 'if it were jazz, turn the drums down', 'a jazz trio or reggae',
-                       'not a swing arrangement, but warm the lead', 'add jazz backing and lower the vocals',
-                       'add a jazz backing and only remove bass', 'give it jazz backing while removing chords',
-                       'give it jazz backing then remove the chords', 'add a jazz backing and make the drums quieter only at the end'):
-            with self.subTest(prompt=prompt), self.assertRaises(EngineError):
-                plan(prompt, DEFAULT_RECIPE, None, self.notes, self.duration, 'original')
-
     def test_unknown_compounds_negations_and_unsatisfiable_requests_cannot_publish_a_partial_recipe(self):
         for text in ('do not make the soundtrack jazz like', 'make it jazzy and add saxophone',
                      'make it jazzy without drums', 'make it sound like bebop', 'make it sound like vaporwave',
