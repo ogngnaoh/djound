@@ -46,7 +46,7 @@ public class WebConfiguration implements WebMvcConfigurer {
 
     @Controller
     static class Spa {
-        @GetMapping({"/", "/remix/new", "/remix/{id}"})
+        @GetMapping({"/", "/remix/new", "/remix/{id}", "/remix/{id}/melody", "/remix/{id}/notes"})
         public String app() {
             return "forward:/index.html";
         }

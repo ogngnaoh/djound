@@ -71,6 +71,15 @@ def problem(status, body, allowed):
     return result
 
 
+# A browser refresh asks the packaged server for the editor URL directly.
+status, _, index_html = request('/')
+expect(200, status, 'studio entry point')
+for view in ('melody', 'notes'):
+    status, headers, body = request(f'/remix/deep-link-check/{view}')
+    expect(200, status, f'{view} deep link')
+    assert headers.get_content_type() == 'text/html' and body == index_html
+
+
 status, _, body = request('/api/workspace')
 expect(200, status, 'workspace')
 workspace = json.loads(body)
