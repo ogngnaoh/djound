@@ -2,7 +2,7 @@
 
 ![djound wordmark beside the notes of the sample melody](showcase/release/header.png)
 
-a local music studio where you can rearrange a melody in your own words.
+rearrange a recorded melody in your own words with local ai.
 
 https://github.com/user-attachments/assets/62703213-9001-49cb-a7bd-21509d79f341
 
