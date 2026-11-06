@@ -61,6 +61,7 @@ _TRACK = re.compile(r'\b(?:bass(?:line)?|drums?|percussion|lead|melody|piano|key
 _LEVEL = re.compile(r'\b(?:loud(?:er|ness)?|quiet(?:er)?|soft(?:er|en)?|lower|raise|boost|attenuate|volume|level|gain|down|up)\b')
 _MIX_UNITS = re.compile(r'\b(?:gain|decibels?|mute|unmute|muting|unmuting|pan|panning|unpan|cent(?:er|re))\b|(?<![a-z])db\b')
 _GLOBAL_BACKING = re.compile(r'\b(?:backing|accompaniment|rhythm section)\b')
+_PRESERVE = re.compile(r"\b(?:keep|preserve|retain|maintain|leave|unchanged|never|not)\b|n['’]t\b")
 _VOLUME = re.compile(r'(?:make (?:the )?(?:backing|accompaniment) (quieter|softer|soft|normal)|'
                      r'set (?:the )?backing volume to (soft|normal)|soften (?:the )?(backing|accompaniment))')
 
@@ -89,10 +90,14 @@ def freeform_requirements(text):
 def verify_freeform_scope(text, required, parent, complete):
     if any(complete[field] != value for field, value in required.items()):
         raise EngineError('LOCAL_UNSUPPORTED_REQUEST', 'The planner could not apply every requested change.')
+    parts = clauses(text)
+    if len(required) == len(parts) and any(complete[field] != parent[field]
+            for field in ('instrument', 'bass', 'drums', 'density', 'backingVolume') if field not in required):
+        raise EngineError('LOCAL_UNSUPPORTED_REQUEST', 'The planner added an arrangement change outside the request.')
     if complete['backingVolume'] != parent['backingVolume']:
-        global_level = any(_GLOBAL_BACKING.search(clause) and
+        global_level = any(_GLOBAL_BACKING.search(clause) and not _PRESERVE.search(clause) and
                            (_LEVEL.search(clause) or re.search(r'\b(?:gentle|gentler|normal)\b', clause))
-                           for clause in clauses(text))
+                           for clause in parts)
         if not global_level:
             raise EngineError('LOCAL_UNSUPPORTED_REQUEST',
                               'The model can adjust the whole backing. Use track mix controls to change a single track.')

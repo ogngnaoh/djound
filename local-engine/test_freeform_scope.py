@@ -55,9 +55,13 @@ class FreeformMixerScope(unittest.TestCase):
                 with self.assertRaises(EngineError) as failure:
                     checked_model_patch(missing, parent, prompt, required)
                 self.assertEqual(failure.exception.code, 'LOCAL_UNSUPPORTED_REQUEST')
+            with self.assertRaises(EngineError):
+                checked_model_patch(dict(self.keep, drums=False, backingVolume='soft', instrument='guitar'),
+                                    parent, prompt, required)
 
     def test_model_cannot_insert_unrequested_shared_volume(self):
-        for text in ('Use guitar.', 'Keep the backing and switch to guitar.'):
+        for text in ('Use guitar.', 'Keep the backing and switch to guitar.',
+                     'Keep the backing volume unchanged and switch to guitar.'):
             with self.assertRaises(EngineError) as failure:
                 checked_model_patch(dict(self.keep, instrument='guitar', backingVolume='soft'),
                                     self.parent, text, freeform_requirements(text))
