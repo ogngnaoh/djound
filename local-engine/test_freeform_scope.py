@@ -148,6 +148,64 @@ class FreeformMixerScope(unittest.TestCase):
         self.assertEqual(self.parent['harmony'], model['harmony'])
         self.assertEqual(self.parent['mix']['bass']['tone'], 'warm')
 
+    def test_preservation_checks_the_selected_parent_and_the_final_settings(self):
+        before = dict(self.parent, instrument='guitar')
+        expected = dict(before, density='sparse')
+        for text in ('keep that guitar and set backing density to sparse',
+                     'set backing density to sparse and retain the current lead instrument',
+                     'make the backing sparse and keep everything else unchanged',
+                     'edit: keep the same lead instrument; make the backing sparse'):
+            self.assertFalse(needs_freeform({'operation': 'plan', 'prompt': text}))
+            self.assertEqual(plan(text, before, None, duration=1)['recipe'], expected)
+        for text in ('keep that piano and use piano', 'use piano and keep that piano',
+                     'use electric piano and keep that instrument',
+                     'keep the bass on and remove the bass', 'keep the drums off'):
+            with self.subTest(text=text), self.assertRaises(EngineError) as failure:
+                plan(text, before, None, duration=1)
+            self.assertEqual(failure.exception.code, 'LOCAL_UNSUPPORTED_REQUEST')
+        for text in ('retain the instrument', 'keep everything else the same', 'keep that guitar'):
+            with self.assertRaises(EngineError) as failure:
+                plan(text, before, None, duration=1)
+            self.assertEqual(failure.exception.code, 'LOCAL_NO_CHANGE')
+
+    def test_coordinated_membership_carries_only_the_verb_and_keeps_other_settings(self):
+        expected = dict(self.parent, bass=False, drums=False)
+        expected.pop('mix')
+        for text in ('remove the drums and bass', 'remove bass and the drums',
+                     'edit: remove the bass and the drums'):
+            self.assertFalse(needs_freeform({'operation': 'plan', 'prompt': text}))
+            self.assertEqual(plan(text, self.parent, None, duration=1)['recipe'], expected)
+        combined = plan('use guitar; only add the bass and the drums', DEFAULT_RECIPE, None)
+        self.assertEqual(combined['recipe'], dict(DEFAULT_RECIPE, instrument='guitar', bass=True, drums=True))
+        for text in ('only add the bass if the lead rests', 'only add the drums except at the end',
+                     'only add the bass and use guitar', 'do not remove bass and the drums',
+                     'remove drums and everything except bass', 'add bass; the drums',
+                     'keep the lead instrument and reverse the melody'):
+            with self.subTest(text=text), self.assertRaises(EngineError) as failure:
+                plan(text, self.parent, None, duration=1)
+            self.assertEqual(failure.exception.code, 'LOCAL_UNSUPPORTED_REQUEST')
+
+    def test_keep_the_beat_locks_drum_events_and_their_mix_while_other_parts_can_change(self):
+        groove = {'pattern': 'swing_ride', 'downbeatMs': 50}
+        parent = dict(self.parent, bpm=130, groove=groove, bass=False,
+                      mix={'drums': dict(UNITY_STRIP, gainDb=-4, tone='bright')})
+        active = plan('preserve the drum pattern; I want the bass added', parent, None, duration=1)
+        self.assertEqual(active['recipe'], dict(parent, bass=True))
+        for text in ('use swing ride at 150 bpm from 50 ms and keep the beat',
+                     'retain the beat and warm the drums',
+                     'keep the drum beat and make the backing sparse',
+                     'make the backing soft and preserve the drum pattern',
+                     'keep the beat and I only want the drums out',
+                     'I only want the drums off in the chorus'):
+            with self.subTest(text=text), self.assertRaises(EngineError) as failure:
+                plan(text, parent, None, duration=1)
+            self.assertEqual(failure.exception.code, 'LOCAL_UNSUPPORTED_REQUEST')
+        for no_beat in (dict(DEFAULT_RECIPE),
+                        dict(parent, mix={'drums': dict(UNITY_STRIP, muted=True)})):
+            with self.assertRaises(EngineError) as failure:
+                plan('keep the beat and add bass', no_beat, None, duration=1)
+            self.assertEqual(failure.exception.code, 'LOCAL_UNSUPPORTED_REQUEST')
+
     def test_repeating_a_known_edit_keeps_the_response_confined_to_requested_fields(self):
         prompt = 'Remove drums and make the backing quieter and make the backing quieter.'
         required = freeform_requirements(prompt)

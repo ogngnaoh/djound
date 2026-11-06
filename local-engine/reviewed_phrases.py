@@ -4,7 +4,7 @@ import re
 
 from chart_phrases import chart_action
 from common import ROOT, EngineError
-from edit_commands import parse
+from edit_commands import TRACK_MEMBERSHIP, TRACK_OBJECT, parse, preservation
 
 
 COMMAND_TEMPLATES = [(re.compile(row['pattern']), row['command'], kind)
@@ -18,14 +18,39 @@ PHRASES = {
     for pattern in patterns
     for article in ('', 'the ')
 }
+_DESIRED_TRACK = re.compile(r'i (only )?want (?:the )?(bass|drums) (on|off|in|out|added|removed|gone)')
+
+
+def membership_clause(text):
+    match = _DESIRED_TRACK.fullmatch(text)
+    if not match:
+        return text
+    verb = 'add' if match[3] in ('on', 'in', 'added') else 'remove'
+    return f'{match[1] or ""}{verb} {match[2]}'
 
 
 def clauses(text):
     normalized = ' '.join(text.lower().split()).removeprefix('please ').removesuffix('.')
-    return re.split(r'\s*;\s*|,? (?:and then|and|then) ', normalized)
+    parts = re.split(r'(\s*;\s*|,? (?:and then|and|then) )', normalized)
+    result = [membership_clause(parts[0])]
+    for separator, part in zip(parts[1::2], parts[2::2]):
+        part = membership_clause(part)
+        prior = TRACK_MEMBERSHIP.fullmatch(result[-1])
+        target = TRACK_OBJECT.fullmatch(part)
+        if prior and separator.strip(' ,') == 'and' and target:
+            # "Remove the drums and bass" carries just the verb to the second named track.
+            part = f'{"only " if prior[1] else ""}{prior[2]} {target[1]}'
+        elif prior and prior[1] and ';' not in separator and preservation(part) is None:
+            raise EngineError('LOCAL_UNSUPPORTED_REQUEST', 'Separate a restricted track change from any other edit.')
+        result.append(part)
+    return result
 
 
 def compile_clause(clause):
+    if preservation(clause) is not None:
+        return clause, 'preservation'
+    if membership := TRACK_MEMBERSHIP.fullmatch(clause):
+        return f'{membership[2]} {membership[3]}', 'mix'
     if clause in PHRASES:
         stem, tone = PHRASES[clause]
         return f'set {stem} tone to {tone}', 'tone'
@@ -84,7 +109,10 @@ def freeform_requirements(text):
         elif volume := _VOLUME.fullmatch(clause):
             field, value = 'backingVolume', 'normal' if 'normal' in volume.groups() else 'soft'
         else:
-            if matched or _MIX_UNITS.search(clause) or (_TRACK.search(clause) and _LEVEL.search(clause)):
+            restricted = re.match(r'(?:only (?:add|remove)\b|'
+                                  r'(?:add|remove) (?:the )?(?:bass|drums) (?:only|if|unless|except|but)\b)', clause)
+            negated = re.fullmatch(r"(?:never|do not|don['’]t) (?:add|remove) (?:the )?(?:bass|drums)", clause)
+            if matched or restricted or negated or _DESIRED_TRACK.match(clause) or _MIX_UNITS.search(clause) or (_TRACK.search(clause) and _LEVEL.search(clause)):
                 raise EngineError('LOCAL_UNSUPPORTED_REQUEST',
                                   'Review the complete track edit in Guided edits or use the track mix controls.')
             all_clauses_known = False

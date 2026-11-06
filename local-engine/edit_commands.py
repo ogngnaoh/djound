@@ -14,6 +14,8 @@ GAIN = re.compile(rf'set {STEM} gain to {NUMBER} db', re.ASCII)
 RELATIVE_GAIN = re.compile(rf'(lower|raise) {STEM} by {NUMBER} db', re.ASCII)
 PAN = re.compile(rf'pan {STEM} {NUMBER}% (left|right)', re.ASCII)
 HARD_PAN = re.compile(rf'pan {STEM} hard (left|right)', re.ASCII)
+TRACK_MEMBERSHIP = re.compile(r'(?:(only) )?(add|remove) (?:the )?(bass|drums)')
+TRACK_OBJECT = re.compile(r'(?:the )?(bass|drums)')
 GROOVE = re.compile(r'use (swing ride|four on the floor) at (\d{1,3}) bpm from (\d{1,5}) ms', re.ASCII)
 
 
@@ -25,6 +27,40 @@ class Assignment:
     relative: bool = False
 
 
+@dataclass(frozen=True)
+class Preservation:
+    field: str | None
+    value: str | bool | None = None
+
+    def snapshot(self, recipe):
+        if self.field == 'beat':
+            drum_mix = recipe.get('mix', {}).get('drums', {})
+            if not recipe['drums'] or drum_mix.get('muted'):
+                return None
+            # These fields determine drum events and their isolated mix on the frozen notes.
+            return (recipe['bpm'], recipe.get('groove'), recipe['density'], recipe['backingVolume'], drum_mix)
+        return recipe[self.field]
+
+
+def preservation(clause):
+    match = re.fullmatch(r'(?:keep|retain|preserve) (.+)', clause)
+    if not match:
+        return None
+    target = re.sub(r'^(?:the |that |this |my )?(?:same |current |existing )?', '', match[1])
+    if target in ('everything else', 'everything else unchanged', 'everything else the same'):
+        return Preservation(None)
+    if target in ('instrument', 'instrument unchanged', 'lead instrument', 'lead instrument unchanged'):
+        return Preservation('instrument')
+    if target in ('beat', 'drum beat', 'drum pattern'):
+        return Preservation('beat')
+    if target in ('piano', 'electric piano', 'guitar', 'uploaded recording'):
+        return Preservation('instrument', 'recorded' if target == 'uploaded recording' else target.replace(' ', '_'))
+    if match := re.fullmatch(r'(bass|drums)(?: (on|off|unchanged))?', target):
+        value = None if match[2] == 'unchanged' else match[2] != 'off'
+        return Preservation(match[1], value)
+    return None
+
+
 def unsupported(reason):
     return EngineError('LOCAL_UNSUPPORTED_REQUEST', reason)
 
@@ -34,8 +70,8 @@ def parse(clause):
         return Assignment('instrument', 'recorded')
     if match := re.fullmatch(r'use (piano|electric piano|guitar)', clause):
         return Assignment('instrument', match[1].replace(' ', '_'))
-    if match := re.fullmatch(r'(add|remove) (bass|drums)', clause):
-        return Assignment(match[2], match[1] == 'add')
+    if match := TRACK_MEMBERSHIP.fullmatch(clause):
+        return Assignment(match[3], match[2] == 'add')
     if match := re.fullmatch(r'make the backing (soft|normal|sparse|steady)', clause):
         return Assignment('density' if match[1] in ('sparse', 'steady') else 'backingVolume', match[1])
     if match := GAIN.fullmatch(clause):
@@ -160,7 +196,16 @@ def guided_plan(prompt, parent, notes=None, duration=None):
         return None
     if len(prompt) > 1000:
         raise EngineError('LOCAL_INVALID_REQUEST', 'Keep the guided edit within 1000 characters.')
-    return reviewed_plan(text[prefix.end():].split(';'), parent, notes, duration)
+    commands = []
+    for raw in text[prefix.end():].split(';'):
+        first, conjunction, second = ' '.join(raw.lower().split()).partition(' and ')
+        action = TRACK_MEMBERSHIP.fullmatch(first)
+        track = TRACK_OBJECT.fullmatch(second)
+        if conjunction and action and track:
+            commands.extend((first, f'{action[2]} {track[1]}'))
+        else:
+            commands.append(raw)
+    return reviewed_plan(commands, parent, notes, duration)
 
 
 def execute_actions(before, actions, notes=None, duration=None):
@@ -168,6 +213,7 @@ def execute_actions(before, actions, notes=None, duration=None):
     state = dict(before)
     strips = {stem: dict(strip) for stem, strip in state.pop('mix', {}).items()}
     assigned = set()
+    preserved = {}
     annotations = {}
     for index, raw in enumerate(actions, 1):
         try:
@@ -177,6 +223,16 @@ def execute_actions(before, actions, notes=None, duration=None):
             if not raw.strip():
                 raise unsupported('Enter one complete listed command using plain English text.')
             clause = ' '.join(raw.lower().split())
+            guard = preservation(clause)
+            if guard is not None:
+                # The executor starts from the selected recipe and applies only explicit actions.
+                # "Everything else" therefore needs no additional field-level guard.
+                if guard.field is not None:
+                    value = guard.snapshot(before)
+                    if value is None or (guard.value is not None and value != guard.value):
+                        raise unsupported('The selected version does not have the setting you asked to keep.')
+                    preserved[guard] = value
+                continue
             action = chart_action(clause)
             if action:
                 apply_chart(action, state, assigned, annotations, notes, duration)
@@ -208,6 +264,8 @@ def execute_actions(before, actions, notes=None, duration=None):
             raise unsupported(f'The requested mix needs an audible {stem} track.')
         del strips[stem]
     complete = recipe({**state, 'mix': strips}, duration)
+    if any(guard.snapshot(complete) != value for guard, value in preserved.items()):
+        raise unsupported('The request changes a setting you also asked to keep.')
     if complete == before:
         raise EngineError('LOCAL_NO_CHANGE', 'These settings already match the selected version.')
     return complete, annotations
