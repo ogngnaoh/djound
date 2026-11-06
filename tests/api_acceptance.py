@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""S01 black-box checks against a real isolated Djound/PostgreSQL installation."""
+"""Black-box checks against a real isolated Djound/PostgreSQL installation."""
 from concurrent.futures import ThreadPoolExecutor
 import hashlib
 import json
@@ -167,7 +167,7 @@ problem(status, body, {403})
 status, _, body = upload(AUDIO, 'origin-' + uuid.uuid4().hex, extra_headers={'Origin': 'null'})
 problem(status, body, {403})
 
-# S02: compare-and-set editing and immutable idempotent source replacement.
+# Compare-and-set editing and immutable idempotent source replacement.
 assert detail['canReplaceSource'] is True
 saved_text = 'Keep these words when the source changes.'
 status, _, body = save_draft(exploration_id, saved_text, media_id, detail['draft']['revision'])
@@ -212,7 +212,7 @@ assert problem(status, body, {409})['code'] == 'IDEMPOTENCY_CONFLICT'
 status, _, body = replace_source(exploration_id, replacement, 1, 'stale-replace-' + uuid.uuid4().hex)
 assert problem(status, body, {409})['code'] == 'SOURCE_CHANGED'
 
-# S03 normal mode must remain unavailable, with no accepted request or draft consumption.
+# Normal mode must remain unavailable, with no accepted request or draft consumption.
 status, _, body = request('/api/explorations/' + exploration_id + '/requests', 'POST',
                          json.dumps({'text': 'Do not run generation in unconfigured mode.',
                                      'basisRecordingId': current['original']['id'],

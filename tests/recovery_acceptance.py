@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""S05 recovery checks against real app/SQL/media and explicitly enabled sample controls."""
+"""Recovery checks against real app/SQL/media and explicitly enabled sample controls."""
 from concurrent.futures import ThreadPoolExecutor
 import hashlib
 import json

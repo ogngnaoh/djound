@@ -68,7 +68,7 @@ class JazzRenderTests(unittest.TestCase):
         import numpy as np
         import soundfile as sf
 
-        spec = json.loads((ROOT / 'experiments/rhythm-arrangement/study.json').read_text())
+        spec = json.loads((ROOT / 'tests/fixtures/chart.json').read_text())
         notes, duration = spec['notes'], spec['duration']
         harmony, _ = propose(notes, duration, 110, 500)
         old = dict(DEFAULT_RECIPE, instrument='recorded', bass=True, drums=True, bpm=110, harmony=harmony,

@@ -1,0 +1,55 @@
+[
+  {
+    "arm": "baseline",
+    "id": "add-bass",
+    "actual": {
+      "instrument": "piano",
+      "bass": true,
+      "drums": false,
+      "density": "steady",
+      "backingVolume": "normal",
+      "bpm": 100
+    }
+  },
+  {
+    "arm": "baseline",
+    "id": "already-piano",
+    "actual": "LOCAL_NO_CHANGE"
+  },
+  {
+    "arm": "baseline",
+    "id": "unknown-part",
+    "actual": "LOCAL_UNSUPPORTED_REQUEST"
+  },
+  {
+    "arm": "baseline",
+    "id": "remove-drums",
+    "actual": {
+      "instrument": "electric_piano",
+      "bass": true,
+      "drums": false,
+      "density": "steady",
+      "backingVolume": "normal",
+      "bpm": 100
+    }
+  },
+  {
+    "arm": "baseline",
+    "id": "quiet-drums",
+    "actual": {
+      "instrument": "electric_piano",
+      "bass": true,
+      "drums": true,
+      "density": "steady",
+      "backingVolume": "normal",
+      "bpm": 100,
+      "mix": {
+        "drums": {
+          "gainDb": -3,
+          "pan": 0,
+          "muted": false
+        }
+      }
+    }
+  }
+]

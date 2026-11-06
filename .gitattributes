@@ -1,0 +1,11 @@
+* text=auto
+*.sh text eol=lf
+server/mvnw text eol=lf
+server/mvnw.cmd text eol=crlf
+*.png binary
+*.jpg binary
+*.wav binary
+*.mp4 binary
+*.pdf binary
+# The final blank line terminates an SSE frame; it is protocol data.
+fixtures/provider/melodyflow/*.sse text eol=lf whitespace=-blank-at-eof

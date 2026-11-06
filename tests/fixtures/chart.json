@@ -1,0 +1,345 @@
+{
+  "source": "fixtures/audio/local-demo-source.wav",
+  "sourceSha256": "6e41121a1cd3cb48048ddc5ee216fd31231b3863b7d464ef39fb5a62925a3c58",
+  "notes": [
+    {
+      "start": 0.25541950113378686,
+      "end": 0.6385487528344671,
+      "pitch": 60,
+      "velocity": 99
+    },
+    {
+      "start": 0.6617687074829932,
+      "end": 0.9520181405895691,
+      "pitch": 63,
+      "velocity": 96
+    },
+    {
+      "start": 1.0681179138321995,
+      "end": 1.3467573696145125,
+      "pitch": 67,
+      "velocity": 98
+    },
+    {
+      "start": 1.3235374149659864,
+      "end": 1.7298866213151927,
+      "pitch": 70,
+      "velocity": 98
+    },
+    {
+      "start": 2.021419954648526,
+      "end": 2.311669387755102,
+      "pitch": 67,
+      "velocity": 98
+    },
+    {
+      "start": 2.4277691609977325,
+      "end": 2.7180185941043082,
+      "pitch": 65,
+      "velocity": 97
+    },
+    {
+      "start": 2.834118367346939,
+      "end": 3.228857596371882,
+      "pitch": 63,
+      "velocity": 98
+    },
+    {
+      "start": 3.240467573696145,
+      "end": 3.5539369614512473,
+      "pitch": 62,
+      "velocity": 95
+    },
+    {
+      "start": 3.9370662131519274,
+      "end": 4.228599546485261,
+      "pitch": 60,
+      "velocity": 98
+    },
+    {
+      "start": 4.333089342403628,
+      "end": 4.716218594104308,
+      "pitch": 67,
+      "velocity": 93
+    },
+    {
+      "start": 4.611728798185941,
+      "end": 4.890368253968254,
+      "pitch": 72,
+      "velocity": 99
+    },
+    {
+      "start": 5.29671746031746,
+      "end": 5.586966893424036,
+      "pitch": 70,
+      "velocity": 96
+    },
+    {
+      "start": 5.71467664399093,
+      "end": 6.087479818594105,
+      "pitch": 68,
+      "velocity": 100
+    },
+    {
+      "start": 6.11069977324263,
+      "end": 6.400949206349207,
+      "pitch": 67,
+      "velocity": 96
+    },
+    {
+      "start": 6.517048979591837,
+      "end": 6.818908390022676,
+      "pitch": 65,
+      "velocity": 98
+    },
+    {
+      "start": 7.202037641723356,
+      "end": 7.585166893424036,
+      "pitch": 63,
+      "velocity": 98
+    },
+    {
+      "start": 7.619996825396825,
+      "end": 7.887026303854875,
+      "pitch": 65,
+      "velocity": 97
+    },
+    {
+      "start": 7.887026303854875,
+      "end": 8.166949659863945,
+      "pitch": 67,
+      "velocity": 97
+    },
+    {
+      "start": 8.573298866213152,
+      "end": 8.956428117913832,
+      "pitch": 62,
+      "velocity": 98
+    },
+    {
+      "start": 8.979648072562357,
+      "end": 9.269897505668935,
+      "pitch": 60,
+      "velocity": 98
+    },
+    {
+      "start": 9.79234648526077,
+      "end": 10.083879818594106,
+      "pitch": 63,
+      "velocity": 98
+    },
+    {
+      "start": 10.617938775510204,
+      "end": 11.012678004535148,
+      "pitch": 60,
+      "velocity": 99
+    }
+  ],
+  "duration": 12.0,
+  "expectedBars": [
+    {
+      "start": 0.5,
+      "end": 2.6818181818181817,
+      "chord": "Eb",
+      "alternatives": [
+        "Cm",
+        "Gm",
+        "C"
+      ],
+      "ambiguous": false,
+      "origin": "suggested"
+    },
+    {
+      "start": 2.6818181818181817,
+      "end": 4.863636363636363,
+      "chord": "Cm",
+      "alternatives": [
+        "Ab",
+        "C",
+        "Eb"
+      ],
+      "ambiguous": false,
+      "origin": "suggested"
+    },
+    {
+      "start": 4.863636363636363,
+      "end": 7.045454545454545,
+      "chord": "Fm",
+      "alternatives": [
+        "Db",
+        "Eb",
+        "Gm"
+      ],
+      "ambiguous": true,
+      "origin": "suggested"
+    },
+    {
+      "start": 7.045454545454545,
+      "end": 9.227272727272727,
+      "chord": "Cm",
+      "alternatives": [
+        "Eb",
+        "Gm",
+        "Ab"
+      ],
+      "ambiguous": true,
+      "origin": "suggested"
+    },
+    {
+      "start": 9.227272727272727,
+      "end": 11.409090909090908,
+      "chord": "Cm",
+      "alternatives": [
+        "Ab",
+        "C",
+        "Fm"
+      ],
+      "ambiguous": true,
+      "origin": "suggested"
+    },
+    {
+      "start": 11.409090909090908,
+      "end": 12,
+      "chord": null,
+      "alternatives": [],
+      "ambiguous": false,
+      "origin": "empty"
+    }
+  ],
+  "expectedBacking": [
+    {
+      "id": "chords",
+      "bank": 0,
+      "program": 4,
+      "notes": [
+        {
+          "start": 0.5,
+          "end": 2.550909090909091,
+          "pitch": 55,
+          "velocity": 51
+        },
+        {
+          "start": 0.5,
+          "end": 2.550909090909091,
+          "pitch": 58,
+          "velocity": 51
+        },
+        {
+          "start": 0.5,
+          "end": 2.550909090909091,
+          "pitch": 63,
+          "velocity": 51
+        },
+        {
+          "start": 2.6818181818181817,
+          "end": 4.7327272727272724,
+          "pitch": 55,
+          "velocity": 51
+        },
+        {
+          "start": 2.6818181818181817,
+          "end": 4.7327272727272724,
+          "pitch": 60,
+          "velocity": 51
+        },
+        {
+          "start": 2.6818181818181817,
+          "end": 4.7327272727272724,
+          "pitch": 63,
+          "velocity": 51
+        },
+        {
+          "start": 4.863636363636363,
+          "end": 6.914545454545454,
+          "pitch": 56,
+          "velocity": 51
+        },
+        {
+          "start": 4.863636363636363,
+          "end": 6.914545454545454,
+          "pitch": 60,
+          "velocity": 51
+        },
+        {
+          "start": 4.863636363636363,
+          "end": 6.914545454545454,
+          "pitch": 65,
+          "velocity": 51
+        },
+        {
+          "start": 7.045454545454545,
+          "end": 9.096363636363636,
+          "pitch": 55,
+          "velocity": 51
+        },
+        {
+          "start": 7.045454545454545,
+          "end": 9.096363636363636,
+          "pitch": 60,
+          "velocity": 51
+        },
+        {
+          "start": 7.045454545454545,
+          "end": 9.096363636363636,
+          "pitch": 63,
+          "velocity": 51
+        },
+        {
+          "start": 9.227272727272727,
+          "end": 11.278181818181817,
+          "pitch": 55,
+          "velocity": 51
+        },
+        {
+          "start": 9.227272727272727,
+          "end": 11.278181818181817,
+          "pitch": 60,
+          "velocity": 51
+        },
+        {
+          "start": 9.227272727272727,
+          "end": 11.278181818181817,
+          "pitch": 63,
+          "velocity": 51
+        }
+      ]
+    },
+    {
+      "id": "bass",
+      "bank": 0,
+      "program": 32,
+      "notes": [
+        {
+          "start": 0.5,
+          "end": 2.3327272727272725,
+          "pitch": 39,
+          "velocity": 56
+        },
+        {
+          "start": 2.6818181818181817,
+          "end": 4.514545454545455,
+          "pitch": 36,
+          "velocity": 56
+        },
+        {
+          "start": 4.863636363636363,
+          "end": 6.696363636363636,
+          "pitch": 41,
+          "velocity": 56
+        },
+        {
+          "start": 7.045454545454545,
+          "end": 8.878181818181817,
+          "pitch": 36,
+          "velocity": 56
+        },
+        {
+          "start": 9.227272727272727,
+          "end": 11.059999999999999,
+          "pitch": 36,
+          "velocity": 56
+        }
+      ]
+    }
+  ]
+}

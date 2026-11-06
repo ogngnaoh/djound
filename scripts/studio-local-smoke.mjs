@@ -1,5 +1,4 @@
 // Real LOCAL inference through the redesigned Studio, in an isolated installation.
-// Browser plugin unavailable: use installed Chrome through Playwright.
 import { createRequire } from "node:module";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { existsSync } from "node:fs";

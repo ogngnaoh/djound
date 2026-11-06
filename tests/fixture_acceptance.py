@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""S03 black-box checks. This runs real app/SQL/media, with explicit sample output."""
+"""Fixture acceptance checks. This runs real app/SQL/media, with explicit sample output."""
 from concurrent.futures import ThreadPoolExecutor
 import hashlib
 import json
@@ -172,7 +172,7 @@ expect(202, status, 'deliberate resubmission after temporary active-slot rejecti
 assert not later_receipt['replayed']
 await_terminal(later_receipt['attemptId'])
 assert len(detail(sources[loser]['id'])['renditions']) == 1
-# S04: Keep acts on exact retained bytes and refinements always anchor the original.
+# Keep acts on exact retained bytes and refinements always anchor the original.
 keep_path = '/api/recordings/' + result['id']
 status, kept = json_request(keep_path, 'PATCH', {'kept': True})
 expect(200, status, 'Keep rendition')

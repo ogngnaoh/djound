@@ -7,7 +7,7 @@ case "${1:-studio}" in
   studio) browser_check=scripts/studio-local-smoke.mjs ;;
   jazz) browser_check=scripts/studio-local-smoke.mjs
         export DJOUND_CHECK_JAZZ=1 ;;
-  playback) browser_check=benchmarks/playback/measure.cjs ;;
+  playback) browser_check=tests/playback/measure.cjs ;;
   planner) ;;
   *) echo 'Usage: verify-local.sh [studio|jazz|playback|planner]' >&2; exit 2 ;;
 esac
@@ -54,7 +54,7 @@ start_app() {
 }
 start_app
 if [[ "${1:-studio}" == planner ]]; then
-  python3 benchmarks/planner/verify_api.py "${@:2}"
+  python3 tests/planner/verify_api.py "${@:2}"
   exit 0
 fi
 if [[ "${1:-studio}" == playback ]]; then
