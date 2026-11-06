@@ -101,7 +101,7 @@ def validate_mix(value, available):
 
 
 def recipe(value, duration=None):
-    if not isinstance(value, dict) or (set(value) - {'mix', 'groove', 'harmony'}) != set(DEFAULT_RECIPE):
+    if not isinstance(value, dict) or (set(value) - {'mix', 'groove', 'harmony', 'accompanimentStyle'}) != set(DEFAULT_RECIPE):
         raise EngineError('LOCAL_INVALID_RECIPE', 'The proposed arrangement is incomplete or has unsupported fields.')
     if value['instrument'] not in ('piano', 'electric_piano', 'guitar', 'recorded'):
         raise EngineError('LOCAL_INVALID_RECIPE', 'Choose the uploaded recording, piano, electric piano, or guitar.')
@@ -126,6 +126,10 @@ def recipe(value, duration=None):
     if 'harmony' in value:
         from chart import validate_chart
         result['harmony'] = validate_chart(value['harmony'], duration)
+    if 'accompanimentStyle' in value:
+        if value['accompanimentStyle'] != 'swing_combo' or 'harmony' not in result:
+            raise EngineError('LOCAL_INVALID_RECIPE', 'Choose swing combo with a reviewed chord chart.')
+        result['accompanimentStyle'] = 'swing_combo'
     if 'mix' in value:
         strips = validate_mix(value['mix'], active_stems(result))
         if strips:

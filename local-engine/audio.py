@@ -92,7 +92,9 @@ def arrangement(notes, duration, recipe):
         step += 1
     if 'harmony' in recipe:
         from chart import backing
-        tracks.extend(backing(recipe['harmony'], duration, recipe['bass'], sparse, soft))
+        from jazz_arrangement import swing_combo
+        score = swing_combo if recipe.get('accompanimentStyle') == 'swing_combo' else backing
+        tracks.extend(score(recipe['harmony'], duration, recipe['bass'], sparse, soft))
     elif recipe['bass'] and bass:
         tracks.append({'id': 'bass', 'program': 32, 'bank': 0, 'notes': bass})
     if grid and recipe['drums']:
@@ -220,6 +222,8 @@ def render(notes, duration, recipe, output, status='provided_notes', source=None
             'provenance': {'renderer': renderer, 'notesSha256': anchor,
                            'audioSha256': digest(audio), 'midiSha256': digest(midi_path), 'stems': stems,
                            **({'harmony': {'method': 'reviewed major/minor chart v1',
+                                           **({'performance': 'swing combo v1'}
+                                              if recipe.get('accompanimentStyle') == 'swing_combo' else {}),
                                            'chartSha256': canonical_hash(recipe['harmony']),
                                            'minimumTickExtensions': expanded}} if has_chart else {}),
                            **({'mix': {'method': 'isolated stereo stem mixer v1', 'strips': controls,
