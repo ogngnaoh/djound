@@ -69,6 +69,7 @@ _VOLUME = re.compile(r'(?:make (?:the )?(?:backing|accompaniment) (quieter|softe
 def freeform_requirements(text):
     """Reject track-only instructions and retain explicit obligations for a model proposal."""
     required = {}
+    all_clauses_known = True
     for clause in clauses(text):
         matched = compile_clause(clause)
         if matched and matched[0] in ('add bass', 'remove bass', 'add drums', 'remove drums'):
@@ -80,24 +81,25 @@ def freeform_requirements(text):
             if matched or _MIX_UNITS.search(clause) or (_TRACK.search(clause) and _LEVEL.search(clause)):
                 raise EngineError('LOCAL_UNSUPPORTED_REQUEST',
                                   'Review the complete track edit in Guided edits or use the track mix controls.')
+            all_clauses_known = False
             continue
         if field in required and required[field] != value:
             raise EngineError('LOCAL_UNSUPPORTED_REQUEST', 'Choose one change for each arrangement setting.')
         required[field] = value
-    return required
+    return required, all_clauses_known
 
 
-def verify_freeform_scope(text, required, parent, complete):
+def verify_freeform_scope(text, requirements, parent, complete):
+    required, all_clauses_known = requirements
     if any(complete[field] != value for field, value in required.items()):
         raise EngineError('LOCAL_UNSUPPORTED_REQUEST', 'The planner could not apply every requested change.')
-    parts = clauses(text)
-    if len(required) == len(parts) and any(complete[field] != parent[field]
-            for field in ('instrument', 'bass', 'drums', 'density', 'backingVolume') if field not in required):
+    arrangement_fields = ('instrument', 'bass', 'drums', 'density', 'backingVolume')
+    if all_clauses_known and any(complete[key] != parent[key] for key in arrangement_fields if key not in required):
         raise EngineError('LOCAL_UNSUPPORTED_REQUEST', 'The planner added an arrangement change outside the request.')
     if complete['backingVolume'] != parent['backingVolume']:
         global_level = any(_GLOBAL_BACKING.search(clause) and not _PRESERVE.search(clause) and
                            (_LEVEL.search(clause) or re.search(r'\b(?:gentle|gentler|normal)\b', clause))
-                           for clause in parts)
+                           for clause in clauses(text))
         if not global_level:
             raise EngineError('LOCAL_UNSUPPORTED_REQUEST',
                               'The model can adjust the whole backing. Use track mix controls to change a single track.')

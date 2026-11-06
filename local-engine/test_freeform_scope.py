@@ -46,7 +46,7 @@ class FreeformMixerScope(unittest.TestCase):
         prompt = 'Remove drums and make the backing quieter.'
         required = freeform_requirements(prompt)
         self.assertTrue(needs_freeform({'operation': 'plan', 'prompt': prompt}))
-        self.assertEqual(required, {'drums': False, 'backingVolume': 'soft'})
+        self.assertEqual(required, ({'drums': False, 'backingVolume': 'soft'}, True))
         for parent in (dict(DEFAULT_RECIPE, drums=True, bass=True), self.parent):
             complete, _ = checked_model_patch(dict(self.keep, drums=False, backingVolume='soft'),
                                               parent, prompt, required)
@@ -66,3 +66,12 @@ class FreeformMixerScope(unittest.TestCase):
                 checked_model_patch(dict(self.keep, instrument='guitar', backingVolume='soft'),
                                     self.parent, text, freeform_requirements(text))
             self.assertEqual(failure.exception.code, 'LOCAL_UNSUPPORTED_REQUEST')
+
+    def test_repeating_a_known_edit_keeps_the_response_confined_to_requested_fields(self):
+        prompt = 'Remove drums and make the backing quieter and make the backing quieter.'
+        required = freeform_requirements(prompt)
+        trimmed = dict(self.keep, drums=False, backingVolume='soft')
+        complete, _ = checked_model_patch(trimmed, self.parent, prompt, required)
+        self.assertEqual(complete, dict(self.parent, drums=False, backingVolume='soft'))
+        with self.assertRaises(EngineError):
+            checked_model_patch(dict(trimmed, instrument='guitar'), self.parent, prompt, required)
