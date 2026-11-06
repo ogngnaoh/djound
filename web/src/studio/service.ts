@@ -1,3 +1,4 @@
+import { chordSuggestions } from "./harmony.ts";
 import {
   api,
   getExploration,
@@ -942,6 +943,10 @@ function backendService(): StudioService {
         text: plan.text,
         recipe: plan.recipe,
         before: plan.basisRecipe,
+        chordSuggestions: chordSuggestions(
+          plan.recipe.harmony,
+          plan.model?.chordSuggestions,
+        ),
         canGenerate: plan.canGenerate,
         warnings: plan.warnings,
       };

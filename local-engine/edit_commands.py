@@ -2,12 +2,13 @@
 import re
 from dataclasses import dataclass
 from decimal import Decimal
+from chart_phrases import chart_action
 
 from common import DEFAULT_RECIPE, UNITY_STRIP, EngineError, active_stems, canonical_hash, recipe
 
 
 PREFIX = re.compile(r'^edit:', re.IGNORECASE | re.ASCII)
-STEM = r'(lead|bass|drums)'
+STEM = r'(lead|bass|drums|chords)'
 NUMBER = r'([+-]?(?:\d+(?:\.\d{1,3})?|\.\d{1,3}))'
 GAIN = re.compile(rf'set {STEM} gain to {NUMBER} db', re.ASCII)
 RELATIVE_GAIN = re.compile(rf'(lower|raise) {STEM} by {NUMBER} db', re.ASCII)
@@ -99,6 +100,10 @@ def summarize(before, after):
         grid = after.get('groove')
         parts.append(f"{grid['pattern'].replace('_', ' ')} at {after['bpm']} BPM from {grid['downbeatMs']} ms"
                      if grid else 'original pulse at 100 BPM')
+    if before.get('harmony') != after.get('harmony'):
+        chart = after.get('harmony')
+        parts.append('chords ' + ' / '.join(label or 'rest' for label in chart['chords'])
+                     if chart else 'chord chart removed')
     for stem in active_stems(after):
         old = before.get('mix', {}).get(stem, UNITY_STRIP)
         new = after.get('mix', {}).get(stem, UNITY_STRIP)
@@ -116,7 +121,33 @@ def summarize(before, after):
     return sentence[:1].upper() + sentence[1:] + '.'
 
 
-def guided_plan(prompt, parent):
+def apply_chart(action, state, assigned, annotations, notes, duration):
+    from chart import edit_bar, propose
+    verb, index, label = action
+    key = ('chart', index if verb == 'bar' else verb)
+    if key in assigned or (verb != 'bar' and any(track == 'chart' for track, _ in assigned)):
+        raise unsupported('Suggest one chart, then give at most one change per bar.')
+    if duration is None:
+        raise unsupported('Review the confirmed melody before editing its chord chart.')
+    if verb in ('suggest', 'grid'):
+        if not notes:
+            raise unsupported('Confirm the melody notes before asking for suggested chords.')
+        current = state.get('harmony')
+        bpm = current['bpm'] if current else state['bpm']
+        downbeat = (current or state.get('groove') or {}).get('downbeatMs', 0)
+        if verb == 'grid':
+            bpm, downbeat = index, label
+        state['harmony'], annotations['chordSuggestions'] = propose(notes, duration, bpm, downbeat)
+    elif verb == 'remove':
+        state.pop('harmony', None)
+    else:
+        if 'harmony' not in state:
+            raise unsupported('Suggest a chord chart before changing a bar.')
+        state['harmony'] = edit_bar(state['harmony'], index, label, duration)
+    assigned.add(key)
+
+
+def guided_plan(prompt, parent, notes=None, duration=None):
     """Return None for free text. Invalid explicit commands always raise a typed error."""
     text = prompt.lstrip() if isinstance(prompt, str) else ''
     prefix = PREFIX.match(text)
@@ -124,15 +155,23 @@ def guided_plan(prompt, parent):
         return None
     if len(prompt) > 1000:
         raise EngineError('LOCAL_INVALID_REQUEST', 'Keep the guided edit within 1000 characters.')
-    before = recipe(DEFAULT_RECIPE if parent is None else parent)
+    before = recipe(DEFAULT_RECIPE if parent is None else parent, duration)
     state = dict(before)
     strips = {stem: dict(strip) for stem, strip in state.pop('mix', {}).items()}
     assigned = set()
-    for index, raw in enumerate(text[prefix.end():].split(';'), 1):
+    annotations = {}
+    clauses = text[prefix.end():].split(';')
+    for index, raw in enumerate(clauses, 1):
         try:
-            if not raw.isascii() or not raw.strip():
+            if not raw.strip():
                 raise unsupported('Enter one complete listed command using plain English text.')
             clause = ' '.join(raw.lower().split())
+            action = chart_action(clause)
+            if action:
+                apply_chart(action, state, assigned, annotations, notes, duration)
+                continue
+            if not raw.isascii():
+                raise unsupported('Enter one complete listed command using plain English text.')
             grid = GROOVE.fullmatch(clause)
             if grid or clause == 'restore the original pulse':
                 if any(field == 'groove' for _, field in assigned):
@@ -152,16 +191,22 @@ def guided_plan(prompt, parent):
         except EngineError as error:
             raise EngineError(error.code, f'Command {index}. {error.message}') from error
     try:
-        complete = recipe({**state, 'mix': strips})
+        # A removed or resting chart may retire prior strips, but never discard a
+        # mixer change that the listener explicitly requested in this same plan.
+        for stem in strips.keys() - set(active_stems(state)):
+            if any(track == stem for track, _ in assigned):
+                raise unsupported(f'The requested mix needs an audible {stem} track.')
+            del strips[stem]
+        complete = recipe({**state, 'mix': strips}, duration)
     except EngineError as error:
         raise unsupported(error.message) from error
     if complete == before:
         raise EngineError('LOCAL_NO_CHANGE', 'These commands already match the selected version.')
-    changes = {key: complete.get(key, {} if key == 'mix' else None) for key in (*DEFAULT_RECIPE, 'groove', 'mix')
+    changes = {key: complete.get(key, {} if key == 'mix' else None) for key in (*DEFAULT_RECIPE, 'groove', 'harmony', 'mix')
                if complete.get(key) != before.get(key)}
     return {
         'recipe': complete,
         'explanation': summarize(before, complete),
-        'provenance': {'origin': 'GUIDED_COMMANDS', 'inferenceAttempts': 0,
+        'provenance': {'origin': 'GUIDED_COMMANDS', 'inferenceAttempts': 0, **annotations,
                        'parentRecipeSha256': canonical_hash(before), 'changes': changes},
     }

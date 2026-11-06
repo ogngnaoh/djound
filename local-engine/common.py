@@ -53,7 +53,7 @@ def inside(path, root, must_exist=False):
     return candidate
 
 
-STEM_NAMES = ('lead', 'bass', 'drums')
+STEM_NAMES = ('lead', 'bass', 'drums', 'chords')
 UNITY_STRIP = {'gainDb': 0, 'pan': 0, 'muted': False}
 
 
@@ -63,7 +63,11 @@ def arrangement_settings(value):
 
 
 def active_stems(arrangement):
-    return tuple(name for name in STEM_NAMES if name == 'lead' or arrangement[name])
+    chart = arrangement.get('harmony')
+    pitched = chart is not None and any(chord is not None for chord in chart['chords'])
+    enabled = {'lead': True, 'bass': arrangement['bass'] and (chart is None or pitched),
+               'drums': arrangement['drums'], 'chords': pitched}
+    return tuple(name for name in STEM_NAMES if enabled[name])
 
 
 def validate_mix(value, available):
@@ -96,8 +100,8 @@ def validate_mix(value, available):
     return result
 
 
-def recipe(value, duration=12):
-    if not isinstance(value, dict) or (set(value) - {'mix', 'groove'}) != set(DEFAULT_RECIPE):
+def recipe(value, duration=None):
+    if not isinstance(value, dict) or (set(value) - {'mix', 'groove', 'harmony'}) != set(DEFAULT_RECIPE):
         raise EngineError('LOCAL_INVALID_RECIPE', 'The proposed arrangement is incomplete or has unsupported fields.')
     if value['instrument'] not in ('piano', 'electric_piano', 'guitar', 'recorded'):
         raise EngineError('LOCAL_INVALID_RECIPE', 'Choose the uploaded recording, piano, electric piano, or guitar.')
@@ -114,11 +118,14 @@ def recipe(value, duration=12):
         grid = value['groove']
         if not isinstance(grid, dict) or set(grid) != {'pattern', 'downbeatMs'} or grid['pattern'] not in ('swing_ride', 'four_on_the_floor'):
             raise EngineError('LOCAL_INVALID_RECIPE', 'Choose swing ride or four on the floor with an explicit first beat.')
-        if type(grid['downbeatMs']) is not int or not 0 <= grid['downbeatMs'] <= duration * 1000 - 10 + 1e-7:
+        if type(grid['downbeatMs']) is not int or not 0 <= grid['downbeatMs'] <= (12 if duration is None else duration) * 1000 - 10 + 1e-7:
             raise EngineError('LOCAL_INVALID_RECIPE', 'Place the first beat inside the recording with at least 10 ms left to play.')
         result['groove'] = dict(grid)
     elif value['bpm'] != 100:
         raise EngineError('LOCAL_INVALID_RECIPE', 'Choose a drum pattern to set a backing tempo. The original pulse uses 100 BPM.')
+    if 'harmony' in value:
+        from chart import validate_chart
+        result['harmony'] = validate_chart(value['harmony'], duration)
     if 'mix' in value:
         strips = validate_mix(value['mix'], active_stems(result))
         if strips:

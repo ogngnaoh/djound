@@ -735,6 +735,13 @@ export interface components {
              */
             tone?: "neutral" | "warm" | "bright";
         };
+        /** @description A reviewed chord chart on its own 4/4 grid. Each bar starting inside the clip has one chord or an explicit rest. */
+        LocalHarmony: {
+            bpm: number;
+            /** @description Leave at least 10 ms after the first beat. */
+            downbeatMs: number;
+            chords: ("C" | "Cm" | "Db" | "Dbm" | "D" | "Dm" | "Eb" | "Ebm" | "E" | "Em" | "F" | "Fm" | "F#" | "F#m" | "G" | "Gm" | "Ab" | "Abm" | "A" | "Am" | "Bb" | "Bbm" | "B" | "Bm" | null)[];
+        };
         LocalRecipe: {
             /**
              * @description Recorded uses the complete uploaded performance as the lead. Confirmed notes guide the added backing.
@@ -755,11 +762,13 @@ export interface components {
                 /** @description First backing beat in milliseconds. Leave at least 10 ms before the end of the clip. */
                 downbeatMs: number;
             };
+            harmony?: components["schemas"]["LocalHarmony"];
             /** @description Complete strip settings for active tracks only. Omitted tracks play at 0 dB, centered and unmuted. At least one active track must be unmuted. */
             mix?: {
                 lead?: components["schemas"]["LocalMixStrip"];
                 bass?: components["schemas"]["LocalMixStrip"];
                 drums?: components["schemas"]["LocalMixStrip"];
+                chords?: components["schemas"]["LocalMixStrip"];
             };
         };
         LocalPlan: {

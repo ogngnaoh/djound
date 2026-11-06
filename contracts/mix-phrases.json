@@ -1,0 +1,9 @@
+[
+  {"pattern":"^(add|remove) (?:the )?(bass|drums)$","command":"$1 $2"},
+  {"pattern":"^(?:turn|switch) (?:the )?(bass|drums) on$","command":"add $1"},
+  {"pattern":"^(?:turn|switch) (?:the )?(bass|drums) off$","command":"remove $1"},
+  {"pattern":"^(mute|unmute|center) (?:the )?(lead|bass|drums|chords)$","command":"$1 $2"},
+  {"pattern":"^(lower|raise) (?:the )?(lead|bass|drums|chords) by ([0-9]+(?:\\.[0-9]{1,3})?) (?:db|decibels?)$","command":"$1 $2 by $3 db"},
+  {"pattern":"^pan (?:the )?(lead|bass|drums|chords) ([0-9]+(?:\\.[0-9]{1,3})?) ?(?:%|percent) (left|right)$","command":"pan $1 $2% $3"},
+  {"pattern":"^pan (?:the )?(lead|bass|drums|chords) hard (left|right)$","command":"pan $1 hard $2"}
+]

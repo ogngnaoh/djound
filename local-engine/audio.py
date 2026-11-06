@@ -70,25 +70,30 @@ def arrangement(notes, duration, recipe):
     grid = recipe.get('groove')
     origin = grid['downbeatMs'] / 1000 if grid else min(note['start'] for note in notes)
     sparse, soft = recipe['density'] == 'sparse', recipe['backingVolume'] == 'soft'
+    use_melody_bass = 'harmony' not in recipe and recipe['bass']
     bass, drums = [], []
     step = 0
     # Always schedule the opening backing beat. Keep the existing tail margin on
     # subsequent beats so ordinary arrangements retain their qualified timing.
     while step == 0 or origin + step * beat < duration - .12:
         start = origin + step * beat
-        active = [note for note in notes if note['start'] <= start < note['end']]
-        if grid and not active and recipe['bass']:
-            active = [min(notes, key=lambda n: min(abs(n['start'] - start), abs(n['end'] - start)))]
-        if active and step % (4 if sparse else 2) == 0:
-            chosen = max(active, key=lambda note: note['velocity'])
-            bass.append({'start': start, 'end': min(duration, start + beat * .65),
-                         'pitch': 36 + chosen['pitch'] % 12, 'velocity': 38 if soft else 58})
+        if use_melody_bass and step % (4 if sparse else 2) == 0:
+            active = [note for note in notes if note['start'] <= start < note['end']]
+            if grid and not active:
+                active = [min(notes, key=lambda n: min(abs(n['start'] - start), abs(n['end'] - start)))]
+            if active:
+                chosen = max(active, key=lambda note: note['velocity'])
+                bass.append({'start': start, 'end': min(duration, start + beat * .65),
+                             'pitch': 36 + chosen['pitch'] % 12, 'velocity': 38 if soft else 58})
         if step % (4 if sparse else 2) == 0:
             drums.append({'start': start, 'end': min(duration, start + .10), 'pitch': 36, 'velocity': 36 if soft else 54})
         if not sparse or step % 2 == 0:
             drums.append({'start': start, 'end': min(duration, start + .08), 'pitch': 42, 'velocity': 28 if soft else 43})
         step += 1
-    if recipe['bass'] and bass:
+    if 'harmony' in recipe:
+        from chart import backing
+        tracks.extend(backing(recipe['harmony'], duration, recipe['bass'], sparse, soft))
+    elif recipe['bass'] and bass:
         tracks.append({'id': 'bass', 'program': 32, 'bank': 0, 'notes': bass})
     if grid and recipe['drums']:
         drums = groove_notes(grid['pattern'], recipe['bpm'], origin, duration, sparse, soft)
@@ -132,6 +137,8 @@ def synthesized_stems(tracks, duration, output):
         stem = np.fromfile(path, dtype='<f4').reshape(-1, 2)
         if stem.shape != samples.shape or not np.isfinite(stem).all():
             raise EngineError('LOCAL_AUDIO_INVALID', 'A rendered instrument stem is invalid.')
+        if track['id'] == 'chords' and not np.any(stem):
+            raise EngineError('LOCAL_INVALID_RECIPE', 'The chord bars are too short to sound. Choose a chord in an earlier bar or leave the chart at rest.')
         if track['id'] != 'lead' and not np.any(stem):
             raise EngineError('LOCAL_INVALID_RECIPE', 'The backing produced no audio. Choose an earlier melody onset or turn off that backing track.')
         accumulated += stem
@@ -185,11 +192,21 @@ def render(notes, duration, recipe, output, status='provided_notes', source=None
         raise
     if integrity['clipped_fraction'] or integrity['rms'] < 1e-6:
         raise EngineError('LOCAL_AUDIO_INVALID', 'The rendered audio is clipped or silent.')
-    midi = pretty_midi.PrettyMIDI(resolution=960, initial_tempo=recipe['bpm'])
+    # Chart clips may end one sample into their final bar. MIDI note-off must
+    # follow note-on by at least one tick for other programs to read the note.
+    has_chart = 'harmony' in recipe
+    midi = pretty_midi.PrettyMIDI(resolution=7680 if has_chart else 960, initial_tempo=recipe['bpm'])
+    expanded = 0
     for track in tracks:
         name = 'lead transcription guide' if recorded and track['id'] == 'lead' else track['id']
         part = pretty_midi.Instrument(program=track['program'], is_drum=track['bank'] == 128, name=name)
         part.notes = [pretty_midi.Note(**note) for note in track['notes']]
+        if has_chart and track['id'] in ('bass', 'chords'):
+            for note in part.notes:
+                on = midi.time_to_tick(note.start)
+                if midi.time_to_tick(note.end) == on:
+                    note.end = midi.tick_to_time(int(on) + 1)
+                    expanded += 1
         midi.instruments.append(part)
     midi_path = output / 'arrangement.mid'
     midi.write(str(midi_path))
@@ -210,6 +227,9 @@ def render(notes, duration, recipe, output, status='provided_notes', source=None
             'midiPath': str(midi_path), 'recipe': recipe,
             'provenance': {'renderer': renderer, 'notesSha256': anchor,
                            'audioSha256': digest(audio), 'midiSha256': digest(midi_path), 'stems': stems,
+                           **({'harmony': {'method': 'reviewed major/minor chart v1',
+                                           'chartSha256': canonical_hash(recipe['harmony']),
+                                           'minimumTickExtensions': expanded}} if has_chart else {}),
                            **({'mix': {'method': 'isolated stereo stem mixer v1', 'strips': controls,
                                        **({'toneEqV1': tone_results} if tone_results else {}),
                                        'stemFiles': 'dry pre-fader audio', 'masterGainDb': export['gain_db']}} if controls else {}),

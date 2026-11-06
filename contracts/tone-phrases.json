@@ -1,5 +1,5 @@
 {
-  "tracks": { "lead": "lead", "melody": "lead", "bass": "bass", "drums": "drums" },
+  "tracks": { "lead": "lead", "melody": "lead", "bass": "bass", "drums": "drums", "chords": "chords" },
   "tones": {
     "bright": ["brighten {track}", "make {track} brighter"],
     "warm": ["warm {track}", "warm up {track}", "make {track} warmer"],

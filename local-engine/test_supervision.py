@@ -50,9 +50,9 @@ class Supervision(unittest.TestCase):
             self.assertEqual(failure.exception.code, 'LOCAL_INVALID_REQUEST')
 
     def test_model_readiness_follows_the_guided_prefix(self):
-        for prompt in ['edit: add drums', '  EDit: bad command']:
+        for prompt in ['edit: add drums', '  EDit: bad command', 'add drums', 'warm the lead and change bar 2 to D minor']:
             self.assertFalse(worker.needs_freeform({'operation': 'plan', 'prompt': prompt}))
-        for prompt in ['add drums', 'editing: add drums', 'use the words edit: here']:
+        for prompt in ['use a delicate electric piano', 'editing: add drums', 'use the words edit: here']:
             self.assertTrue(worker.needs_freeform({'operation': 'plan', 'prompt': prompt}))
         for operation in ['transcribe', 'render', 'preview']:
             self.assertFalse(worker.needs_freeform({'operation': operation}))

@@ -12,8 +12,11 @@ import {
 } from "lucide-react";
 import { Button } from "../components/ui/button";
 import { useAudio } from "./Player";
-import { allTracksMuted, mixChanges, normalizeMix, TrackMix } from "./TrackMix";
-import { GuidedEdits, isGuided, isToneRequest } from "./GuidedEdits";
+import { mixChanges, TrackMix } from "./TrackMix";
+import { allTracksMuted, normalizeMix, activeStems } from "./mixState";
+import { ChordChart } from "./ChordChart";
+import { isOfflineRequest } from "./chartPhrases";
+import { GuidedEdits, isGuided } from "./GuidedEdits";
 import { DrumGroove, grooveLabel, validGrid } from "./DrumGroove";
 import {
   DEFAULT_RECIPE,
@@ -67,26 +70,29 @@ function optionValue(value: boolean | string) {
 
 export function RecipeDetails({ recipe }: { recipe: Recipe }) {
   return (
-    <dl className="recipe-details">
-      {ARRANGEMENT_FIELDS.map(({ key, label, options }) => (
-        <Fragment key={key}>
-          <dt>{label}</dt>
-          <dd>{options.find((o) => o.value === recipe[key])?.text}</dd>
-        </Fragment>
-      ))}
-      {mixChanges(recipe).map((change) => (
-        <Fragment key={change.label}>
-          <dt>{change.label}</dt>
-          <dd>{change.value}</dd>
-        </Fragment>
-      ))}
-      {recipe.groove && (
-        <>
-          <dt>Drum pattern</dt>
-          <dd>{grooveLabel(recipe)}</dd>
-        </>
-      )}
-    </dl>
+    <>
+      <dl className="recipe-details">
+        {ARRANGEMENT_FIELDS.map(({ key, label, options }) => (
+          <Fragment key={key}>
+            <dt>{label}</dt>
+            <dd>{options.find((o) => o.value === recipe[key])?.text}</dd>
+          </Fragment>
+        ))}
+        {mixChanges(recipe).map((change) => (
+          <Fragment key={change.label}>
+            <dt>{change.label}</dt>
+            <dd>{change.value}</dd>
+          </Fragment>
+        ))}
+        {recipe.groove && (
+          <>
+            <dt>Drum pattern</dt>
+            <dd>{grooveLabel(recipe)}</dd>
+          </>
+        )}
+      </dl>
+      {recipe.harmony && <ChordChart recipe={recipe} />}
+    </>
   );
 }
 
@@ -216,6 +222,7 @@ export function Refinement({
       } catch {}
       return "";
     }),
+    [quickChart, setQuickChart] = useState<string | null>(null),
     [view, setView] = useState<
       "request" | "adjust" | "review" | "creating" | "result"
     >("request"),
@@ -232,6 +239,7 @@ export function Refinement({
       source: number;
       draft: number;
     } | null>(null);
+  const direction = quickChart ?? text;
   const supportedBasis = mode !== "backend" || basis.recipeKnown === true;
   const submittedBasis =
     proposal && (view === "creating" || view === "result")
@@ -250,6 +258,7 @@ export function Refinement({
       // creation receipt settles. Honor a basis chosen during that window.
       if (view === "creating") return;
       previousBasis.current = basisId;
+      setQuickChart(null);
       if (operation.current === "review") controller.current?.abort();
       setRecipe(basis?.recipe ?? DEFAULT_RECIPE);
       setProposal(null);
@@ -314,8 +323,11 @@ export function Refinement({
     operation.current = "review";
     try {
       const reviewText =
-        manual && !text.trim() ? "Direct arrangement changes" : text;
-      if (reviewText !== text) changeText(reviewText);
+        manual && !direction.trim() ? "Direct arrangement changes" : direction;
+      if (reviewText !== direction) {
+        if (quickChart === null) changeText(reviewText);
+        else setQuickChart(reviewText);
+      }
       const saved = await service.saveDraft(project, reviewText, basisId);
       onUpdate(saved);
       c.signal.throwIfAborted();
@@ -411,7 +423,8 @@ export function Refinement({
     mode === "backend" &&
     project.available &&
     project.freeformAvailable === false;
-  const needsLanguageModel = !isGuided(text) && !isToneRequest(text);
+  const needsLanguageModel =
+    !isGuided(direction) && !isOfflineRequest(direction);
   return (
     <div className="refinement">
       <header>
@@ -462,9 +475,16 @@ export function Refinement({
                 ? "Try “warm the bass” or choose a guided edit below."
                 : "Try “Remove drums and make the backing quieter.”"
             }
-            value={text}
+            value={direction}
             maxLength={1000}
-            onChange={(e) => changeText(e.target.value)}
+            onChange={(e) => {
+              if (quickChart === null) changeText(e.target.value);
+              else {
+                setQuickChart(e.target.value);
+                setProposal(null);
+                setError("");
+              }
+            }}
             disabled={busy}
           />
           {guidedOnly && needsLanguageModel && (
@@ -474,7 +494,44 @@ export function Refinement({
             </p>
           )}
           {mode === "backend" && (
+            <div className="chord-suggest">
+              <button
+                type="button"
+                className="text-action"
+                disabled={disabled || busy}
+                onClick={() => {
+                  if (quickChart !== null) {
+                    setQuickChart(null);
+                  } else if (!text.trim() && !alternate) {
+                    changeText("edit: suggest chords");
+                  } else {
+                    // Review this standalone command without replacing either saved draft.
+                    try {
+                      localStorage.setItem(
+                        `djound.studio.draft.${project.id}`,
+                        text,
+                      );
+                    } catch {}
+                    setQuickChart("edit: suggest chords");
+                  }
+                  setError("");
+                  setProposal(null);
+                }}
+              >
+                {quickChart !== null
+                  ? "Return to previous draft"
+                  : "Suggest chords"}
+              </button>
+              {quickChart !== null && (
+                <span className="small subtle">
+                  Your previous draft is saved.
+                </span>
+              )}
+            </div>
+          )}
+          {mode === "backend" && quickChart === null && (
             <GuidedEdits
+              chordsAvailable={activeStems(basis.recipe).includes("chords")}
               alternate={alternate}
               text={text}
               onSwitch={(next) => changeText(next, text)}
@@ -488,9 +545,9 @@ export function Refinement({
             disabled={
               disabled ||
               busy ||
-              !text.trim() ||
+              !direction.trim() ||
               (guidedOnly && needsLanguageModel) ||
-              (mode === "backend" && /^edit:$/i.test(text.trim()))
+              (mode === "backend" && /^edit:$/i.test(direction.trim()))
             }
             onClick={() => void review()}
           >
@@ -578,6 +635,12 @@ export function Refinement({
                   duration={duration}
                   onChange={setRecipe}
                 />
+                <ChordChart
+                  recipe={recipe}
+                  before={proposal?.before}
+                  suggestions={proposal?.chordSuggestions}
+                  onChange={setRecipe}
+                />
                 <TrackMix recipe={recipe} onChange={setRecipe} />
               </>
             )}
@@ -608,7 +671,7 @@ export function Refinement({
         <>
           <section className="review-request">
             <h3>Describe a change</h3>
-            <p>{text || "Direct arrangement changes"}</p>
+            <p>{proposal.text || "Direct arrangement changes"}</p>
             <button
               className="text-action"
               onClick={() => {
@@ -620,6 +683,14 @@ export function Refinement({
             </button>
           </section>
           <h2 className="proposed-heading">Proposed changes</h2>
+          {mode === "backend" && (
+            <ChordChart
+              recipe={recipe}
+              before={proposal.before}
+              suggestions={proposal.chordSuggestions}
+              onChange={changeReviewedRecipe}
+            />
+          )}
           {grooveLabel(recipe) !== grooveLabel(proposal.before) && (
             <div className="change-row" data-changed="true">
               <span>Drum pattern</span>
@@ -748,6 +819,7 @@ export function Refinement({
             className="full"
             onClick={() => {
               onBasis(result.id);
+              setQuickChart(null);
               setView("request");
               setResult(null);
             }}

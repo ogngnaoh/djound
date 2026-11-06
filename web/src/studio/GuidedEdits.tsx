@@ -1,26 +1,3 @@
-import phrases from "../../../contracts/tone-phrases.json";
-
-const tones = new Set<string>();
-for (const patterns of Object.values(phrases.tones)) {
-  for (const pattern of patterns) {
-    for (const track of Object.keys(phrases.tracks)) {
-      tones.add(pattern.replace("{track}", track));
-      tones.add(pattern.replace("{track}", `the ${track}`));
-    }
-  }
-}
-
-export function isToneRequest(text: string) {
-  return text
-    .toLowerCase()
-    .trim()
-    .replace(/\s+/g, " ")
-    .replace(/^please /, "")
-    .replace(/\.$/, "")
-    .split(/\s*;\s*| and /)
-    .every((clause) => tones.has(clause));
-}
-
 const GROUPS = [
   {
     label: "Lead",
@@ -34,6 +11,10 @@ const GROUPS = [
   {
     label: "Backing parts",
     edits: ["add bass", "remove bass", "add drums", "remove drums"],
+  },
+  {
+    label: "Chord chart",
+    edits: ["suggest chords", "suggest chords at 100 bpm from 0 ms"],
   },
   {
     label: "Drum pattern",
@@ -52,7 +33,7 @@ const GROUPS = [
       "make the backing normal",
     ],
   },
-  ...["lead", "bass", "drums"].map((stem) => ({
+  ...["lead", "bass", "drums", "chords"].map((stem) => ({
     label: `Mix ${stem}`,
     edits: [
       `lower ${stem} by 3 dB`,
@@ -79,6 +60,7 @@ export function GuidedEdits({
   onSwitch,
   disabled,
   initiallyOpen,
+  chordsAvailable,
 }: {
   text: string;
   alternate: string;
@@ -86,6 +68,7 @@ export function GuidedEdits({
   onSwitch: (value: string) => void;
   disabled: boolean;
   initiallyOpen: boolean;
+  chordsAvailable: boolean;
 }) {
   const clean = text.trim();
   const guided = isGuided(text);
@@ -143,7 +126,9 @@ export function GuidedEdits({
               <option value="" disabled>
                 Choose an edit
               </option>
-              {GROUPS.map(({ label, edits }) => (
+              {GROUPS.filter(
+                (group) => group.label !== "Mix chords" || chordsAvailable,
+              ).map(({ label, edits }) => (
                 <optgroup key={label} label={label}>
                   {edits.map((edit) => (
                     <option key={edit}>{edit}</option>

@@ -1,10 +1,9 @@
 from importlib.util import find_spec
-from pathlib import Path
 import unittest
 
 from common import DEFAULT_RECIPE, UNITY_STRIP, EngineError, recipe
 from planner import plan
-from tone_phrases import tone_commands
+from reviewed_phrases import reviewed_phrases
 from worker import needs_freeform
 
 
@@ -28,7 +27,7 @@ class ToneContracts(unittest.TestCase):
         for value in (None, [], True, 'deep'):
             with self.subTest(value=value), self.assertRaises(EngineError):
                 recipe(dict(DEFAULT_RECIPE, mix={'lead':dict(UNITY_STRIP, tone=value)}))
-        self.assertIsNone(tone_commands('warm the lead except the quiet notes'))
+        self.assertIsNone(reviewed_phrases('warm the lead except the quiet notes'))
         self.assertEqual(recipe(dict(DEFAULT_RECIPE, mix={'lead':dict(UNITY_STRIP, tone='neutral')})), DEFAULT_RECIPE)
 
 

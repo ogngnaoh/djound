@@ -9,7 +9,14 @@ export type Scenario =
   | "creation-failure"
   | "playback-failure"
   | "stale";
-export type Stem = "lead" | "bass" | "drums";
+export type Stem = "lead" | "bass" | "drums" | "chords";
+export type Harmony = components["schemas"]["LocalHarmony"];
+export type Chord = Exclude<Harmony["chords"][number], null>;
+export type ChordSuggestion = {
+  chord: Chord | null;
+  ambiguous: boolean;
+  alternatives: Chord[];
+};
 export type MixStrip = components["schemas"]["LocalMixStrip"];
 export type Recipe = {
   instrument: components["schemas"]["LocalRecipe"]["instrument"];
@@ -19,6 +26,7 @@ export type Recipe = {
   backingVolume: "soft" | "normal";
   bpm: number;
   groove?: components["schemas"]["LocalRecipe"]["groove"];
+  harmony?: Harmony;
   mix?: Partial<Record<Stem, MixStrip>>;
 };
 export type Note = {
@@ -72,6 +80,7 @@ export type Proposal = {
   text: string;
   recipe: Recipe;
   before: Recipe;
+  chordSuggestions?: ChordSuggestion[];
   canGenerate: boolean;
   warnings: string[];
 };
@@ -130,5 +139,13 @@ export function instrumentName(value: Recipe["instrument"]) {
   }[value];
 }
 export function describeRecipe(r: Recipe) {
-  return `${instrumentName(r.instrument)}${r.bass ? (r.backingVolume === "soft" ? ", softer bass" : ", bass") : ", no bass"}${r.drums ? " and drums" : ", no drums"}`;
+  const sounding = r.harmony?.chords.some((chord) => chord !== null);
+  const bass = !r.bass
+    ? "no bass"
+    : sounding === false
+      ? "resting bass"
+      : r.backingVolume === "soft"
+        ? "softer bass"
+        : "bass";
+  return `${instrumentName(r.instrument)}, ${bass}${r.drums ? " and drums" : ", no drums"}${sounding ? ", chord accompaniment" : ""}`;
 }

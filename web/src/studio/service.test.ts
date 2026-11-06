@@ -1,6 +1,9 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { createStudioService } from "./service.ts";
+import { changeBar, chordSuggestions, removeChart } from "./harmony.ts";
+import { activeStems, allTracksMuted } from "./mixState.ts";
+import { DEFAULT_RECIPE, type Recipe } from "./types.ts";
 
 function storage() {
   const values = new Map<string, string>();
@@ -519,4 +522,80 @@ test("a completed language review uses its own plan when another tab has created
     api.POST = post;
     api.GET = get;
   }
+});
+
+test("a reviewed chart edit changes one bar; resting all bars drops only the silent tracks", () => {
+  const parent: Recipe = {
+    ...DEFAULT_RECIPE,
+    bass: true,
+    drums: true,
+    groove: { pattern: "swing_ride", downbeatMs: 100 },
+    bpm: 120,
+    harmony: { bpm: 80, downbeatMs: 200, chords: ["C", null, "Ebm"] },
+    mix: {
+      lead: { gainDb: 0, pan: 0, muted: true },
+      drums: { gainDb: 0, pan: 0.4, muted: true },
+      chords: { gainDb: -6, pan: -0.5, muted: false, tone: "bright" },
+      bass: { gainDb: 2, pan: 0.2, muted: false, tone: "warm" },
+    },
+  };
+  const snapshot = structuredClone(parent);
+  const minor = changeBar(parent, 2, "Dm");
+  assert.deepEqual(parent, snapshot);
+  assert.deepEqual(minor.harmony, {
+    ...snapshot.harmony,
+    chords: ["C", null, "Dm"],
+  });
+  assert.deepEqual(minor.mix, parent.mix);
+  assert.equal(allTracksMuted(minor), false);
+  const rests = changeBar(changeBar(minor, 0, null), 2, null);
+  assert.deepEqual(activeStems(rests), ["lead", "drums"]);
+  assert.deepEqual(rests.mix, {
+    lead: parent.mix?.lead,
+    drums: parent.mix?.drums,
+  });
+  assert.equal(allTracksMuted(rests), true);
+  assert.deepEqual(rests.groove, parent.groove);
+  assert.deepEqual(parent, snapshot);
+  const resumed = changeBar(rests, 1, "F#m");
+  assert.deepEqual(activeStems(resumed), ["lead", "bass", "drums", "chords"]);
+  assert.equal(resumed.mix?.bass, undefined);
+  assert.equal(resumed.mix?.chords, undefined);
+  assert.equal(allTracksMuted(resumed), false);
+  const removed = removeChart(minor);
+  assert.deepEqual(activeStems(removed), ["lead", "bass", "drums"]);
+  assert.equal(removed.harmony, undefined);
+  assert.equal(removed.mix?.chords, undefined);
+  assert.deepEqual(removed.mix?.bass, parent.mix?.bass);
+  assert.deepEqual(parent, snapshot);
+});
+
+test("suggestion evidence must match the grid and cannot change the reviewed chart", () => {
+  const chart: NonNullable<Recipe["harmony"]> = {
+    bpm: 120,
+    downbeatMs: 100,
+    chords: ["D", null],
+  };
+  const raw = [
+    {
+      start: 0.1,
+      end: 2.1,
+      chord: "Am",
+      ambiguous: true,
+      alternatives: ["C", "Em"],
+    },
+    { start: 2.1, end: 3, chord: null, ambiguous: false, alternatives: [] },
+  ];
+  assert.deepEqual(chordSuggestions(chart, raw), [
+    { chord: "Am", ambiguous: true, alternatives: ["C", "Em"] },
+    { chord: null, ambiguous: false, alternatives: [] },
+  ]);
+  assert.deepEqual(chart.chords, ["D", null]);
+  assert.equal(chordSuggestions(chart, undefined), undefined);
+  assert.equal(chordSuggestions(chart, [raw[0]]), undefined);
+  assert.equal(chordSuggestions({ ...chart, downbeatMs: 0 }, raw), undefined);
+  assert.equal(
+    chordSuggestions(chart, [raw[0], { ...raw[1], alternatives: ["H"] }]),
+    undefined,
+  );
 });

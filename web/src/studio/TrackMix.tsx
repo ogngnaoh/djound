@@ -1,42 +1,9 @@
 import { useState } from "react";
 import type { MixStrip, Recipe, Stem } from "./types";
 
-const STEMS = ["lead", "bass", "drums"] as const;
-const UNITY: MixStrip = { gainDb: 0, pan: 0, muted: false };
-const NAMES = { lead: "Lead", bass: "Bass", drums: "Drums" };
+import { activeStems, isUnity, normalizeMix, UNITY } from "./mixState";
 
-function activeStems(recipe: Recipe) {
-  return STEMS.filter((stem) => stem === "lead" || recipe[stem]);
-}
-function isUnity(s: MixStrip) {
-  return (
-    s.gainDb === 0 &&
-    s.pan === 0 &&
-    !s.muted &&
-    (s.tone ?? "neutral") === "neutral"
-  );
-}
-
-export function normalizeMix(recipe: Recipe): Recipe {
-  if (!recipe.mix) return recipe;
-  const mix = { ...recipe.mix };
-  for (const stem of STEMS) {
-    const strip = mix[stem];
-    if (!strip || (stem !== "lead" && !recipe[stem]) || isUnity(strip))
-      delete mix[stem];
-    else if (strip.tone === "neutral") {
-      const { tone, ...flat } = strip;
-      mix[stem] = flat;
-    }
-  }
-  const result: Recipe = { ...recipe, mix };
-  if (!Object.keys(mix).length) delete result.mix;
-  return result;
-}
-
-export function allTracksMuted(recipe: Recipe) {
-  return activeStems(recipe).every((stem) => recipe.mix?.[stem]?.muted);
-}
+const NAMES = { lead: "Lead", bass: "Bass", drums: "Drums", chords: "Chords" };
 
 function panText(pan: number) {
   return pan === 0

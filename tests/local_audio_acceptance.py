@@ -48,6 +48,32 @@ def spectral_balance_db(samples, sample_rate):
     return 10 * np.log10(treble / body)
 
 
+def check_chart(track, harmony, rate, frames):
+    names = ['C', 'Db', 'D', 'Eb', 'E', 'F', 'F#', 'G', 'Ab', 'A', 'Bb', 'B']
+    origin = Fraction(harmony['downbeatMs'], 1000)
+    bar = Fraction(240, harmony['bpm'])
+    labels = harmony['chords']
+    assert origin + (len(labels) - 1) * bar < Fraction(frames, rate) <= origin + len(labels) * bar
+    total = 0
+    per_bar = []
+    for index, label in enumerate(labels):
+        start = round((origin + index * bar) * rate)
+        stop = min(frames, round((origin + (index + 1) * bar) * rate))
+        sounding = [note for note in track['notes'] if start <= round(note['start'] * rate) < stop]
+        expected = []
+        if label is not None:
+            root = names.index(label.removesuffix('m'))
+            third = 3 if label.endswith('m') else 4
+            expected = sorted([root, (root + third) % 12, (root + 7) % 12])
+        assert sorted(note['pitch'] % 12 for note in sounding) == expected, (index, label, sounding)
+        assert all(abs(round(note['start'] * rate) - start) <= 1
+                   and note['start'] < note['end'] and round(note['end'] * rate) <= stop for note in sounding)
+        total += len(sounding)
+        per_bar.append(sounding)
+    assert total == len(track['notes']), 'Unexpected chord note outside the reviewed grid'
+    return per_bar
+
+
 result = json.loads(Path(sys.argv[1]).read_text())
 data = Path(sys.argv[2])
 evidence = Path(result['evidence'])
@@ -75,7 +101,7 @@ for index, recording in enumerate(result['snapshot']['renditions'], 1):
                     'rms': float(np.sqrt(np.mean(samples ** 2))), 'clippedSamples': 0,
                     'leadPcmSha256': lead_hashes[-1], 'notesSha256': note_hashes[-1],
                     'worker': manifest['provenance']['supervisor']})
-if len(reports) in (5, 7, 10, 13):
+if len(reports) in (5, 7, 10, 13, 17):
     # The fourth rendition mixes the first version's dry stems on the same timeline.
     # Compare serialized samples to an independent stereo matrix and gain equation.
     parent = data / 'local-jobs' / result['snapshot']['renditions'][0]['attemptId'] / 'output'
@@ -96,7 +122,7 @@ if len(reports) in (5, 7, 10, 13):
     print('PASS: actual text-to-mix samples match the stereo matrix; direct controls restore the original WAV byte for byte.')
 else:
     assert len(reports) == 3
-if len(reports) in (7, 10, 13):
+if len(reports) in (7, 10, 13, 17):
     uploaded = Path(__file__).resolve().parents[1] / 'fixtures/audio/local-demo-source.wav'
     source, _ = sf.read(uploaded, dtype='float32', always_2d=True)
     source_hash = hashlib.sha256(source.astype('<f4').tobytes()).hexdigest()
@@ -115,7 +141,7 @@ if len(reports) in (7, 10, 13):
         assert proof['sourceSha256'] == result['snapshot']['original']['sha256']
     mix_check['uploadedLeadPcmSha256'] = source_hash
     print('PASS: recorded-lead mix equals the original samples plus backing; isolating the lead restores its source PCM exactly.')
-if len(reports) in (10, 13):
+if len(reports) in (10, 13, 17):
     groove_checks = []
     downbeat_frame = round(.710 * rate)
     assert np.any(source[:downbeat_frame]), 'The fixture must have audible lead before the first drum beat'
@@ -147,7 +173,7 @@ if len(reports) in (10, 13):
         assert groove_checks[0][field] != groove_checks[1][field]
     mix_check['drumGrooves'] = groove_checks
     print('PASS: both drum grids match the reviewed pickup, preserve the source PCM, and restore swing exactly.')
-if len(reports) == 13:
+if len(reports) in (13, 17):
     tone_checks = []
     target = source.astype(np.float64)
     reference_rms = np.sqrt(np.mean(target ** 2))
@@ -182,6 +208,49 @@ if len(reports) == 13:
                             'drumPcmSha256': expected_drum_sha, 'playbackSha256': recording['sha256']})
     mix_check['trackTone'] = tone_checks
     print('PASS: bright and warm change isolated lead spectra at matched RMS; served PCM matches the master and neutral restores the original WAV.')
+if len(reports) == 17:
+    chart_checks, scores = [], []
+    baseline_tracks = {track['id']: track for track in tracks[12]}
+    for i in range(13, 17):
+        recording = result['snapshot']['renditions'][i]
+        folder = data / 'local-jobs' / recording['attemptId'] / 'output'
+        by_name = {track['id']: track for track in tracks[i]}
+        assert by_name['lead'] == baseline_tracks['lead'] and by_name['drums'] == baseline_tracks['drums']
+        assert lead_hashes[i] == source_hash
+        expected_names = {'lead', 'drums', 'chords'} if i < 16 else {'lead', 'drums'}
+        assert by_name.keys() == expected_names
+        raw, raw_rate = sf.read(folder / 'audio.raw.wav', dtype='float32', always_2d=True)
+        assert raw_rate == rate and raw.shape == source.shape
+        wanted = np.zeros(source.shape, dtype=np.float64)
+        hashes = {}
+        chord_rms = None
+        for j, track in enumerate(tracks[i]):
+            stem, stem_rate = sf.read(folder / f'stem-{j}.raw.wav', dtype='float32', always_2d=True)
+            assert stem_rate == rate and stem.shape == raw.shape
+            hashes[track['id']] = hashlib.sha256(stem.astype('<f4').tobytes()).hexdigest()
+            wanted += stem
+            if track['id'] == 'chords':
+                assert not np.any(stem[:downbeat_frame]), 'Chord sound entered before the reviewed grid'
+                chord_rms = float(np.sqrt(np.mean(stem.astype(np.float64) ** 2)))
+                assert chord_rms > 1e-5, 'Scheduled chords did not produce an audible stem'
+        assert hashes['drums'] == expected_drum_sha
+        np.testing.assert_array_equal(raw, wanted.astype('float32'))
+        chart = recording['localRecipe'].get('harmony')
+        if i < 16:
+            assert chart['bpm'] == 120 and chart['downbeatMs'] == 710
+            scores.append(check_chart(by_name['chords'], chart, rate, len(source)))
+        else:
+            assert chart is None, 'Removed chord chart remained in the recipe'
+        chart_checks.append({'version': i + 1, 'chart': chart, 'chordRms': chord_rms, 'stemPcmSha256': hashes,
+                             'playbackSha256': recording['sha256']})
+    assert scores[0] == scores[2] and scores[0][1] != scores[1][1]
+    assert all(a == b for idx, (a, b) in enumerate(zip(scores[0], scores[1], strict=True)) if idx != 1)
+    assert chart_checks[0]['stemPcmSha256'] == chart_checks[2]['stemPcmSha256']
+    assert chart_checks[0]['stemPcmSha256']['chords'] != chart_checks[1]['stemPcmSha256']['chords']
+    assert (evidence / 'version-14.wav').read_bytes() == (evidence / 'version-16.wav').read_bytes()
+    assert (evidence / 'version-13.wav').read_bytes() == (evidence / 'version-17.wav').read_bytes()
+    mix_check['chordCharts'] = chart_checks
+    print('PASS: reviewed triad events, bar-local correction, dry lead and drums, exact chart undo and removal.')
 assert lead_hashes[0] == lead_hashes[1], 'Backing-only refinement changed the locked lead'
 assert lead_hashes[2] != lead_hashes[1], 'Explicit guitar correction did not change the lead timbre'
 assert len(set(note_hashes)) == 1, 'Refinement or instrument correction changed confirmed notes'

@@ -330,6 +330,104 @@ else:
     }
 
     @Test
+    void harmonyUsesConfirmedNotesAndPublishesOnlyTheReviewedChart() throws Exception {
+        String id = source();
+        var notes = confirmed(id);
+        var suggest = new PlanCommand(1L, notes.revision(), 1L, "edit: suggest chords", null);
+        var original = local().manual(id, suggest);
+        var recipe = new LinkedHashMap<>(original.recipe());
+        var fixture = root.resolve("plan-result.json");
+        var json = new tools.jackson.databind.ObjectMapper();
+        var provenance = Map.of("origin", "GUIDED_COMMANDS", "inferenceAttempts", 0);
+        recipe.put("harmony", Map.of("bpm", 200, "downbeatMs", 0, "chords", List.of("C", "Dm")));
+        Files.writeString(
+                fixture,
+                json.writeValueAsString(Map.of("recipe", recipe, "provenance", provenance)));
+        assertEquals("PLAN_INVALID", completed(local().propose(id, suggest)).outcomeCode());
+        assertEquals(original, local().state(id).plan());
+
+        var proposedChart = Map.of("bpm", 200, "downbeatMs", 0, "chords", List.of("C"));
+        recipe.put("harmony", proposedChart);
+        Files.writeString(
+                fixture,
+                json.writeValueAsString(Map.of("recipe", recipe, "provenance", provenance)));
+        var job = completed(local().propose(id, suggest));
+        assertEquals("SUCCEEDED", job.state());
+        var proposed = local().result(job.id()).plan();
+        var input =
+                json.readTree(
+                        Files.readString(
+                                root.resolve("local-jobs")
+                                        .resolve(job.id())
+                                        .resolve("request.json")));
+        assertEquals(
+                notes.notes(), Arrays.asList(json.treeToValue(input.path("notes"), Note[].class)));
+        assertEquals(notes.durationSeconds(), input.path("duration").asDouble());
+        assertEquals(proposedChart, proposed.recipe().get("harmony"));
+        assertFalse(proposed.basisRecipe().containsKey("harmony"));
+        assertTrue(ex().get(id).renditions().isEmpty());
+
+        var chosen = Map.of("bpm", 73, "downbeatMs", 40, "chords", List.of("Dm"));
+        recipe.put("harmony", chosen);
+        recipe.put(
+                "mix",
+                Map.of("chords", Map.of("gainDb", -4, "pan", 0, "muted", false, "tone", "warm")));
+        var correction =
+                new CorrectionCommand(1L, notes.revision(), 1L, proposed.text(), null, recipe);
+        var reviewed = local().correct(proposed.id(), correction);
+        assertEquals(
+                proposed.recipe(),
+                ((Map<?, ?>) reviewed.model().get("correction")).get("commandRecipe"));
+        assertEquals(reviewed, local().correct(reviewed.id(), correction));
+        assertEquals(recipe, local().renderRequest(reviewed.id(), id).get("recipe"));
+        var saved =
+                finished(gen().create(id, command(reviewed), "reviewed-chart-render").attemptId());
+        assertEquals("SUCCEEDED", saved.state());
+        var recording = ex().recording(saved.resultRecordingId());
+        assertEquals(reviewed.recipe(), recording.localRecipe());
+        assertTrue(recording.direction().contains("Chord chart: Dm. 73 BPM, first beat at 40 ms."));
+        assertEquals(
+                "STALE_DRAFT",
+                assertThrows(ApiProblem.class, () -> local().correct(proposed.id(), correction))
+                        .code());
+        assertEquals(proposedChart, local().plan(proposed.id()).recipe().get("harmony"));
+
+        var draft =
+                ex().saveDraft(
+                                id,
+                                new Models.DraftUpdate(
+                                        "Use electric piano",
+                                        recording.id(),
+                                        ex().get(id).draft().revision()));
+        var next =
+                new PlanCommand(
+                        1L, notes.revision(), draft.revision(), draft.text(), recording.id());
+        var direct = local().manual(id, next);
+        assertEquals(reviewed.recipe(), direct.recipe());
+        Files.delete(fixture);
+        var unrelated = local().result(completed(local().propose(id, next)).id()).plan();
+        assertEquals(chosen, unrelated.recipe().get("harmony"));
+        assertEquals(reviewed.recipe().get("mix"), unrelated.recipe().get("mix"));
+
+        var reset = new LinkedHashMap<>(unrelated.recipe());
+        reset.remove("harmony");
+        reset.remove("mix");
+        var restored =
+                local().correct(
+                                unrelated.id(),
+                                new CorrectionCommand(
+                                        1L,
+                                        notes.revision(),
+                                        draft.revision(),
+                                        draft.text(),
+                                        recording.id(),
+                                        reset));
+        assertFalse(restored.recipe().containsKey("harmony"));
+        assertTrue(restored.summary().contains("Removed the chord chart."));
+        assertEquals(reviewed.recipe(), ex().recording(recording.id()).localRecipe());
+    }
+
+    @Test
     void mixedRecordingKeepsFrozenNotesAndControlsWhenTheNextVersionReturnsToUnity()
             throws Exception {
         String id = source();

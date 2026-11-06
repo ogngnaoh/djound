@@ -1,0 +1,6 @@
+{
+  "suggest": ["suggest chords", "suggest a chord progression", "suggest chords for the melody"],
+  "remove": ["remove chords", "remove the chords", "remove the chord progression"],
+  "gridPattern": "^suggest chords at ([0-9]{2,3}) bpm from ([0-9]{1,5}) ms$",
+  "barPattern": "^(?:set|change|make) (?:bar|measure) ([1-9]|10) (?:to )?(?:(?:a )?(rest)|([a-g])(#|b| sharp| flat)?(?: ?(m|minor|major))?)$"
+}

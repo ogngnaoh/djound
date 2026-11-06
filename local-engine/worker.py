@@ -16,7 +16,7 @@ import zipfile
 
 from common import HERE, HOME, ROOT, EngineError, data_root, digest, inside, notes, recipe, write_json
 from edit_commands import PREFIX
-from tone_phrases import tone_commands
+from reviewed_phrases import reviewed_phrases
 from setup_assets import is_planner_asset, verify
 
 OPERATIONS = ['transcribe', 'preview', 'plan', 'render']
@@ -73,7 +73,7 @@ def readiness(*, check_freeform=True):
 
 def needs_freeform(request):
     return (request['operation'] == 'plan' and not PREFIX.match(request['prompt'].lstrip())
-            and tone_commands(request['prompt']) is None)
+            and reviewed_phrases(request['prompt']) is None)
 
 
 def request_values(path):
@@ -93,8 +93,10 @@ def request_values(path):
             raise EngineError('LOCAL_AUDIO_LIMIT', 'Choose a clip up to 12 seconds for this arrangement.')
         if not isinstance(request.get('prompt'), str) or not 1 <= len(request['prompt'].strip()) <= 1000:
             raise EngineError('LOCAL_INVALID_REQUEST', 'Describe a concrete edit in 1000 characters or fewer.')
+        if 'notes' in request:
+            notes(request['notes'], request.get('duration'))
         if request.get('parentRecipe') is not None:
-            recipe(request['parentRecipe'])
+            recipe(request['parentRecipe'], request.get('duration'))
     else:
         notes(request.get('notes'), request.get('duration'))
         if operation == 'render':

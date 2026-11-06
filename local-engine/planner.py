@@ -82,8 +82,9 @@ def validate_patch(value, parent):
     # The text model can edit arrangement slots only. Inherit the selected
     # version's existing strips for still-active parts, with unity for new parts.
     arrangement = arrangement_settings(parent)
-    if 'groove' in parent:
-        arrangement['groove'] = parent['groove']
+    for key in ('groove', 'harmony'):
+        if key in parent:
+            arrangement[key] = parent[key]
     arrangement.update(value['changes'])
     complete = recipe(arrangement)
     inherited = {name: strip for name, strip in parent.get('mix', {}).items()
@@ -113,20 +114,32 @@ def decode_plan(raw):
     return json.loads(text)
 
 
-def plan(prompt, parent, output):
+def plan(prompt, parent, output, notes=None, duration=None):
     if not isinstance(prompt, str) or not prompt.strip() or len(prompt) > 1000:
         raise EngineError('LOCAL_INVALID_REQUEST', 'Describe a concrete arrangement change in 1000 characters or fewer.')
-    parent = recipe(DEFAULT_RECIPE if parent is None else parent)
+    parent = recipe(DEFAULT_RECIPE if parent is None else parent, duration)
+    if 'harmony' in parent and duration is None:
+        raise EngineError('LOCAL_INVALID_REQUEST', 'A chord chart plan needs the confirmed clip duration.')
     from edit_commands import guided_plan
-    from tone_phrases import tone_commands
-    commands = tone_commands(prompt)
-    if commands is not None:
-        result = guided_plan('edit: ' + commands, parent)
-        result['provenance']['syntax'] = 'tone-phrases-v1'
+    from reviewed_phrases import reviewed_phrases
+    native = reviewed_phrases(prompt)
+    if native is not None:
+        commands, syntax = native
+        result = guided_plan('edit: ' + commands, parent, notes=notes, duration=duration)
+        result['provenance']['syntax'] = syntax
         return result
-    guided = guided_plan(prompt, parent)
+    guided = guided_plan(prompt, parent, notes=notes, duration=duration)
     if guided is not None:
         return guided
+    # The six-slot model cannot create, replace or remove the chord chart. A
+    # surviving harmony track also means a lead solo needs an explicit removal.
+    if re.search(r'\b(?:chords?|triads?|progressions?|cadences?|bars?|measures?|(?:re)?harmon(?:y|ies|ic|i[sz](?:e|ed|ing|ation)))\b', prompt, re.I):
+        raise EngineError('LOCAL_UNSUPPORTED_REQUEST', 'Use Guided edits or the chord chart to review chord changes.')
+    if 'harmony' in parent and re.search(
+        r'\b(?:solo|a cappella|unaccompanied)\b|\b(?:no|remove|without|drop|strip|mute|turn off|disable)\b.{0,35}'
+        r'\b(?:backing|accompaniment|everything|all instruments)\b|\b(?:only|just) (?:keep |leave )?(?:the )?(?:lead|melody)\b',
+        prompt, re.I):
+        raise EngineError('LOCAL_UNSUPPORTED_REQUEST', 'Review the chord chart, bass and drums individually to remove accompaniment.')
     if re.search(r'\b(?:warm(?:er)?|bright(?:er|en)?|tone)\b', prompt, re.I):
         raise EngineError('LOCAL_UNSUPPORTED_REQUEST', 'Review a complete tone change such as “warm the bass”, or combine tone and other changes in Guided edits.')
     from stereo_scope import requests_stereo_change

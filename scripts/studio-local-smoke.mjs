@@ -802,8 +802,71 @@ try {
     const neutral = await create(13);
     expect(neutral.localRecipe).toEqual(swingRecipe);
     expect(neutral.sha256).toBe(returned.sha256);
+    await useVersion(neutral);
+    await button("Suggest chords").click();
+    await expect(direction()).toHaveValue("edit: suggest chords");
+    const chartPlan = await interpret(await direction().inputValue());
+    expect(chartPlan.basisRecordingId).toBe(neutral.id);
+    expect(chartPlan.noteRevision).toBe((await local()).notes.revision);
+    const chart = chartPlan.recipe.harmony;
+    expect(chart).toMatchObject({bpm: 120, downbeatMs: 710});
+    expect(chart.chords).toHaveLength(6);
+    expect(chartPlan.recipe).toEqual({...swingRecipe, harmony: chart});
+    const suggestions = chartPlan.model.chordSuggestions;
+    expect(suggestions).toHaveLength(chart.chords.length);
+    for (const [i, bar] of suggestions.entries()) {
+      expect(bar.chord).toBe(chart.chords[i]);
+      expect(bar.start).toBeCloseTo(.710 + 2 * i, 6);
+      expect(bar.end).toBeCloseTo(Math.min(12, .710 + 2 * (i + 1)), 6);
+      expect(typeof bar.ambiguous).toBe("boolean");
+      expect(Array.isArray(bar.alternatives)).toBe(true);
+      expect(bar.alternatives).not.toContain(bar.chord);
+      expect(bar.origin).toBe(bar.chord === null ? "empty" : "suggested");
+    }
+    expect(suggestions.some(bar => bar.alternatives.length > 0)).toBe(true);
+    await expect(page.locator("[data-chord-alternatives]").first()).toBeVisible();
+    const harmonized = await create(14);
+    expect(harmonized.localRecipe).toEqual(chartPlan.recipe);
+    expect(harmonized.sha256).not.toBe(neutral.sha256);
+    await playRow(harmonized);
+    await pause();
+
+    await useVersion(harmonized);
+    const originalChord = chart.chords[1];
+    const changedChord = originalChord === "Dm" ? "C" : "Dm";
+    await direction().fill(`Use ${changedChord} in bar two and keep the other chords.`);
+    const beforeBarControl = plannerRequests.length;
+    await button("Adjust arrangement").click();
+    const chordPicker = page.getByLabel("Chord for bar 2", {exact: true});
+    await expect(chordPicker).toHaveValue(originalChord ?? "");
+    await chordPicker.selectOption(changedChord);
+    await button("Review arrangement").click();
+    await expect(button("Create version")).toBeEnabled();
+    const barPlan = (await local()).plan;
+    const changedLabels = chart.chords.map((label, i) => i === 1 ? changedChord : label);
+    expect(barPlan.recipe).toEqual({...swingRecipe, harmony: {...chart, chords: changedLabels}});
+    expect(barPlan.basisRecordingId).toBe(harmonized.id);
+    expect(plannerRequests.length).toBe(beforeBarControl);
+    const correctedChart = await create(15);
+    expect(correctedChart.localRecipe).toEqual(barPlan.recipe);
+    expect(correctedChart.sha256).not.toBe(harmonized.sha256);
+    await useVersion(correctedChart);
+    const undoBarPlan = await interpret(`edit: set bar 2 to ${originalChord ?? "rest"}`);
+    expect(undoBarPlan.basisRecordingId).toBe(correctedChart.id);
+    expect(undoBarPlan.recipe).toEqual(chartPlan.recipe);
+    const undoBar = await create(16);
+    expect(undoBar.localRecipe).toEqual(chartPlan.recipe);
+    expect(undoBar.sha256).toBe(harmonized.sha256);
+    await useVersion(undoBar);
+    const removeChartPlan = await interpret("edit: remove chords");
+    expect(removeChartPlan.basisRecordingId).toBe(undoBar.id);
+    expect(removeChartPlan.recipe).toEqual(neutral.localRecipe);
+    const removedChart = await create(17);
+    expect(removedChart.localRecipe).toEqual(neutral.localRecipe);
+    expect(removedChart.sha256).toBe(neutral.sha256);
     expect((await exploration()).original.sha256).toBe(source.sha256);
-    extraPlans.push(performancePlan, soloPlan, swingPlan, straightPlan, returnPlan, brightPlan, warmPlan, neutralPlan);
+    extraPlans.push(performancePlan, soloPlan, swingPlan, straightPlan, returnPlan, brightPlan, warmPlan,
+      neutralPlan, chartPlan, barPlan, undoBarPlan, removeChartPlan);
   }
   expect(errors).toEqual([]);
   expect(external).toEqual([]);
@@ -850,6 +913,7 @@ try {
             "manual mix restoration is byte-identical; a newer melody revision is disclosed before creation",
             "recorded lead with direct swing drums, guided straight drums, and exact restoration on a 120 BPM pickup grid",
             "natural bright and neutral tone phrases and direct warm adjustment preserve the grid; resetting restores the served WAV exactly",
+            "actual confirmed-note chord suggestion, direct one-bar correction, exact restoration and complete chart removal",
           ] : []),
           "desktop and 390/320 px layouts; mobile refinement controls",
           "no unexpected browser errors or external browser requests",

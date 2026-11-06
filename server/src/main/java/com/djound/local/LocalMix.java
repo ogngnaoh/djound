@@ -7,7 +7,7 @@ import java.util.*;
 
 /** Sparse mixer settings embedded in the immutable arrangement recipe. */
 final class LocalMix {
-    private static final List<String> TRACKS = List.of("lead", "bass", "drums");
+    private static final List<String> TRACKS = List.of("lead", "bass", "drums", "chords");
     private static final Set<String> CONTROLS = Set.of("gainDb", "pan", "muted");
     private static final Set<String> CONTROLS_WITH_TONE = Set.of("gainDb", "pan", "muted", "tone");
     private static final Set<String> TONES = Set.of("neutral", "warm", "bright");
@@ -17,7 +17,7 @@ final class LocalMix {
     static Map<String, Object> canonical(Map<String, Object> recipe) {
         if (!recipe.containsKey("mix")) return Map.of();
         if (!(recipe.get("mix") instanceof Map<?, ?> mix) || !TRACKS.containsAll(mix.keySet()))
-            throw invalid("Use mixer settings only for lead, bass and drums.");
+            throw invalid("Use mixer settings only for lead, bass, drums and chords.");
         Map<String, Object> strips = new LinkedHashMap<>();
         boolean audible = false;
         for (String track : TRACKS) {
@@ -26,7 +26,8 @@ final class LocalMix {
                 audible |= active;
                 continue;
             }
-            if (!active) throw invalid("Enable " + track + " before changing its mix.");
+            if (!active)
+                throw invalid("The " + track + " track must be active before changing its mix.");
             if (!(mix.get(track) instanceof Map<?, ?> strip)
                     || !(strip.keySet().equals(CONTROLS)
                             || strip.keySet().equals(CONTROLS_WITH_TONE))
@@ -59,7 +60,14 @@ final class LocalMix {
     }
 
     private static boolean active(Map<String, Object> recipe, String track) {
-        return track.equals("lead") || Boolean.TRUE.equals(recipe.get(track));
+        return switch (track) {
+            case "lead" -> true;
+            case "chords" -> LocalHarmony.sounds(recipe);
+            case "bass" ->
+                    Boolean.TRUE.equals(recipe.get("bass"))
+                            && (!recipe.containsKey("harmony") || LocalHarmony.sounds(recipe));
+            default -> Boolean.TRUE.equals(recipe.get(track));
+        };
     }
 
     static String describe(Map<String, Object> recipe, Map<String, Object> previous) {

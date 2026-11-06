@@ -24,7 +24,8 @@ def main():
     try:
         if operation == 'plan':
             from planner import plan
-            fields = plan(request.get('prompt'), request.get('parentRecipe'), output)
+            fields = plan(request.get('prompt'), request.get('parentRecipe'), output,
+                          notes=request.get('notes'), duration=request.get('duration'))
             if 'duration' in request:
                 fields['recipe'] = recipe(fields['recipe'], request['duration'])
         else:
@@ -34,7 +35,7 @@ def main():
             else:
                 duration = request['duration']
                 validated = notes(request['notes'], duration)
-                specification = DEFAULT_RECIPE if operation == 'preview' else recipe(request['recipe'])
+                specification = DEFAULT_RECIPE if operation == 'preview' else recipe(request['recipe'], duration)
                 source = (inside(request['sourceAudio'], data_root(), True)
                           if specification['instrument'] == 'recorded' else None)
                 fields = render(validated, duration, specification, output, source=source, source_sha=request.get('sourceSha256'))

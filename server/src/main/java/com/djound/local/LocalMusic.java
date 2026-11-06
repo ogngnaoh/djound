@@ -368,8 +368,9 @@ public class LocalMusic {
         payload.put("operation", "plan");
         payload.put("prompt", command.text());
         var inherited = basisRecipe(basis);
-        validateDownbeat(inherited, confirmed.durationSeconds());
+        validateArrangementTiming(inherited, confirmed.durationSeconds());
         payload.put("parentRecipe", inherited);
+        payload.put("notes", confirmed.notes());
         payload.put("duration", confirmed.durationSeconds());
         payload.put("draftRevision", command.expectedDraftRevision());
         payload.put("basisRecordingId", basis);
@@ -526,7 +527,7 @@ public class LocalMusic {
                                             null,
                                             id),
                                     parent);
-                    validateDownbeat(recipe, confirmed.durationSeconds());
+                    validateArrangementTiming(recipe, confirmed.durationSeconds());
                     if (recipe.equals(parent.recipe())) return parent;
                     Map<String, Object> provenance = new LinkedHashMap<>(parent.model());
                     String originalRecipeKey =
@@ -572,6 +573,7 @@ public class LocalMusic {
                                     "Your arrangement choices. The confirmed melody notes stay"
                                             + " unchanged."
                                             + grooveDescription(recipe, parent.recipe())
+                                            + LocalHarmony.describe(recipe, parent.recipe())
                                             + LocalMix.describe(recipe, parent.recipe()),
                                     write(
                                             List.of(
@@ -603,7 +605,7 @@ public class LocalMusic {
                     "Preview and confirm the proposed changes before creating a version.");
         Plan p = plan(command.localPlanId());
         var confirmed = requirePlanNotes(explorationId, command, p);
-        validateDownbeat(p.recipe(), confirmed.durationSeconds());
+        validateArrangementTiming(p.recipe(), confirmed.durationSeconds());
         return p;
     }
 
@@ -650,7 +652,7 @@ public class LocalMusic {
                         .stream()
                         .findFirst()
                         .orElseThrow(() -> problem("PLAN_CHANGED", "The reviewed melody and recording do not match."));
-        validateDownbeat(p.recipe(), ((Number) source.get("duration_seconds")).doubleValue());
+        validateArrangementTiming(p.recipe(), ((Number) source.get("duration_seconds")).doubleValue());
         Map<String, Object> request = new LinkedHashMap<>();
         request.put("schemaVersion", 1);
         request.put("operation", "render");
@@ -691,6 +693,7 @@ public class LocalMusic {
                 + recipe.get("bpm")
                 + " BPM backing pulse."
                 + grooveDescription(recipe, plan.basisRecipe())
+                + LocalHarmony.describe(recipe, plan.basisRecipe())
                 + LocalMix.describe(recipe, plan.basisRecipe());
     }
 
@@ -844,7 +847,7 @@ public class LocalMusic {
                                                 + " Review it and try again.");
                             Map<String, Object> recipe =
                                     validateRecipe(map(result.path("recipe").toString()));
-                            validateDownbeat(recipe, confirmed.durationSeconds());
+                            validateArrangementTiming(recipe, confirmed.durationSeconds());
                             db.sql(
                                             "INSERT INTO"
                                                 + " local_plan(id,exploration_id,source_recording_id,source_revision,note_revision,draft_revision,basis_recording_id,submitted_text,recipe_json,basis_recipe_json,summary,warnings_json,can_generate,model_json,preparation_job_id)"
@@ -951,6 +954,7 @@ public class LocalMusic {
         Map<String, Object> r = new LinkedHashMap<>(input == null ? Map.of() : input);
         r.remove("mix");
         Object grid = r.remove("groove");
+        Object harmony = r.remove("harmony");
         if (!r.keySet()
                         .equals(
                                 Set.of(
@@ -979,7 +983,8 @@ public class LocalMusic {
                     || !Set.of("swing_ride", "four_on_the_floor")
                             .contains(String.valueOf(fields.get("pattern")))
                     || !(fields.get("downbeatMs") instanceof Integer firstBeat)
-                    || firstBeat < 0)
+                    || firstBeat < 0
+                    || firstBeat > 11990)
                 throw problem(
                         "PLAN_INVALID",
                         "Choose a supported drum pattern and a first beat in milliseconds.");
@@ -987,14 +992,15 @@ public class LocalMusic {
             groove.put("pattern", fields.get("pattern"));
             groove.put("downbeatMs", firstBeat);
             r.put("groove", groove);
-            validateDownbeat(r, 12);
         }
+        if (input.containsKey("harmony")) r.put("harmony", LocalHarmony.canonical(harmony));
         var mix = LocalMix.canonical(input);
         if (!mix.isEmpty()) r.put("mix", mix);
         return r;
     }
 
-    private static void validateDownbeat(Map<String, Object> recipe, double seconds) {
+    private static void validateArrangementTiming(Map<String, Object> recipe, double seconds) {
+        LocalHarmony.validateTiming(recipe, seconds);
         if (recipe.get("groove") instanceof Map<?, ?> grid
                 && (Integer) grid.get("downbeatMs") + 10L > seconds * 1000 + 1e-7)
             throw problem(

@@ -795,6 +795,21 @@ components:
         pan: { type: number, minimum: -1, maximum: 1, description: Left to right. Zero is centered. }
         muted: { type: boolean }
         tone: { type: string, enum: [neutral, warm, bright], description: A bounded two-shelf EQ on this dry track. Neutral or omitted bypasses the EQ. }
+    LocalHarmony:
+      type: object
+      additionalProperties: false
+      required: [bpm, downbeatMs, chords]
+      description: A reviewed chord chart on its own 4/4 grid. Each bar starting inside the clip has one chord or an explicit rest.
+      properties:
+        bpm: { type: integer, minimum: 40, maximum: 200 }
+        downbeatMs: { type: integer, minimum: 0, maximum: 11990, description: Leave at least 10 ms after the first beat. }
+        chords:
+          type: array
+          minItems: 1
+          maxItems: 10
+          items:
+            type: [string, 'null']
+            enum: [C, Cm, Db, Dbm, D, Dm, Eb, Ebm, E, Em, F, Fm, 'F#', 'F#m', G, Gm, Ab, Abm, A, Am, Bb, Bbm, B, Bm, null]
     LocalRecipe:
       type: object
       if: { not: { required: [groove] } }
@@ -815,6 +830,7 @@ components:
           properties:
             pattern: { type: string, enum: [swing_ride, four_on_the_floor] }
             downbeatMs: { type: integer, minimum: 0, maximum: 11990, description: "First backing beat in milliseconds. Leave at least 10 ms before the end of the clip." }
+        harmony: { $ref: '#/components/schemas/LocalHarmony' }
         mix:
           type: object
           additionalProperties: false
@@ -823,6 +839,7 @@ components:
             lead: { $ref: '#/components/schemas/LocalMixStrip' }
             bass: { $ref: '#/components/schemas/LocalMixStrip' }
             drums: { $ref: '#/components/schemas/LocalMixStrip' }
+            chords: { $ref: '#/components/schemas/LocalMixStrip' }
     LocalPlan:
       type: object
       required: [id, noteRevision, sourceRevision, draftRevision, text, basisRecordingId, recipe, basisRecipe, summary, canGenerate, warnings, model]
