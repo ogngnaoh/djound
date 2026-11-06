@@ -1,4 +1,5 @@
 import unittest
+from itertools import permutations
 
 from common import DEFAULT_RECIPE, EngineError, recipe
 from edit_commands import guided_plan
@@ -7,6 +8,31 @@ from planner import slot_patch
 
 
 class DrumGridTests(unittest.TestCase):
+    def test_explicit_drums_and_pattern_compose_in_either_order(self):
+        pattern = 'use swing ride at 120 bpm from 710 ms'
+        for present in (False, True):
+            parent = {**DEFAULT_RECIPE, 'drums': present}
+            expected = {**parent, 'drums': True, 'bpm': 120,
+                        'groove': {'pattern': 'swing_ride', 'downbeatMs': 710}}
+            for clauses in permutations(('add drums', pattern)):
+                with self.subTest(present=present, clauses=clauses):
+                    self.assertEqual(guided_plan('edit: ' + '; '.join(clauses), parent)['recipe'], expected)
+            for clauses in (('add drums', pattern, 'add drums'), (pattern, pattern),
+                            ('remove drums', pattern), (pattern, 'remove drums')):
+                with self.subTest(present=present, clauses=clauses), self.assertRaises(EngineError) as error:
+                    guided_plan('edit: ' + '; '.join(clauses), parent)
+                self.assertEqual(error.exception.code, 'LOCAL_UNSUPPORTED_REQUEST')
+
+    def test_previous_drum_pattern_is_retained_while_inactive_and_can_be_reset(self):
+        parent = {**DEFAULT_RECIPE, 'drums': True, 'bpm': 136,
+                  'groove': {'pattern': 'four_on_the_floor', 'downbeatMs': 100}}
+        inactive = guided_plan('edit: remove drums', parent)['recipe']
+        self.assertEqual(inactive, {**parent, 'drums': False})
+        self.assertEqual(guided_plan('edit: add drums', inactive)['recipe'], parent)
+        for clauses in permutations(('remove drums', 'restore the original pulse')):
+            with self.subTest(clauses=clauses):
+                self.assertEqual(guided_plan('edit: ' + '; '.join(clauses), parent)['recipe'], DEFAULT_RECIPE)
+
     def test_guided_switch_preserves_other_settings_and_restores_the_pulse(self):
         parent = {**DEFAULT_RECIPE, 'drums': True, 'mix': {'lead': {'gainDb': -3, 'pan': .5, 'muted': False}}}
         swing = guided_plan('edit: use swing ride at 120 bpm from 710 ms', parent)['recipe']

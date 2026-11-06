@@ -131,14 +131,16 @@ def guided_plan(prompt, parent):
             clause = ' '.join(raw.lower().split())
             grid = GROOVE.fullmatch(clause)
             if grid or clause == 'restore the original pulse':
-                if ('groove', None) in assigned:
+                if any(field == 'groove' for _, field in assigned):
                     raise unsupported('Choose one drum pattern per edit.')
-                assigned.add(('groove', None))
                 if grid:
-                    if not state['drums'] or ('drums', None) not in assigned:
-                        apply(Assignment('drums', True), state, strips, assigned)
-                    state.update(bpm=int(grid[2]), groove={'pattern': grid[1].replace(' ', '_'), 'downbeatMs': int(grid[3])})
+                    if (None, 'drums') in assigned and not state['drums']:
+                        raise unsupported('Choose between selecting a drum pattern and removing drums.')
+                    # A pattern activates its track. Only an explicit add/remove owns the membership field.
+                    assigned.add(('drums', 'groove'))
+                    state.update(drums=True, bpm=int(grid[2]), groove={'pattern': grid[1].replace(' ', '_'), 'downbeatMs': int(grid[3])})
                 else:
+                    assigned.add((None, 'groove'))
                     state.pop('groove', None)
                     state['bpm'] = 100
             else:
