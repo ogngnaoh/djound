@@ -550,7 +550,7 @@ components:
         provisioned: { type: boolean }
     Recording:
       type: object
-      required: [id, explorationId, kind, title, fileName, contentType, byteSize, durationMs, sampleRate, channels, codec, sha256, mediaUrl, provenance, kept, direction, requestId, attemptId, createdAt, localRecipe]
+      required: [id, explorationId, kind, title, fileName, contentType, byteSize, durationMs, sampleRate, channels, codec, sha256, mediaUrl, provenance, kept, direction, requestId, attemptId, createdAt, localRecipe, localNoteRevision]
       properties:
         id: { type: string }
         explorationId: { type: string }
@@ -567,6 +567,9 @@ components:
         mediaUrl: { type: string }
         provenance: { type: string, enum: [ORIGINAL, FIXTURE, LIVE, LOCAL] }
         kept: { type: boolean }
+        localNoteRevision:
+          description: The confirmed melody revision used to render this local version. Null for other recordings.
+          type: [integer, "null"]
         localRecipe:
           description: Exact immutable reviewed arrangement used for this LOCAL rendition. Null for originals and recordings without a local plan; never inferred from direction text.
           oneOf:
@@ -783,6 +786,14 @@ components:
         outcomeCode: { type: [string, 'null'] }
         detail: { type: [string, 'null'] }
         updatedAt: { type: string, format: date-time }
+    LocalMixStrip:
+      type: object
+      additionalProperties: false
+      required: [gainDb, pan, muted]
+      properties:
+        gainDb: { type: number, minimum: -60, maximum: 12 }
+        pan: { type: number, minimum: -1, maximum: 1, description: Left to right. Zero is centered. }
+        muted: { type: boolean }
     LocalRecipe:
       type: object
       additionalProperties: false
@@ -794,6 +805,14 @@ components:
         density: { type: string, enum: [sparse, steady] }
         backingVolume: { type: string, enum: [soft, normal] }
         bpm: { type: integer, const: 100, description: Backing-only pulse; does not retime melody notes. }
+        mix:
+          type: object
+          additionalProperties: false
+          description: Complete strip settings for active tracks only. Omitted tracks play at 0 dB, centered and unmuted. At least one active track must be unmuted.
+          properties:
+            lead: { $ref: '#/components/schemas/LocalMixStrip' }
+            bass: { $ref: '#/components/schemas/LocalMixStrip' }
+            drums: { $ref: '#/components/schemas/LocalMixStrip' }
     LocalPlan:
       type: object
       required: [id, noteRevision, sourceRevision, draftRevision, text, basisRecordingId, recipe, basisRecipe, summary, canGenerate, warnings, model]

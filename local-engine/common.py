@@ -53,8 +53,45 @@ def inside(path, root, must_exist=False):
     return candidate
 
 
+STEM_NAMES = ('lead', 'bass', 'drums')
+UNITY_STRIP = {'gainDb': 0, 'pan': 0, 'muted': False}
+
+
+def arrangement_settings(value):
+    """Return the original six model-visible fields in their qualified token order."""
+    return {key: value[key] for key in DEFAULT_RECIPE}
+
+
+def active_stems(arrangement):
+    return tuple(name for name in STEM_NAMES if name == 'lead' or arrangement[name])
+
+
+def validate_mix(value, available):
+    if not isinstance(value, dict) or set(value) - set(available):
+        raise EngineError('LOCAL_INVALID_RECIPE', 'Adjust the mix only for active tracks in this arrangement.')
+    result = {}
+    for name in available:
+        if name not in value:
+            continue
+        strip = value[name]
+        if not isinstance(strip, dict) or strip.keys() != UNITY_STRIP.keys() or type(strip['muted']) is not bool:
+            raise EngineError('LOCAL_INVALID_RECIPE', 'Each track needs gain in dB, stereo pan and a mute setting.')
+        normalized = {}
+        for field, low, high in (('gainDb', -60, 12), ('pan', -1, 1)):
+            number = strip[field]
+            if type(number) not in (int, float) or not low <= number <= high:
+                raise EngineError('LOCAL_INVALID_RECIPE', f'{field} must be a finite number from {low} to {high}.')
+            normalized[field] = int(number) if number == int(number) else number
+        normalized['muted'] = strip['muted']
+        if normalized != UNITY_STRIP:
+            result[name] = normalized
+    if all(result.get(name, UNITY_STRIP)['muted'] for name in available):
+        raise EngineError('LOCAL_INVALID_RECIPE', 'Unmute at least one active track before creating a version.')
+    return result
+
+
 def recipe(value):
-    if not isinstance(value, dict) or set(value) != set(DEFAULT_RECIPE):
+    if not isinstance(value, dict) or (set(value) - {'mix'}) != set(DEFAULT_RECIPE):
         raise EngineError('LOCAL_INVALID_RECIPE', 'The proposed arrangement is incomplete or has unsupported fields.')
     if value['instrument'] not in ('piano', 'electric_piano', 'guitar'):
         raise EngineError('LOCAL_INVALID_RECIPE', 'Choose piano, electric piano, or guitar.')
@@ -66,7 +103,12 @@ def recipe(value):
         raise EngineError('LOCAL_INVALID_RECIPE', 'This version uses a fixed 100 BPM backing; melody timing stays unchanged.')
     # Equivalent Java/JSON maps may arrive in different key orders. The model
     # consumes tokens, not an abstract map: use one stable prompt representation.
-    return {key: value[key] for key in DEFAULT_RECIPE}
+    result = arrangement_settings(value)
+    if 'mix' in value:
+        strips = validate_mix(value['mix'], active_stems(result))
+        if strips:
+            result['mix'] = strips
+    return result
 
 
 def notes(value, duration):

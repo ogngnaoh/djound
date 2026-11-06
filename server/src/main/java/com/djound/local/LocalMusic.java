@@ -409,14 +409,11 @@ public class LocalMusic {
                                     command.text(),
                                     write(payload.get("parentRecipe")),
                                     write(payload.get("parentRecipe")),
-                                    "Choose your arrangement. These settings start from the"
-                                            + " selected version; your words have not been"
-                                            + " interpreted.",
+                                    "These arrangement settings come from the selected version.",
                                     write(
                                             List.of(
-                                                    "Direct controls: review and save your choices"
-                                                        + " before creating. No language model was"
-                                                        + " called.")),
+                                                    "Direct controls use your selected settings. No"
+                                                        + " language model was called.")),
                                     write(Map.of("origin", "USER_DEFINED")))
                             .update();
                     return plan(planId);
@@ -489,7 +486,7 @@ public class LocalMusic {
             throw problem(
                     "INVALID_REQUEST",
                     "Provide the current source, melody, draft and arrangement controls.");
-        validateRecipe(command.recipe());
+        var recipe = validateRecipe(command.recipe());
         return tx.execute(
                 status -> {
                     guard();
@@ -519,13 +516,18 @@ public class LocalMusic {
                                     command.expectedDraftRevision(),
                                     null,
                                     id));
+                    if (recipe.equals(parent.recipe())) return parent;
                     Map<String, Object> provenance = new LinkedHashMap<>(parent.model());
-                    boolean manual = "USER_DEFINED".equals(parent.model().get("origin"));
+                    String originalRecipeKey =
+                            switch (String.valueOf(parent.model().get("origin"))) {
+                                case "USER_DEFINED" -> "initialRecipe";
+                                case "GUIDED_COMMANDS" -> "commandRecipe";
+                                default -> "modelSuggestedRecipe";
+                            };
                     Object originalId = parent.id(), originalRecipe = parent.recipe();
                     if (parent.model().get("correction") instanceof Map<?, ?> previous) {
                         originalId = previous.get("originalPlanId");
-                        originalRecipe =
-                                previous.get(manual ? "initialRecipe" : "modelSuggestedRecipe");
+                        originalRecipe = previous.get(originalRecipeKey);
                     }
                     provenance.put(
                             "correction",
@@ -536,7 +538,7 @@ public class LocalMusic {
                                     parent.id(),
                                     "originalPlanId",
                                     originalId,
-                                    manual ? "initialRecipe" : "modelSuggestedRecipe",
+                                    originalRecipeKey,
                                     originalRecipe,
                                     "editedFromRecipe",
                                     parent.recipe()));
@@ -554,19 +556,26 @@ public class LocalMusic {
                                     parent.draftRevision(),
                                     parent.basisRecordingId(),
                                     parent.text(),
-                                    write(command.recipe()),
+                                    write(recipe),
                                     write(parent.basisRecipe()),
                                     "Your arrangement choices. The confirmed melody notes stay"
-                                            + " unchanged.",
+                                            + " unchanged."
+                                            + LocalMix.describe(recipe, parent.recipe()),
                                     write(
                                             List.of(
-                                                    manual
-                                                            ? "Direct arrangement choices; no"
-                                                                    + " language model was called."
-                                                            : "You edited these controls; they may"
-                                                                    + " differ from the model's"
+                                                    switch (originalRecipeKey) {
+                                                        case "initialRecipe" ->
+                                                                "Direct arrangement choices; no"
+                                                                    + " language model was called.";
+                                                        case "commandRecipe" ->
+                                                                "You edited the guided command's"
+                                                                    + " settings before rendering.";
+                                                        default ->
+                                                                "You edited these controls; they"
+                                                                    + " may differ from the model's"
                                                                     + " interpretation of your"
-                                                                    + " words.")),
+                                                                    + " words.";
+                                                    })),
                                     write(provenance))
                             .update();
                     return plan(corrected);
@@ -651,7 +660,8 @@ public class LocalMusic {
                 + recipe.get("backingVolume")
                 + " backing; "
                 + recipe.get("bpm")
-                + " BPM backing pulse.";
+                + " BPM backing pulse."
+                + LocalMix.describe(recipe, plan.basisRecipe());
     }
 
     public String frozenInstructions(Plan plan) {
@@ -797,8 +807,8 @@ public class LocalMusic {
                                         "STALE_DRAFT",
                                         "The direction changed while it was being interpreted."
                                                 + " Review it and try again.");
-                            Map<String, Object> recipe = map(result.path("recipe").toString());
-                            validateRecipe(recipe);
+                            Map<String, Object> recipe =
+                                    validateRecipe(map(result.path("recipe").toString()));
                             db.sql(
                                             "INSERT INTO"
                                                 + " local_plan(id,exploration_id,source_recording_id,source_revision,note_revision,draft_revision,basis_recording_id,submitted_text,recipe_json,basis_recipe_json,summary,warnings_json,can_generate,model_json,preparation_job_id)"
@@ -900,9 +910,11 @@ public class LocalMusic {
         }
     }
 
-    public static void validateRecipe(Map<String, Object> r) {
-        if (r == null
-                || !r.keySet()
+    /** Validate a complete proposal and return its canonical representation for persistence. */
+    public static Map<String, Object> validateRecipe(Map<String, Object> input) {
+        Map<String, Object> r = new LinkedHashMap<>(input == null ? Map.of() : input);
+        r.remove("mix");
+        if (!r.keySet()
                         .equals(
                                 Set.of(
                                         "instrument",
@@ -922,6 +934,9 @@ public class LocalMusic {
             throw problem(
                     "PLAN_INVALID",
                     "The proposed changes are outside the supported instrument/backing controls.");
+        var mix = LocalMix.canonical(input);
+        if (!mix.isEmpty()) r.put("mix", mix);
+        return r;
     }
 
     private List<Note> readNotes(String value) {

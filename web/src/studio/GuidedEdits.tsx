@@ -1,0 +1,119 @@
+const GROUPS = [
+  { label: "Lead", edits: ["use piano", "use electric piano", "use guitar"] },
+  {
+    label: "Backing parts",
+    edits: ["add bass", "remove bass", "add drums", "remove drums"],
+  },
+  {
+    label: "Backing pattern and volume",
+    edits: [
+      "make the backing sparse",
+      "make the backing steady",
+      "make the backing soft",
+      "make the backing normal",
+    ],
+  },
+  ...["lead", "bass", "drums"].map((stem) => ({
+    label: `Mix ${stem}`,
+    edits: [
+      `lower ${stem} by 3 dB`,
+      `raise ${stem} by 3 dB`,
+      `set ${stem} gain to 0 dB`,
+      `pan ${stem} 50% left`,
+      `pan ${stem} 50% right`,
+      `center ${stem}`,
+      `mute ${stem}`,
+      `unmute ${stem}`,
+    ],
+  })),
+];
+
+export const isGuided = (text: string) => /^edit:/i.test(text.trim());
+
+export function GuidedEdits({
+  text,
+  alternate,
+  onChange,
+  onSwitch,
+  disabled,
+}: {
+  text: string;
+  alternate: string;
+  onChange: (value: string) => void;
+  onSwitch: (value: string) => void;
+  disabled: boolean;
+}) {
+  const clean = text.trim();
+  const guided = isGuided(text);
+  return (
+    <details className="guided-edits">
+      <summary>Guided edits</summary>
+      {clean && !guided ? (
+        <>
+          <p>Keep your wording for reference while you choose commands.</p>
+          <button
+            type="button"
+            className="text-action"
+            disabled={disabled}
+            onClick={() => onSwitch(alternate || "edit: ")}
+          >
+            {alternate ? "Resume guided draft" : "Compose guided edit"}
+          </button>
+        </>
+      ) : (
+        <>
+          {guided && alternate && (
+            <>
+              <p className="small">
+                Original wording
+                <br />
+                <span
+                  style={{ overflowWrap: "anywhere", whiteSpace: "pre-wrap" }}
+                >
+                  {alternate}
+                </span>
+              </p>
+              <button
+                type="button"
+                className="text-action"
+                disabled={disabled}
+                onClick={() => onSwitch(alternate)}
+              >
+                Restore original wording
+              </button>
+            </>
+          )}
+          <label>
+            Add a command
+            <select
+              aria-label="Add a guided edit"
+              disabled={disabled}
+              value=""
+              onChange={(e) => {
+                const base = guided
+                  ? clean.slice(5).trim().replace(/;\s*$/, "").trim()
+                  : "";
+                onChange(`edit: ${base ? base + "; " : ""}${e.target.value}`);
+              }}
+            >
+              <option value="" disabled>
+                Choose an edit
+              </option>
+              {GROUPS.map(({ label, edits }) => (
+                <optgroup key={label} label={label}>
+                  {edits.map((edit) => (
+                    <option key={edit}>{edit}</option>
+                  ))}
+                </optgroup>
+              ))}
+            </select>
+          </label>
+          <p>
+            Combine commands above and edit the numbers before review. Add a
+            backing track before mixing it.
+          </p>
+        </>
+      )}
+    </details>
+  );
+}

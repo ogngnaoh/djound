@@ -309,6 +309,7 @@ try {
   await shot("02-reviewed-text");
   const first = await create(1);
   expect(first.localRecipe).toEqual(firstPlan.recipe);
+  expect(first.localNoteRevision).toBe(firstPlan.noteRevision);
   await shot("03-first-result");
   await useVersion(first);
   const secondPlan = await interpret(
@@ -569,6 +570,89 @@ try {
   await page.reload();
   await expect(button("Inspect Version 2")).toBeVisible();
   expect(await page.locator("audio").evaluate((a) => a.paused)).toBe(true);
+  const extraPlans = [];
+  if (process.env.DJOUND_VERIFY_MIX !== "0") {
+    await useVersion(first);
+    const wording = "Let the drums sit this one out and move the bass a bit left.";
+    await direction().fill(wording);
+    const guided = page.locator("details.guided-edits");
+    await guided.locator("summary").click();
+    const reviewCount = plannerRequests.length;
+    const renderCount = submissions.length;
+    await button("Compose guided edit").click();
+    await expect(guided.getByText(wording, {exact: true})).toBeVisible();
+    await expect(button("Review changes")).toBeDisabled();
+    const picker = page.getByLabel("Add a guided edit");
+    await picker.selectOption("lower bass by 3 dB");
+    await page.reload();
+    await guided.locator("summary").click();
+    await expect(guided.getByText(wording, {exact: true})).toBeVisible();
+    await expect(direction()).toHaveValue("edit: lower bass by 3 dB");
+    await button("Restore original wording").click();
+    await expect(direction()).toHaveValue(wording);
+    await button("Resume guided draft").click();
+    await expect(direction()).toHaveValue("edit: lower bass by 3 dB");
+    expect(plannerRequests.length).toBe(reviewCount);
+    expect(submissions.length).toBe(renderCount);
+    await picker.selectOption("pan bass 50% left");
+    await picker.selectOption("mute drums");
+    await expect(direction()).toHaveValue("edit: lower bass by 3 dB; pan bass 50% left; mute drums");
+    const mixPlan = await interpret((await direction().inputValue()).replace("3 dB","6 dB"));
+    expect(mixPlan.model).toMatchObject({origin: "GUIDED_COMMANDS", inferenceAttempts: 0});
+    expect(mixPlan.recipe.mix).toEqual({
+      bass: {gainDb:-6, pan:-0.5, muted:false},
+      drums: {gainDb:0, pan:0, muted:true},
+    });
+    for (const change of ["Bass gain","Bass pan","Drums playback"]) {
+      await expect(page.locator(".change-row").filter({hasText:change})).toBeVisible();
+    }
+    await shot("11-guided-mix-review");
+    const mixed = await create(4);
+    expect(mixed.sha256).not.toBe(first.sha256);
+    await useVersion(mixed);
+    await direction().fill("edit: raise bass by 3 dB; reverse the melody");
+    await button("Review changes").click();
+    await expect(page.getByRole("alert")).toContainText(/command|guided|edit:/i, {timeout:20000});
+    await expect(button("Create version")).toHaveCount(0);
+    expect((await exploration()).renditions).toHaveLength(4);
+
+    const unmutePlan = await interpret("edit: unmute drums");
+    await button("Adjust arrangement").click();
+    await page.getByText("Track mix", {exact:true}).click();
+    await page.getByLabel("Mix track").selectOption("bass");
+    await expect(page.getByLabel("Track gain")).toHaveValue("-6");
+    await expect(page.getByLabel("Track pan")).toHaveValue("-50");
+    await shot("12-bass-mix-controls");
+    await button("Reset bass mix").click();
+    await page.getByLabel("Mix track").selectOption("drums");
+    await expect(page.getByLabel("Mute drums")).not.toBeChecked();
+    await button("Review arrangement").click();
+    await expect(button("Create version")).toBeVisible();
+    const restoredPlan = (await local()).plan;
+    expect(restoredPlan.recipe).toEqual(firstPlan.recipe);
+    expect(restoredPlan.model.origin).toBe("GUIDED_COMMANDS");
+    expect(restoredPlan.model.correction.originalPlanId).toBe(unmutePlan.id);
+    expect(restoredPlan.model.correction.commandRecipe).toEqual(unmutePlan.recipe);
+    const restored = await create(5);
+    expect(restored.sha256).toBe(first.sha256);
+    extraPlans.push(mixPlan, restoredPlan);
+
+    // A newer confirmed melody can coexist with the selected version's older notes.
+    const reconfirmed = await context.request.put(
+      `${base}/api/explorations/${id}/local/notes`,
+      { data: { expectedSourceRevision: confirmed.sourceRevision,
+        expectedNoteRevision: confirmed.revision, notes: confirmed.notes, confirm: true } },
+    );
+    expect(reconfirmed.status()).toBe(200);
+    const newMelody = await reconfirmed.json();
+    expect(newMelody.revision).toBeGreaterThan(first.localNoteRevision);
+    await page.reload();
+    await useVersion(first);
+    await interpret("edit: pan lead 0.001% left");
+    await expect(page.locator(".change-row").filter({hasText:"Lead pan"})).toContainText("0.001% left");
+    await expect(page.getByText(`This uses your current melody (revision ${newMelody.revision}).`, {exact:false})).toContainText(`Version 1 used revision ${first.localNoteRevision}`);
+    expect((await exploration()).renditions).toHaveLength(5);
+  }
   expect(errors).toEqual([]);
   expect(external).toEqual([]);
   const snapshot = await exploration();
@@ -580,12 +664,12 @@ try {
         explorationId: id,
         evidence,
         timings,
-        plans: [firstPlan, secondPlan, correctionProposal, correctedPlan],
+        plans: [firstPlan, secondPlan, correctionProposal, correctedPlan, ...extraPlans],
         snapshot,
         localSnapshot: await local(),
         acceptedKey: submissions[2].key,
         acceptedCommand: submissions[2].body,
-        attemptId: snapshot.latestAttempt.id,
+        attemptId: third.attemptId,
         ...(video
           ? {
               video: await video.path(),
@@ -605,6 +689,11 @@ try {
           "external draft revision invalidates visible approval; backend rejects stale plan",
           "engine readiness refresh disables and restores controls without reload or inference",
           "exact audio hashes, range media, original preservation",
+          ...(extraPlans.length ? [
+            "guided drafting preserves the original words and requires explicit review",
+            "compound track mix, visible strip changes, and atomic rejection of an unsupported clause",
+            "manual mix restoration is byte-identical; a newer melody revision is disclosed before creation",
+          ] : []),
           "desktop and 390/320 px layouts; mobile refinement controls",
           "no unexpected browser errors or external browser requests",
         ],

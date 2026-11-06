@@ -27,7 +27,8 @@ public final class Models {
             String requestId,
             String attemptId,
             Instant createdAt,
-            Map<String, Object> localRecipe) {}
+            Map<String, Object> localRecipe,
+            Long localNoteRevision) {}
 
     public record RecordingUpdate(Boolean kept) {}
 

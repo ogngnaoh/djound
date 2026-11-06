@@ -114,7 +114,11 @@ try {
     page.getByRole("heading", { name: "Proposed changes" }),
   ).toBeVisible();
   await shot("review");
-  await page.getByLabel("Proposed drums", { exact: true }).selectOption("on");
+  const proposedDrums = page.getByLabel("Proposed drums", { exact: true });
+  if (!(await proposedDrums.isVisible())) {
+    await page.getByText("Unchanged arrangement settings", { exact: true }).click();
+  }
+  await proposedDrums.selectOption("on");
   await expect(
     page.getByRole("button", { name: "Create version", exact: true }),
   ).toHaveCount(0);

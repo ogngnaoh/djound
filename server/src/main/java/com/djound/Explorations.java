@@ -21,7 +21,7 @@ import java.util.*;
 public class Explorations {
     private static final ObjectMapper JSON = new ObjectMapper();
     private static final String RECORDING_SELECT =
-            "SELECT r.*, p.recipe_json AS local_recipe_json FROM recording r "
+            "SELECT r.*, p.recipe_json AS local_recipe_json, p.note_revision AS local_note_revision FROM recording r "
                     + "LEFT JOIN generation_request q ON q.id=r.request_id "
                     + "LEFT JOIN local_plan p ON p.id=q.local_plan_id AND r.provenance='LOCAL' ";
     private final JdbcClient jdbc;
@@ -428,7 +428,7 @@ public class Explorations {
                                        ((SELECT active_attempt_id IS NULL FROM workspace WHERE id=1)
                                         AND NOT EXISTS(SELECT 1 FROM recording rendition
                                                        WHERE rendition.exploration_id=e.id AND rendition.kind='RENDITION'))
-                                        AS can_replace_source, original.*, NULL AS local_recipe_json
+                                        AS can_replace_source, original.*, NULL::bigint AS local_note_revision, NULL AS local_recipe_json
                                 FROM exploration e JOIN recording original ON original.id=e.original_id
                                 WHERE e.id=?
                                 """)
@@ -477,7 +477,7 @@ public class Explorations {
         var summaries =
                 jdbc.sql(
                                 """
-                                SELECT e.id AS exploration_key, e.title AS exploration_title, e.updated_at, original.*, NULL AS local_recipe_json,
+                                SELECT e.id AS exploration_key, e.title AS exploration_title, e.updated_at, original.*, NULL::bigint AS local_note_revision, NULL AS local_recipe_json,
                                        (SELECT COUNT(*) FROM recording result WHERE result.exploration_id=e.id AND result.kind='RENDITION') AS rendition_count
                                 FROM exploration e JOIN recording original ON original.id=e.original_id
                                 ORDER BY e.updated_at DESC,e.id
@@ -594,6 +594,7 @@ public class Explorations {
                 r.getString("request_id"),
                 r.getString("attempt_id"),
                 r.getTimestamp("created_at").toInstant(),
-                localRecipe(r.getString("local_recipe_json")));
+                localRecipe(r.getString("local_recipe_json")),
+                r.getObject("local_note_revision", Long.class));
     }
 }

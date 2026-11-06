@@ -542,6 +542,8 @@ export interface components {
             /** @enum {string} */
             provenance: "ORIGINAL" | "FIXTURE" | "LIVE" | "LOCAL";
             kept: boolean;
+            /** @description The confirmed melody revision used to render this local version. Null for other recordings. */
+            localNoteRevision: number | null;
             /** @description Exact immutable reviewed arrangement used for this LOCAL rendition. Null for originals and recordings without a local plan; never inferred from direction text. */
             localRecipe: components["schemas"]["LocalRecipe"] | null;
             direction: string | null;
@@ -722,6 +724,12 @@ export interface components {
             /** Format: date-time */
             updatedAt: string;
         };
+        LocalMixStrip: {
+            gainDb: number;
+            /** @description Left to right. Zero is centered. */
+            pan: number;
+            muted: boolean;
+        };
         LocalRecipe: {
             /** @enum {string} */
             instrument: "piano" | "electric_piano" | "guitar";
@@ -736,6 +744,12 @@ export interface components {
              * @constant
              */
             bpm: 100;
+            /** @description Complete strip settings for active tracks only. Omitted tracks play at 0 dB, centered and unmuted. At least one active track must be unmuted. */
+            mix?: {
+                lead?: components["schemas"]["LocalMixStrip"];
+                bass?: components["schemas"]["LocalMixStrip"];
+                drums?: components["schemas"]["LocalMixStrip"];
+            };
         };
         LocalPlan: {
             id: string;

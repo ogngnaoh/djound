@@ -3,7 +3,7 @@ from pathlib import Path
 import tempfile
 import unittest
 
-from common import DEFAULT_RECIPE, EngineError, inside, notes, recipe
+from common import DEFAULT_RECIPE, UNITY_STRIP, EngineError, arrangement_settings, inside, notes, recipe
 from planner import decode_plan, plan, slot_patch, validate_patch
 from stereo_scope import requests_stereo_change
 
@@ -22,6 +22,44 @@ class Contracts(unittest.TestCase):
         shuffled = dict(reversed(list(DEFAULT_RECIPE.items())))
         self.assertEqual(json.dumps(recipe(shuffled)), json.dumps(recipe(DEFAULT_RECIPE)))
         self.assertEqual(list(recipe(shuffled)), list(DEFAULT_RECIPE))
+
+    def test_mix_is_optional_canonical_and_hidden_from_arrangement_model(self):
+        parent = {**DEFAULT_RECIPE, 'bass': True}
+        for neutral in [{}, {'bass': dict(UNITY_STRIP, gainDb=-0.0)}]:
+            self.assertEqual(recipe(dict(parent, mix=neutral)), parent)
+        mixed = recipe(dict(parent, mix={'bass': dict(UNITY_STRIP, gainDb=-6.0),
+                                         'lead': UNITY_STRIP}))
+        self.assertEqual(mixed['mix'], {'bass': dict(UNITY_STRIP, gainDb=-6)})
+        self.assertEqual(json.dumps(arrangement_settings(mixed)), json.dumps(parent))
+
+    def test_invalid_stem_mix_is_rejected_atomically(self):
+        invalid = [None, [], {'vocal': UNITY_STRIP}, {'drums': UNITY_STRIP},
+                   {'lead': {'pan': .5}}, {'lead': dict(UNITY_STRIP, muted=1)},
+                   {'lead': dict(UNITY_STRIP, extra=0)}, {'lead': dict(UNITY_STRIP, gainDb=True)},
+                   {'lead': dict(UNITY_STRIP, pan=float('nan'))}, {'lead': dict(UNITY_STRIP, pan=1.1)},
+                   {'lead': dict(UNITY_STRIP, gainDb=-61)}, {'lead': dict(UNITY_STRIP, gainDb=13)},
+                   {'lead': dict(UNITY_STRIP, muted=True)}]
+        for strips in invalid:
+            with self.subTest(strips=strips), self.assertRaises(EngineError) as caught:
+                recipe(dict(DEFAULT_RECIPE, mix=strips))
+            self.assertEqual(caught.exception.code, 'LOCAL_INVALID_RECIPE')
+
+    def test_model_patch_inherits_only_still_active_strips(self):
+        lead = dict(UNITY_STRIP, pan=.25)
+        parent = recipe(dict(DEFAULT_RECIPE, bass=True, mix={'lead':lead, 'bass':dict(UNITY_STRIP, gainDb=-6)}))
+        value = {'supported':True, 'instrument':'guitar', 'bass':False, 'drums':True,
+                 'density':'KEEP', 'backingVolume':'KEEP'}
+        complete, _ = slot_patch(value, parent)
+        self.assertEqual(complete, dict(DEFAULT_RECIPE, instrument='guitar', drums=True, mix={'lead':lead}))
+        self.assertIn('bass', parent['mix'])
+        with self.assertRaises(EngineError):
+            slot_patch(dict(value, mix={'lead':UNITY_STRIP}), parent)
+        with self.assertRaises(EngineError):
+            validate_patch({'supported':True, 'changes':{'mix':{'lead':UNITY_STRIP}}, 'explanation':'Pan.'}, parent)
+        muted_lead = recipe(dict(DEFAULT_RECIPE, bass=True, mix={'lead':dict(UNITY_STRIP, muted=True)}))
+        with self.assertRaises(EngineError) as caught:
+            slot_patch(dict(value, drums=False), muted_lead)
+        self.assertIn('Unmute at least one', caught.exception.message)
 
     def test_slots_preserve_keep_and_normalize_only_exact_boolean_spellings(self):
         parent = {**DEFAULT_RECIPE, 'instrument': 'guitar', 'bass': True, 'drums': True}

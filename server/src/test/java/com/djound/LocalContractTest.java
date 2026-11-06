@@ -69,4 +69,67 @@ class LocalContractTest {
                 "PLAN_INVALID",
                 assertThrows(ApiProblem.class, () -> LocalMusic.validateRecipe(recipe)).code());
     }
+
+    @Test
+    void mixerAcceptsOnlyCompleteActiveFiniteStripsAndDropsUnitySettings() {
+        var recipe =
+                new HashMap<String, Object>(
+                        Map.of(
+                                "instrument",
+                                "piano",
+                                "bass",
+                                true,
+                                "drums",
+                                false,
+                                "density",
+                                "steady",
+                                "backingVolume",
+                                "normal",
+                                "bpm",
+                                100));
+        var neutral = Map.of("gainDb", -0.0, "pan", 0, "muted", false);
+        recipe.put("mix", Map.of("lead", neutral));
+        assertFalse(LocalMusic.validateRecipe(recipe).containsKey("mix"));
+
+        var lead = Map.of("gainDb", -60, "pan", -1, "muted", true);
+        var bass = Map.of("gainDb", 12, "pan", 1, "muted", false);
+        recipe.put("mix", Map.of("lead", lead, "bass", bass));
+        assertEquals(recipe, LocalMusic.validateRecipe(recipe));
+        for (Object invalid :
+                List.of(
+                        List.of(),
+                        Map.of("vocals", neutral),
+                        Map.of("drums", neutral),
+                        Map.of("lead", Map.of("gainDb", 0, "pan", 0)),
+                        Map.of("lead", Map.of("gainDb", 0, "pan", 0, "muted", false, "reverb", 1)),
+                        Map.of("lead", Map.of("gainDb", "0", "pan", 0, "muted", false)),
+                        Map.of("lead", Map.of("gainDb", -60.01, "pan", 0, "muted", false)),
+                        Map.of("lead", Map.of("gainDb", 12.01, "pan", 0, "muted", false)),
+                        Map.of("lead", Map.of("gainDb", Double.NaN, "pan", 0, "muted", false)),
+                        Map.of(
+                                "lead",
+                                Map.of(
+                                        "gainDb",
+                                        0,
+                                        "pan",
+                                        Double.POSITIVE_INFINITY,
+                                        "muted",
+                                        false)),
+                        Map.of("lead", Map.of("gainDb", 0, "pan", 1.01, "muted", false)),
+                        Map.of("lead", Map.of("gainDb", 0, "pan", 0, "muted", 0)),
+                        Map.of("lead", lead, "bass", lead))) {
+            recipe.put("mix", invalid);
+            assertEquals(
+                    "PLAN_INVALID",
+                    assertThrows(
+                                    ApiProblem.class,
+                                    () -> LocalMusic.validateRecipe(recipe),
+                                    invalid.toString())
+                            .code());
+        }
+        recipe.put("mix", null);
+        assertEquals(
+                "PLAN_INVALID",
+                assertThrows(ApiProblem.class, () -> LocalMusic.validateRecipe(recipe)).code());
+    }
 }

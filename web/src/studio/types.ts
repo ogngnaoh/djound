@@ -1,3 +1,5 @@
+import type { components } from "../api-schema";
+
 export type Mode = "prototype" | "backend";
 export type Scenario =
   | "normal"
@@ -7,6 +9,8 @@ export type Scenario =
   | "creation-failure"
   | "playback-failure"
   | "stale";
+export type Stem = "lead" | "bass" | "drums";
+export type MixStrip = components["schemas"]["LocalMixStrip"];
 export type Recipe = {
   instrument: "piano" | "electric_piano" | "guitar";
   bass: boolean;
@@ -14,6 +18,7 @@ export type Recipe = {
   density: "sparse" | "steady";
   backingVolume: "soft" | "normal";
   bpm: 100;
+  mix?: Partial<Record<Stem, MixStrip>>;
 };
 export type Note = {
   start: number;
@@ -34,6 +39,7 @@ export type Track = {
   recipe: Recipe;
   /** True when settings are authoritative, including the original local starting recipe. */
   recipeKnown?: boolean;
+  noteRevision?: number;
 };
 export type Project = {
   id: string;
@@ -85,6 +91,7 @@ export type StudioService = {
     basisId: string,
     recipe?: Recipe,
     signal?: AbortSignal,
+    reviewedPlanId?: string,
   ): Promise<Proposal>;
   create(
     project: Project,

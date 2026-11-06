@@ -15,6 +15,7 @@ reports = []
 lead_hashes = []
 note_hashes = []
 tracks = []
+mix_check = None
 for index, recording in enumerate(result['snapshot']['renditions'], 1):
     output = data / 'local-jobs' / recording['attemptId'] / 'output'
     manifest = json.loads((output / 'result.json').read_text())
@@ -34,7 +35,27 @@ for index, recording in enumerate(result['snapshot']['renditions'], 1):
                     'rms': float(np.sqrt(np.mean(samples ** 2))), 'clippedSamples': 0,
                     'leadPcmSha256': lead_hashes[-1], 'notesSha256': note_hashes[-1],
                     'worker': manifest['provenance']['supervisor']})
-assert len(reports) == 3
+if len(reports) == 5:
+    # The fourth rendition mixes the first version's dry stems on the same timeline.
+    # Compare serialized samples to an independent stereo matrix and gain equation.
+    parent = data / 'local-jobs' / result['snapshot']['renditions'][0]['attemptId'] / 'output'
+    fourth = data / 'local-jobs' / result['snapshot']['renditions'][3]['attemptId'] / 'output'
+    lead, _ = sf.read(parent / 'stem-0.raw.wav', always_2d=True)
+    bass, _ = sf.read(parent / 'stem-1.raw.wav', always_2d=True)
+    gain = 10 ** (-6 / 20)
+    wanted = lead.copy()
+    wanted[:, 0] += gain * (bass[:, 0] + np.sin(np.pi / 4) * bass[:, 1])
+    wanted[:, 1] += gain * np.cos(np.pi / 4) * bass[:, 1]
+    actual, _ = sf.read(fourth / 'audio.raw.wav', always_2d=True)
+    max_sample_error = float(np.max(np.abs(actual - wanted)))
+    assert max_sample_error < 1e-7, 'Guided mix did not produce the requested channel samples'
+    assert lead_hashes[0] == lead_hashes[3] == lead_hashes[4]
+    assert (evidence / 'version-1.wav').read_bytes() == (evidence / 'version-5.wav').read_bytes()
+    mix_check = {'maxSampleError': max_sample_error, 'sampleFrames': len(actual),
+                 'restoredWavSha256': result['snapshot']['renditions'][0]['sha256']}
+    print('PASS: actual text-to-mix samples match the stereo matrix; direct controls restore the original WAV byte for byte.')
+else:
+    assert len(reports) == 3
 assert lead_hashes[0] == lead_hashes[1], 'Backing-only refinement changed the locked lead'
 assert lead_hashes[2] != lead_hashes[1], 'Explicit guitar correction did not change the lead timbre'
 assert len(set(note_hashes)) == 1, 'Refinement or instrument correction changed confirmed notes'
@@ -57,5 +78,7 @@ assert max(onset_errors) < .08
 report = {'result': 'PASS', 'scope': 'Authored synthetic demo melody; objective checks do not replace listening judgment.',
           'confirmedNotes': len(confirmed), 'maxOnsetErrorSeconds': max(onset_errors),
           'leadUnchangedAcrossBackingRefinement': True, 'renders': reports}
+if mix_check is not None:
+    report['guidedMix'] = mix_check
 (evidence / 'audio-validation.json').write_text(json.dumps(report, indent=2) + '\n')
 print('PASS: real audio is finite and unclipped; lead PCM/notes are identical, drums removed, bass softer, demo pitches/onsets retained.')

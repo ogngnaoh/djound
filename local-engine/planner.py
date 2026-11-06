@@ -2,7 +2,7 @@
 import json
 import time
 
-from common import DEFAULT_RECIPE, HOME, HERE, EngineError, canonical_hash, recipe, write_json
+from common import DEFAULT_RECIPE, HOME, HERE, EngineError, active_stems, arrangement_settings, canonical_hash, recipe, write_json
 
 SYSTEM = """Classify the user's requested music arrangement edits. Return one JSON object with these six fields, in this order:
 {"supported":true, "instrument":"KEEP", "bass":"KEEP", "drums":"KEEP", "density":"KEEP", "backingVolume":"KEEP"}
@@ -47,14 +47,13 @@ def slot_patch(value, parent):
             if type(desired) is not bool:
                 raise EngineError('LOCAL_PLAN_INVALID', 'The local model returned an invalid track control.')
         changes[field] = desired
-    recipe({**parent, **changes})
     labels = {'piano': 'piano', 'electric_piano': 'electric piano', 'guitar': 'guitar'}
     phrases = []
     for key, desired in sorted(changes.items()):
         if desired == parent[key]:
             continue
         if key == 'instrument':
-            phrases.append(f"Use {labels.get(desired, str(desired))} for the lead.")
+            phrases.append(f"Use {labels.get(str(desired), str(desired))} for the lead.")
         elif key in ('bass', 'drums'):
             phrases.append(f"{'Add' if desired else 'Remove'} {key}.")
         elif key == 'density':
@@ -77,9 +76,17 @@ def validate_patch(value, parent):
         raise EngineError('LOCAL_UNSUPPORTED_REQUEST', value['explanation'])
     if set(value['changes']) - (set(DEFAULT_RECIPE) - {'bpm'}):
         raise EngineError('LOCAL_PLAN_INVALID', 'The local model proposed an unsupported control.')
-    complete = recipe({**parent, **value['changes']})
+    # The text model can edit arrangement slots only. Inherit the selected
+    # version's existing strips for still-active parts, with unity for new parts.
+    arrangement = arrangement_settings(parent)
+    arrangement.update(value['changes'])
+    complete = recipe(arrangement)
+    inherited = {name: strip for name, strip in parent.get('mix', {}).items()
+                 if name in active_stems(complete)}
+    if inherited:
+        complete = recipe({**complete, 'mix': inherited})
     if complete == parent:
-        raise EngineError('LOCAL_NO_CHANGE', 'That request does not change the current arrangement. Choose a different instrument or backing setting.')
+        raise EngineError('LOCAL_NO_CHANGE', 'The planner found no changes to the current arrangement. Try a guided edit or adjust the controls directly.')
     return complete
 
 
@@ -105,9 +112,13 @@ def plan(prompt, parent, output):
     if not isinstance(prompt, str) or not prompt.strip() or len(prompt) > 1000:
         raise EngineError('LOCAL_INVALID_REQUEST', 'Describe a concrete arrangement change in 1000 characters or fewer.')
     parent = recipe(DEFAULT_RECIPE if parent is None else parent)
+    from edit_commands import guided_plan
+    guided = guided_plan(prompt, parent)
+    if guided is not None:
+        return guided
     from stereo_scope import requests_stereo_change
     if requests_stereo_change(prompt):
-        raise EngineError('LOCAL_UNSUPPORTED_REQUEST', 'Stereo positioning is unavailable. Leave panning out of your request or adjust the arrangement controls directly.')
+        raise EngineError('LOCAL_UNSUPPORTED_REQUEST', 'Use the track mix controls for stereo positioning. You can review the arrangement and mix together before creating a version.')
     import mlx.core as mx
     from mlx_lm import load, generate
     from mlx_lm.sample_utils import make_sampler
@@ -119,7 +130,7 @@ def plan(prompt, parent, output):
     print('Loading the pinned local planner.', flush=True)
     model, tokenizer = load(str(HOME / metadata['modelDirectory']), tokenizer_config={'trust_remote_code': False})
     messages = [{'role': 'system', 'content': SYSTEM}]
-    messages.append({'role': 'user', 'content': json.dumps({'current_arrangement': parent, 'request': prompt}, ensure_ascii=False)})
+    messages.append({'role': 'user', 'content': json.dumps({'current_arrangement': arrangement_settings(parent), 'request': prompt}, ensure_ascii=False)})
     encoded = tokenizer.apply_chat_template(messages, tokenize=False, add_generation_prompt=True, enable_thinking=False)
     if len(tokenizer.encode(encoded)) > 3072:
         raise EngineError('LOCAL_INVALID_REQUEST', 'The request is too long for this bounded local planner.')

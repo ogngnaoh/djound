@@ -61,6 +61,7 @@ result={'schemaVersion':1,'status':'succeeded','operation':op,'provenance':{'eng
 if op=='plan':
  recipe=dict(r['parentRecipe']);recipe['instrument']='electric_piano'
  result.update(recipe=recipe,explanation='Switch the confirmed melody to electric piano.')
+ if (base/'plan-result.json').exists(): result.update(json.loads((base/'plan-result.json').read_text()))
 else:
  path=out/'audio.wav'
  with wave.open(str(path),'wb') as w:
@@ -177,6 +178,120 @@ else:
                 p.draftRevision(),
                 null,
                 p.id());
+    }
+
+    @Test
+    void mixedRecordingKeepsFrozenNotesAndControlsWhenTheNextVersionReturnsToUnity()
+            throws Exception {
+        String id = source();
+        var notes = confirmed(id);
+        var direct =
+                local().manual(
+                                id,
+                                new PlanCommand(1L, notes.revision(), 1L, "electric piano", null));
+        var unchanged =
+                new CorrectionCommand(
+                        1L, notes.revision(), 1L, direct.text(), null, direct.recipe());
+        assertEquals(direct, local().correct(direct.id(), unchanged));
+        var recipe = new LinkedHashMap<>(direct.recipe());
+        var lead = Map.of("gainDb", -4.5, "pan", -0.25, "muted", false);
+        var neutral = Map.of("gainDb", 0, "pan", 0, "muted", false);
+        recipe.put("bass", true);
+        recipe.put("mix", Map.of("lead", lead, "bass", neutral));
+        var correction =
+                new CorrectionCommand(1L, notes.revision(), 1L, direct.text(), null, recipe);
+        var mixed = local().correct(direct.id(), correction);
+        assertEquals(Map.of("lead", lead), mixed.recipe().get("mix"));
+        assertEquals(mixed.id(), local().correct(mixed.id(), correction).id());
+        assertFalse(local().plan(direct.id()).recipe().containsKey("mix"));
+        var render = local().renderRequest(mixed.id(), id);
+        assertEquals(notes.notes(), render.get("notes"));
+        assertEquals(mixed.recipe(), render.get("recipe"));
+        var created = finished(gen().create(id, command(mixed), "mixed-version-key").attemptId());
+        assertEquals("SUCCEEDED", created.state());
+        var recording = ex().recording(created.resultRecordingId());
+        assertEquals(mixed.recipe(), recording.localRecipe());
+        assertTrue(recording.direction().contains("lead -4.5 dB, 25% left, unmuted"));
+        assertEquals(
+                "STALE_DRAFT",
+                assertThrows(ApiProblem.class, () -> local().correct(mixed.id(), correction))
+                        .code());
+
+        var draft =
+                ex().saveDraft(
+                                id,
+                                new Models.DraftUpdate(
+                                        "Center the lead",
+                                        recording.id(),
+                                        ex().get(id).draft().revision()));
+        var next =
+                local().manual(
+                                id,
+                                new PlanCommand(
+                                        1L,
+                                        notes.revision(),
+                                        draft.revision(),
+                                        draft.text(),
+                                        recording.id()));
+        assertEquals(mixed.recipe(), next.basisRecipe());
+        var reset = new LinkedHashMap<>(next.recipe());
+        reset.remove("mix");
+        var resetCommand =
+                new CorrectionCommand(
+                        1L,
+                        notes.revision(),
+                        draft.revision(),
+                        draft.text(),
+                        recording.id(),
+                        reset);
+        var restored = local().correct(next.id(), resetCommand);
+        assertNotEquals(next.id(), restored.id());
+        assertFalse(restored.recipe().containsKey("mix"));
+        assertEquals(restored, local().correct(restored.id(), resetCommand));
+        assertEquals(4, db().sql("SELECT count(*) FROM local_plan").query(Integer.class).single());
+        assertTrue(restored.summary().contains("lead reset to 0 dB"));
+        assertEquals(
+                mixed.recipe(),
+                ((Map<?, ?>) restored.model().get("correction")).get("editedFromRecipe"));
+        var child = finished(gen().create(id, command(restored), "unity-version-key").attemptId());
+        assertEquals("SUCCEEDED", child.state());
+        assertTrue(
+                child.request().direction().contains("lead reset to 0 dB, centered and unmuted"));
+        assertEquals(restored.recipe(), ex().recording(child.resultRecordingId()).localRecipe());
+        assertEquals(mixed.recipe(), ex().recording(recording.id()).localRecipe());
+    }
+
+    @Test
+    void validatesWorkerMixerOutputAndKeepsGuidedCorrectionsDistinctFromModelPredictions()
+            throws Exception {
+        String id = source();
+        var n = confirmed(id);
+        var command = new PlanCommand(1L, n.revision(), 1L, "electric piano", null);
+        String result =
+                """
+                {"provenance":{"origin":"GUIDED_COMMANDS","inferenceAttempts":0},"recipe":{
+                  "instrument":"piano","bass":false,"drums":false,"bpm":100,"density":"steady",
+                  "backingVolume":"normal","mix":{"lead":{"gainDb":-3,"pan":0,"muted":false}}}}
+                """;
+        var fixture = root.resolve("plan-result.json");
+        Files.writeString(fixture, result.replace("\"lead\"", "\"drums\""));
+        var rejected = completed(local().propose(id, command));
+        assertEquals("FAILED", rejected.state());
+        assertEquals("PLAN_INVALID", rejected.outcomeCode());
+        Files.writeString(fixture, result);
+        assertEquals("SUCCEEDED", completed(local().propose(id, command)).state());
+        var guided = local().state(id).plan();
+        var recipe = new LinkedHashMap<>(guided.recipe());
+        recipe.remove("mix");
+        var corrected =
+                local().correct(
+                                guided.id(),
+                                new CorrectionCommand(
+                                        1L, n.revision(), 1L, guided.text(), null, recipe));
+        var provenance = (Map<?, ?>) corrected.model().get("correction");
+        assertEquals(guided.recipe(), provenance.get("commandRecipe"));
+        assertFalse(provenance.containsKey("modelSuggestedRecipe"));
+        assertEquals(0, corrected.model().get("inferenceAttempts"));
     }
 
     @Test
@@ -563,6 +678,17 @@ else:
         String id = source();
         var n = confirmed(id);
         var original = planned(id, n);
+        assertEquals(
+                original,
+                local().correct(
+                                original.id(),
+                                new CorrectionCommand(
+                                        1L,
+                                        n.revision(),
+                                        1L,
+                                        original.text(),
+                                        original.basisRecordingId(),
+                                        original.recipe())));
         Map<String, Object> guitar = new LinkedHashMap<>(original.recipe());
         guitar.put("instrument", "guitar");
         var first =

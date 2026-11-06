@@ -651,6 +651,7 @@ function trackFromRecording(r: Recording): Track {
     kept: r.kept,
     kind: r.kind === "ORIGINAL" ? "original" : "version",
     recipe: r.localRecipe ?? { ...LOCAL_SOURCE_RECIPE },
+    noteRevision: r.localNoteRevision ?? undefined,
     recipeKnown: r.kind === "ORIGINAL" || r.localRecipe != null,
   };
 }
@@ -868,7 +869,7 @@ function backendService(): StudioService {
       await pollJob(data.id, signal);
       return get(project.id);
     },
-    async propose(project, text, basisId, recipe, signal) {
+    async propose(project, text, basisId, recipe, signal, reviewedPlanId) {
       check(signal);
       const p = await service.saveDraft(project, text, basisId);
       const body = {
@@ -884,25 +885,29 @@ function backendService(): StudioService {
           throw new Error(
             "Describe these arrangement changes before reviewing them.",
           );
-        const initial = await api.POST(
-          "/api/explorations/{id}/local/manual-plans",
-          {
-            params: { path: { id: p.id } },
-            body,
-          },
-        );
-        if (!initial.data)
-          throw failure(
-            initial.error,
-            initial.response.status === 404
-              ? "This backend does not support direct arrangement reviews yet. Restart the latest backend build, or use the clickable prototype."
-              : "Could not prepare direct arrangement controls. Your choices are preserved.",
+        let parentId = reviewedPlanId;
+        if (!parentId) {
+          const initial = await api.POST(
+            "/api/explorations/{id}/local/manual-plans",
+            {
+              params: { path: { id: p.id } },
+              body,
+            },
           );
+          if (!initial.data)
+            throw failure(
+              initial.error,
+              initial.response.status === 404
+                ? "This backend does not support direct arrangement reviews yet. Restart the latest backend build, or use the clickable prototype."
+                : "Could not prepare direct arrangement controls. Your choices are preserved.",
+            );
+          parentId = initial.data.id;
+        }
         check(signal);
         const { data, error } = await api.POST(
           "/api/local/plans/{id}/corrections",
           {
-            params: { path: { id: initial.data.id } },
+            params: { path: { id: parentId } },
             body: { ...body, recipe },
           },
         );

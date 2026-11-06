@@ -350,6 +350,7 @@ test("backend history uses immutable recipes, never request text or the latest p
     kept: true,
     direction: "Use guitar, add drums and make everything louder.",
     localRecipe: authoritative,
+    localNoteRevision: 7,
   };
   const exploration = {
     id: "project",
@@ -366,6 +367,7 @@ test("backend history uses immutable recipes, never request text or the latest p
       id: "original",
       kind: "ORIGINAL",
       localRecipe: null,
+      localNoteRevision: null,
       fileName: "melody.wav",
     },
     renditions: [
@@ -403,6 +405,8 @@ test("backend history uses immutable recipes, never request text or the latest p
     );
     assert.deepEqual(project.tracks[1].recipe, authoritative);
     assert.equal(project.tracks[1].recipeKnown, true);
+    assert.equal(project.tracks[1].noteRevision, 7);
+    assert.equal(project.tracks[0].noteRevision, undefined);
     assert.equal(project.tracks[2].recipeKnown, false);
     assert.deepEqual(project.tracks[0].recipe, {
       instrument: "piano",

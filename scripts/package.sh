@@ -7,4 +7,5 @@ mkdir -p server/src/main/resources/static
 # This directory contains only generated frontend output.
 find server/src/main/resources/static -mindepth 1 -maxdepth 1 -exec rm -rf {} +
 cp -R web/dist/. server/src/main/resources/static/
-server/mvnw -o -f server/pom.xml -DskipTests package
+# Maven's resources copy does not remove old Vite hashes from target/classes.
+server/mvnw -o -f server/pom.xml -DskipTests clean package

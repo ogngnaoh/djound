@@ -11,8 +11,9 @@ import numpy as np
 import pretty_midi
 import soundfile as sf
 
-from common import HOME, DEFAULT_RECIPE, EngineError, canonical_hash, digest, notes as validate_notes, recipe as validate_recipe, write_json
+from common import HOME, DEFAULT_RECIPE, EngineError, canonical_hash, digest, notes as validate_notes, recipe as validate_recipe, validate_mix, write_json
 from safe_export import save_safe_wav
+from stem_mixer import Strip, mix
 from validate_audio import validate
 
 
@@ -68,7 +69,9 @@ def arrangement(notes, duration, recipe):
     sparse, soft = recipe['density'] == 'sparse', recipe['backingVolume'] == 'soft'
     bass, drums = [], []
     step = 0
-    while origin + step * beat < duration - .12:
+    # Always schedule the opening backing beat. Keep the existing tail margin on
+    # subsequent beats so ordinary arrangements retain their qualified timing.
+    while step == 0 or origin + step * beat < duration - .12:
         start = origin + step * beat
         active = [note for note in notes if note['start'] <= start < note['end']]
         if active and step % (4 if sparse else 2) == 0:
@@ -76,9 +79,9 @@ def arrangement(notes, duration, recipe):
             bass.append({'start': start, 'end': min(duration, start + beat * .65),
                          'pitch': 36 + chosen['pitch'] % 12, 'velocity': 38 if soft else 58})
         if step % (4 if sparse else 2) == 0:
-            drums.append({'start': start, 'end': start + .10, 'pitch': 36, 'velocity': 36 if soft else 54})
+            drums.append({'start': start, 'end': min(duration, start + .10), 'pitch': 36, 'velocity': 36 if soft else 54})
         if not sparse or step % 2 == 0:
-            drums.append({'start': start, 'end': start + .08, 'pitch': 42, 'velocity': 28 if soft else 43})
+            drums.append({'start': start, 'end': min(duration, start + .08), 'pitch': 42, 'velocity': 28 if soft else 43})
         step += 1
     if recipe['bass'] and bass:
         tracks.append({'id': 'bass', 'program': 32, 'bank': 0, 'notes': bass})
@@ -110,6 +113,7 @@ def render(notes, duration, recipe, output, status='provided_notes'):
     tracks = arrangement(notes, duration, recipe)
     if canonical_hash(tracks[0]['notes']) != anchor:
         raise EngineError('LOCAL_INTERNAL', 'The locked melody changed before rendering.')
+    controls = validate_mix(recipe.get('mix', {}), [track['id'] for track in tracks])
     event_text, frames = schedule(tracks, duration)
     events = output / 'events.txt'
     events.write_text(event_text)
@@ -123,13 +127,18 @@ def render(notes, duration, recipe, output, status='provided_notes'):
         raise EngineError('LOCAL_AUDIO_INVALID', 'The rendered audio is incomplete or invalid.')
     samples = samples.reshape(-1, 2)
     stems = []
+    dry_audio = {}
     accumulated = np.zeros_like(samples, dtype=np.float64)
     for index, track in enumerate(tracks):
         path = Path(str(raw) + f'.track-{index}.f32')
         stem = np.fromfile(path, dtype='<f4').reshape(-1, 2)
         if stem.shape != samples.shape or not np.isfinite(stem).all():
             raise EngineError('LOCAL_AUDIO_INVALID', 'A rendered instrument stem is invalid.')
+        if track['id'] != 'lead' and not np.any(stem):
+            raise EngineError('LOCAL_INVALID_RECIPE', 'The backing produced no audio. Choose an earlier melody onset or turn off that backing track.')
         accumulated += stem
+        if controls:
+            dry_audio[track['id']] = stem
         stem_path = output / f'stem-{index}.raw.wav'
         sf.write(stem_path, stem, 44100, subtype='FLOAT')
         stems.append({'id': track['id'], 'path': str(stem_path),
@@ -137,9 +146,18 @@ def render(notes, duration, recipe, output, status='provided_notes'):
         path.unlink()
     if not np.array_equal(accumulated.astype('<f4'), samples):
         raise EngineError('LOCAL_AUDIO_INVALID', 'Instrument stems do not reconstruct the rendered mix.')
+    if controls:
+        strips = {name: Strip(gain_db=strip['gainDb'], pan=strip['pan'], mute=strip['muted'])
+                  for name, strip in controls.items()}
+        samples = mix(dry_audio, strips)
     audio = output / 'audio.wav'
     export = save_safe_wav(audio, samples.T, 44100)
-    integrity = validate(audio, expected_seconds=duration)
+    try:
+        integrity = validate(audio, expected_seconds=duration)
+    except ValueError as error:
+        if controls and str(error) == 'Silent output':
+            raise EngineError('LOCAL_INVALID_RECIPE', 'This mix is too quiet to publish. Raise the gain or unmute a track.') from error
+        raise
     if integrity['clipped_fraction'] or integrity['rms'] < 1e-6:
         raise EngineError('LOCAL_AUDIO_INVALID', 'The rendered audio is clipped or silent.')
     raw.unlink()
@@ -164,6 +182,8 @@ def render(notes, duration, recipe, output, status='provided_notes'):
             'midiPath': str(midi_path), 'recipe': recipe,
             'provenance': {'renderer': 'TinySoundFont isolated-track v2 / FluidR3', 'notesSha256': anchor,
                            'audioSha256': digest(audio), 'midiSha256': digest(midi_path), 'stems': stems,
+                           **({'mix': {'method': 'isolated stereo stem mixer v1', 'strips': controls,
+                                       'stemFiles': 'dry pre-fader audio', 'masterGainDb': export['gain_db']}} if controls else {}),
                            'export': export, 'audioValidation': integrity, 'seconds': time.monotonic() - started,
                            'arrangement': 'Explicit backing recipes; fixed backing BPM, unchanged lead timing.',
                            'tailPolicy': 'Same final 20ms fade per independent stem; later tails trimmed.'}}

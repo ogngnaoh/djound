@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { Fragment, useEffect, useRef, useState } from "react";
 import {
   ArrowRight,
   Bookmark,
@@ -12,6 +12,8 @@ import {
 } from "lucide-react";
 import { Button } from "../components/ui/button";
 import { useAudio } from "./Player";
+import { allTracksMuted, mixChanges, normalizeMix, TrackMix } from "./TrackMix";
+import { GuidedEdits, isGuided } from "./GuidedEdits";
 import {
   DEFAULT_RECIPE,
   describeRecipe,
@@ -22,93 +24,140 @@ import {
   type StudioService,
   type Track,
 } from "./types";
+const TRACK_OPTIONS = [
+  { value: true, text: "On" },
+  { value: false, text: "Off" },
+] as const;
+const ARRANGEMENT_FIELDS = [
+  {
+    key: "instrument",
+    label: "Lead",
+    options: [
+      { value: "piano", text: instrumentName("piano") },
+      { value: "electric_piano", text: instrumentName("electric_piano") },
+      { value: "guitar", text: instrumentName("guitar") },
+    ],
+  },
+  { key: "bass", label: "Bass", options: TRACK_OPTIONS },
+  { key: "drums", label: "Drums", options: TRACK_OPTIONS },
+  {
+    key: "density",
+    label: "Backing density",
+    options: [
+      { value: "sparse", text: "Sparse" },
+      { value: "steady", text: "Steady" },
+    ],
+  },
+  {
+    key: "backingVolume",
+    label: "Backing volume",
+    options: [
+      { value: "soft", text: "Soft" },
+      { value: "normal", text: "Normal" },
+    ],
+  },
+] as const;
+
+function optionValue(value: boolean | string) {
+  if (typeof value === "boolean") return value ? "on" : "off";
+  return value;
+}
+
 export function RecipeDetails({ recipe }: { recipe: Recipe }) {
   return (
     <dl className="recipe-details">
-      <dt>Lead</dt>
-      <dd>{instrumentName(recipe.instrument)}</dd>
-      <dt>Bass</dt>
-      <dd>{recipe.bass ? "On" : "Off"}</dd>
-      <dt>Drums</dt>
-      <dd>{recipe.drums ? "On" : "Off"}</dd>
-      <dt>Backing volume</dt>
-      <dd>{recipe.backingVolume === "soft" ? "Soft" : "Normal"}</dd>
+      {ARRANGEMENT_FIELDS.map(({ key, label, options }) => (
+        <Fragment key={key}>
+          <dt>{label}</dt>
+          <dd>{options.find((o) => o.value === recipe[key])?.text}</dd>
+        </Fragment>
+      ))}
+      {mixChanges(recipe).map((change) => (
+        <Fragment key={change.label}>
+          <dt>{change.label}</dt>
+          <dd>{change.value}</dd>
+        </Fragment>
+      ))}
     </dl>
   );
 }
+
 export function RecipeFields({
   recipe,
+  before,
   onChange,
 }: {
   recipe: Recipe;
+  before?: Recipe;
   onChange: (r: Recipe) => void;
 }) {
-  return (
-    <div className="recipe-fields">
-      <label>
-        Lead
-        <select
-          aria-label="Lead"
-          value={recipe.instrument}
-          onChange={(e) =>
-            onChange({
-              ...recipe,
-              instrument: e.target.value as Recipe["instrument"],
-            })
-          }
-        >
-          <option value="piano">Piano</option>
-          <option value="electric_piano">Electric piano</option>
-          <option value="guitar">Guitar</option>
-        </select>
-      </label>
-      {(["bass", "drums"] as const).map((k) => (
-        <label key={k}>
-          {k === "bass" ? "Bass" : "Drums"}
-          <select
-            aria-label={k === "bass" ? "Bass" : "Drums"}
-            value={recipe[k] ? "on" : "off"}
-            onChange={(e) =>
-              onChange({ ...recipe, [k]: e.target.value === "on" })
-            }
-          >
-            <option value="on">On</option>
-            <option value="off">Off</option>
-          </select>
+  function control({
+    key,
+    label,
+    options,
+  }: (typeof ARRANGEMENT_FIELDS)[number]) {
+    const input = (
+      <select
+        aria-label={before ? `Proposed ${label.toLowerCase()}` : label}
+        value={optionValue(recipe[key])}
+        onChange={(event) => {
+          const selected = options.find(
+            (o) => optionValue(o.value) === event.target.value,
+          );
+          if (selected)
+            onChange(normalizeMix({ ...recipe, [key]: selected.value }));
+        }}
+      >
+        {options.map((o) => (
+          <option key={optionValue(o.value)} value={optionValue(o.value)}>
+            {o.text}
+          </option>
+        ))}
+      </select>
+    );
+    if (!before)
+      return (
+        <label key={key}>
+          {label}
+          {input}
         </label>
-      ))}
-      <label>
-        Backing density
-        <select
-          aria-label="Backing density"
-          value={recipe.density}
-          onChange={(e) =>
-            onChange({
-              ...recipe,
-              density: e.target.value as Recipe["density"],
-            })
-          }
-        >
-          <option value="sparse">Sparse</option>
-          <option value="steady">Steady</option>
-        </select>
-      </label>
-      <label>
-        Backing volume
-        <select
-          aria-label="Backing volume"
-          value={recipe.backingVolume}
-          onChange={(e) =>
-            onChange({
-              ...recipe,
-              backingVolume: e.target.value as Recipe["backingVolume"],
-            })
-          }
-        >
-          <option value="soft">Soft</option>
-          <option value="normal">Normal</option>
-        </select>
-      </label>
+      );
+    const previous = options.find((o) => o.value === before[key])?.text;
+    return (
+      <div
+        className="change-row"
+        key={key}
+        data-changed={recipe[key] !== before[key]}
+      >
+        <span>{label}</span>
+        <span className="review-value">
+          <span className="subtle">
+            {recipe[key] === before[key] ? "Unchanged" : `${previous} →`}
+          </span>
+          {input}
+        </span>
+      </div>
+    );
+  }
+  if (!before)
+    return (
+      <div className="recipe-fields">{ARRANGEMENT_FIELDS.map(control)}</div>
+    );
+  const changed = ARRANGEMENT_FIELDS.filter(
+    (f) => recipe[f.key] !== before[f.key],
+  );
+  const unchanged = ARRANGEMENT_FIELDS.filter(
+    (f) => recipe[f.key] === before[f.key],
+  );
+  return (
+    <div className="review-fields">
+      {changed.map(control)}
+      {unchanged.length > 0 && (
+        <details className="unchanged-settings">
+          <summary>Unchanged arrangement settings</summary>
+          {unchanged.map(control)}
+        </details>
+      )}
     </div>
   );
 }
@@ -141,7 +190,20 @@ export function Refinement({
   const basis =
       project.tracks.find((t) => t.id === basisId) ?? project.tracks[0],
     audio = useAudio();
+  const referenceKey = `djound.studio.guided.v1.${project.id}`;
   const [text, setText] = useState(() => readDraft(project.id, project.draft)),
+    [alternate, setAlternate] = useState<string>(() => {
+      try {
+        const stored = JSON.parse(localStorage.getItem(referenceKey) ?? "null");
+        if (
+          stored?.active === text &&
+          typeof stored.alternate === "string" &&
+          isGuided(stored.alternate) !== isGuided(text)
+        )
+          return stored.alternate;
+      } catch {}
+      return "";
+    }),
     [view, setView] = useState<
       "request" | "adjust" | "review" | "creating" | "result"
     >("request"),
@@ -203,17 +265,28 @@ export function Refinement({
     proposal,
     view,
   ]);
-  function changeText(value: string) {
+  function changeText(
+    value: string,
+    parked = value === text || (isGuided(text) && isGuided(value))
+      ? alternate
+      : "",
+  ) {
     setText(value);
+    setAlternate(parked);
     try {
       localStorage.setItem(`djound.studio.draft.${project.id}`, value);
+      if (parked)
+        localStorage.setItem(
+          referenceKey,
+          JSON.stringify({ active: value, alternate: parked }),
+        );
+      else if (alternate) localStorage.removeItem(referenceKey);
     } catch {}
     setProposal(null);
     setError("");
   }
   function changeReviewedRecipe(next: Recipe) {
     setRecipe(next);
-    setProposal(null);
     setView("adjust");
     setError(
       "Settings changed. Review your arrangement before creating audio.",
@@ -240,6 +313,9 @@ export function Refinement({
         basisId,
         manual ? recipe : undefined,
         c.signal,
+        manual && proposal?.basisId === basisId && proposal.text === reviewText
+          ? proposal.id
+          : undefined,
       );
       if (c.signal.aborted) return;
       reviewedRevision.current = {
@@ -369,9 +445,23 @@ export function Refinement({
             onChange={(e) => changeText(e.target.value)}
             disabled={busy}
           />
+          {mode === "backend" && (
+            <GuidedEdits
+              alternate={alternate}
+              text={text}
+              onSwitch={(next) => changeText(next, text)}
+              onChange={changeText}
+              disabled={disabled || busy}
+            />
+          )}
           <Button
             className="full"
-            disabled={disabled || busy || !text.trim()}
+            disabled={
+              disabled ||
+              busy ||
+              !text.trim() ||
+              (mode === "backend" && /^edit:$/i.test(text.trim()))
+            }
             onClick={() => void review()}
           >
             {busy ? (
@@ -393,6 +483,7 @@ export function Refinement({
             disabled={disabled || busy}
             onClick={() => {
               setRecipe(basis.recipe);
+              setProposal(null);
               setView("adjust");
               setError("");
             }}
@@ -446,17 +537,24 @@ export function Refinement({
               recipe={recipe}
               onChange={(r) => {
                 setRecipe(r);
-                setProposal(null);
               }}
             />
+            {mode === "backend" && (
+              <TrackMix recipe={recipe} onChange={setRecipe} />
+            )}
           </fieldset>
           <Button
             className="full"
-            disabled={disabled || busy}
+            disabled={disabled || busy || allTracksMuted(recipe)}
             onClick={() => void review(true)}
           >
             {busy ? "Reviewing…" : "Review arrangement"}
           </Button>
+          {allTracksMuted(recipe) && (
+            <p role="status" className="small subtle">
+              Unmute at least one active track to review this mix.
+            </p>
+          )}
           <p className="small subtle">
             Reviewing these controls does not create audio.
           </p>
@@ -478,71 +576,40 @@ export function Refinement({
             </button>
           </section>
           <h2 className="proposed-heading">Proposed changes</h2>
-          <div className="change-row">
-            <span>Lead</span>
-            <span>
-              {instrumentName(recipe.instrument)}
-              <small>
-                {recipe.instrument === proposal.before.instrument
-                  ? "Unchanged"
-                  : `Previously ${instrumentName(proposal.before.instrument)}`}
-              </small>
-            </span>
-          </div>
-          <div className="change-row">
-            <span>Melody</span>
-            <span className="subtle">Unchanged</span>
-          </div>
-          <div className="change-row">
-            <span>Drums</span>
-            <span className="review-value">
-              <span className="subtle">
-                {proposal.before.drums ? "On" : "Off"} →
+          {mixChanges(recipe, proposal.before).map((change) => (
+            <div className="change-row" data-changed="true" key={change.label}>
+              <span>{change.label}</span>
+              <span>
+                <span className="subtle">{change.previous} → </span>
+                {change.value}
               </span>
-              <select
-                aria-label="Proposed drums"
-                value={recipe.drums ? "on" : "off"}
-                onChange={(e) =>
-                  changeReviewedRecipe({
-                    ...recipe,
-                    drums: e.target.value === "on",
-                  })
-                }
-              >
-                <option value="on">On</option>
-                <option value="off">Off</option>
-              </select>
-            </span>
-          </div>
-          <div className="change-row">
-            <span>Backing volume</span>
-            <span className="review-value">
-              <span className="subtle">
-                {proposal.before.backingVolume === "soft" ? "Soft" : "Normal"} →
-              </span>
-              <select
-                aria-label="Proposed backing volume"
-                value={recipe.backingVolume}
-                onChange={(e) =>
-                  changeReviewedRecipe({
-                    ...recipe,
-                    backingVolume: e.target.value as Recipe["backingVolume"],
-                  })
-                }
-              >
-                <option value="soft">Soft</option>
-                <option value="normal">Normal</option>
-              </select>
-            </span>
-          </div>
-          <details className="other-settings">
-            <summary>Other arrangement settings</summary>
-            <RecipeDetails recipe={recipe} />
-            <p>Density: {recipe.density}</p>
-          </details>
-          <p className="small subtle proposal-note">
-            ⓘ &nbsp; Proposal only. No new audio yet.
-          </p>
+            </div>
+          ))}
+          <RecipeFields
+            recipe={recipe}
+            before={proposal.before}
+            onChange={changeReviewedRecipe}
+          />
+          {!recipe.bass &&
+            !recipe.drums &&
+            (recipe.density !== proposal.before.density ||
+              recipe.backingVolume !== proposal.before.backingVolume) && (
+              <p className="small subtle">
+                The backing settings take effect when you add bass or drums.
+              </p>
+            )}
+          {basis.noteRevision != null &&
+          basis.noteRevision !== proposal.noteRevision ? (
+            <p className="notice">
+              This uses your current melody (revision {proposal.noteRevision}).{" "}
+              {basis.title} used revision {basis.noteRevision}. Its arrangement
+              supplies the starting settings.
+            </p>
+          ) : (
+            <p className="small subtle proposal-note">
+              Your confirmed melody stays the same.
+            </p>
+          )}
           {proposal.warnings.map((w, i) => (
             <p className="notice" key={i}>
               {w}
@@ -560,7 +627,6 @@ export function Refinement({
             className="full accent"
             onClick={() => {
               setView("adjust");
-              setProposal(null);
             }}
           >
             <SlidersHorizontal /> Adjust arrangement
