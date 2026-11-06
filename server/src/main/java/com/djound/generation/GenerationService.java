@@ -215,7 +215,9 @@ public class GenerationService {
                     if (configuration.configured()) availability.requireAvailable();
                     if (configuration.live()) allowance.requireAvailable();
                     local.requireIdle();
-                    validateAcknowledgement(workspace, command.acknowledgedUnknownAttemptId());
+                    String acknowledgement =
+                            applicableAcknowledgement(
+                                    workspace, command.acknowledgedUnknownAttemptId());
                     if (!configuration.configured())
                         throw new ApiProblem(
                                 503,
@@ -382,7 +384,7 @@ public class GenerationService {
                     jdbc.sql("UPDATE workspace SET active_attempt_id=? WHERE id=1")
                             .param(attempt)
                             .update();
-                    acknowledge(command.acknowledgedUnknownAttemptId(), attempt);
+                    acknowledge(acknowledgement, attempt);
                     return receipt(request, attempt, draft, draft + 1, false);
                 });
     }
@@ -443,7 +445,9 @@ public class GenerationService {
                     if (configuration.configured()) availability.requireAvailable();
                     if (configuration.live()) allowance.requireAvailable();
                     local.requireIdle();
-                    validateAcknowledgement(workspace, command.acknowledgedUnknownAttemptId());
+                    String acknowledgement =
+                            applicableAcknowledgement(
+                                    workspace, command.acknowledgedUnknownAttemptId());
                     if (!configuration.configured())
                         throw new ApiProblem(
                                 503,
@@ -565,7 +569,7 @@ public class GenerationService {
                                     requestId,
                                     attempt)
                             .update();
-                    acknowledge(command.acknowledgedUnknownAttemptId(), attempt);
+                    acknowledge(acknowledgement, attempt);
                     return retryReceipt(requestId, attempt, false);
                 });
     }
@@ -671,8 +675,8 @@ public class GenerationService {
         // transport.
         if (jdbc.sql(
                         "SELECT EXISTS(SELECT 1 FROM generation_attempt a JOIN generation_request r"
-                            + " ON r.id=a.request_id WHERE r.provenance='LIVE' AND a.state NOT IN"
-                            + " ('SUCCEEDED','FAILED'))")
+                            + " ON r.id=a.request_id WHERE r.provenance='LIVE' AND a.operation_handle IS NOT NULL AND a.state NOT IN"
+                            + " ('ACCEPTED','SUCCEEDED','FAILED'))")
                 .query(Boolean.class)
                 .single()) MelodyFlowTransport.requireNoRetryLaunchProperties();
         transactions.executeWithoutResult(
@@ -924,8 +928,17 @@ public class GenerationService {
         return id == null ? "" : "|ack:" + field(id);
     }
 
-    private void validateAcknowledgement(Map<String, Object> workspace, String acknowledged) {
+    public boolean requiresAcknowledgement(UnknownOutcome outcome) {
+        return outcome != null && !(configuration.local() && "LIVE".equals(outcome.provenance()));
+    }
+
+    /** The caller holds the workspace row lock. Local renders cannot repeat retired hosted work. */
+    private String applicableAcknowledgement(Map<String, Object> workspace, String acknowledged) {
         String unknown = (String) workspace.get("unknown_outcome_attempt_id");
+        if (unknown != null
+                && configuration.local()
+                && !requiresAcknowledgement(unknownOutcome())
+                && (acknowledged == null || unknown.equals(acknowledged))) return null;
         if (!Objects.equals(unknown, acknowledged))
             throw new ApiProblem(
                     409,
@@ -933,6 +946,7 @@ public class GenerationService {
                     "Review and acknowledge the unresolved earlier creation before submitting"
                             + " another attempt.",
                     "ACKNOWLEDGE_UNKNOWN_OUTCOME");
+        return acknowledged;
     }
 
     private void acknowledge(String unknown, String newAttempt) {

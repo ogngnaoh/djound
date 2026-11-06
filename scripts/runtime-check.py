@@ -27,8 +27,10 @@ def configuration(environment):
     if not re.fullmatch(r'[0-9]+', raw_port) or not 1 <= int(raw_port) <= 65535:
         raise ValueError('DJOUND_PORT must be an integer from 1 through 65535.')
     mode = environment.get('DJOUND_MODE', 'UNCONFIGURED')
-    if mode not in {'UNCONFIGURED', 'FIXTURE', 'LIVE', 'LOCAL'}:
-        raise ValueError('DJOUND_MODE must be UNCONFIGURED, FIXTURE, LIVE, or LOCAL.')
+    if mode == 'LIVE':
+        raise ValueError('DJOUND_MODE=LIVE is retired. Choose LOCAL to create music or UNCONFIGURED to play saved recordings.')
+    if mode not in {'UNCONFIGURED', 'FIXTURE', 'LOCAL'}:
+        raise ValueError('DJOUND_MODE must be UNCONFIGURED, FIXTURE, or LOCAL.')
     return int(raw_port), mode
 
 

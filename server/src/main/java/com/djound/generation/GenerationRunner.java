@@ -48,10 +48,11 @@ public class GenerationRunner {
     private void runLive(Models.Attempt owner) {
         try {
             if (owner.state().equals("ACCEPTED")) {
-                owner = service.claimNext();
-                if (owner == null) return;
-                live.submit(owner);
-                owner = service.get(owner.id());
+                service.fail(
+                        owner,
+                        "RETRY_CONTEXT_UNAVAILABLE",
+                        "Hosted generation is retired. This request was never submitted.");
+                return;
             }
             String handle = service.savedHandle(owner.id());
             if (handle == null)
@@ -76,7 +77,7 @@ public class GenerationRunner {
             if (service.fail(
                     owner,
                     code,
-                    "Live creation could not finish: "
+                    "Historical result recovery could not finish: "
                             + (error instanceof ApiProblem
                                     ? error.getMessage()
                                     : "the remote outcome or local result could not be"
@@ -130,7 +131,7 @@ public class GenerationRunner {
                             error instanceof ApiProblem
                                     ? error.getMessage()
                                     : "Local rendering could not finish. Your confirmed notes and"
-                                          + " plan remain saved.")) {
+                                            + " plan remain saved.")) {
                 try {
                     publications.discardFailed(owner);
                 } catch (java.io.IOException cleanup) {

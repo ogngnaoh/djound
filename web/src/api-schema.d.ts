@@ -473,7 +473,7 @@ export interface components {
         };
         Workspace: {
             /** @enum {string} */
-            mode: "UNCONFIGURED" | "FIXTURE" | "LIVE" | "LOCAL";
+            mode: "UNCONFIGURED" | "FIXTURE" | "LOCAL";
             /** @enum {string} */
             configuration: "UNCONFIGURED" | "CONFIGURED";
             /** @enum {string} */
@@ -494,7 +494,7 @@ export interface components {
             supportsStatusCheck: boolean;
             canRecheck: boolean;
             canSubmit: boolean;
-            /** @description True only when acknowledgement of the unresolved outcome is the sole remaining submission blocker. */
+            /** @description True only when acknowledgement of the unresolved outcome is the sole remaining submission blocker. An unresolved historical LIVE attempt is informational for new LOCAL renders. */
             canSubmitWithAcknowledgement: boolean;
             canCreateExploration: boolean;
             activeAttemptId: string | null;
@@ -607,7 +607,7 @@ export interface components {
             expectedSourceRevision: number;
             /** Format: int64 */
             expectedDraftRevision: number;
-            /** @description Explicit acknowledgement captured with this deliberate command. Retired only if the new command is accepted; omitted legacy commands retain their fingerprint encoding. */
+            /** @description Explicit acknowledgement captured with this deliberate command. A LOCAL creation preserves a historical LIVE unknown outcome even if its ID is echoed. Omitted legacy fields retain their original fingerprint encoding. */
             acknowledgedUnknownAttemptId?: string;
         };
         CreationReceipt: {
@@ -666,7 +666,7 @@ export interface components {
         };
         RetryCommand: {
             expectedPreviousAttemptId: string;
-            /** @description Explicit acknowledgement captured with this deliberate retry. Never added or changed during receipt replay. */
+            /** @description Explicit acknowledgement captured with this deliberate retry. A LOCAL retry preserves a historical LIVE unknown outcome. Receipt replay uses the original command. */
             acknowledgedUnknownAttemptId?: string;
         };
         RetryReceipt: {

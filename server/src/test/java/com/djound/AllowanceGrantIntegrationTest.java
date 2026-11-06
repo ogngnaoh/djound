@@ -100,12 +100,15 @@ class AllowanceGrantIntegrationTest {
         assertEquals(0, replay.path("additionalSubmissions").asInt());
         assertEquals(1L, allowance().view().get("limit"));
 
-        h.app.close();
-        h.app = h.launch("LIVE");
-        h.stopScheduler();
         var source = h.source("grant-only-original");
         var command = new Models.CreateRequestCommand("piano", null, 1L, 1L);
         var receipt = h.service().create(source.explorationId(), command, "grant-only-command");
+        h.jdbc()
+                .sql(
+                        "UPDATE generation_request SET provenance='LIVE',"
+                            + " adapter_configuration_id='melodyflow-anonymous-v1' WHERE id=?")
+                .param(receipt.requestId())
+                .update();
         var owner = h.service().claimNext();
         allowance().reserve(owner);
         h.service()

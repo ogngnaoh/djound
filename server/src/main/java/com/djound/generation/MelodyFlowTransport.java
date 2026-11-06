@@ -12,20 +12,18 @@ import java.io.*;
 import java.net.*;
 import java.net.http.*;
 import java.nio.charset.StandardCharsets;
-import java.nio.file.*;
 import java.time.Duration;
 import java.util.*;
 import java.util.concurrent.*;
 
-/**
- * Concrete anonymous Gradio 5.49.1 protocol. No retry, authentication, or alternate destination.
- */
+/** Read-only Gradio protocol for acknowledged historical results. */
 public final class MelodyFlowTransport {
     private static final Logger log = LoggerFactory.getLogger(MelodyFlowTransport.class);
     private static final int ERROR_DIAGNOSTIC_LIMIT = 2048;
     private static final java.util.regex.Pattern QUOTA_EXHAUSTED =
             java.util.regex.Pattern.compile(
-                    "^You have exceeded your ZeroGPU quota \\([0-9]+s requested vs\\. 0s left\\)\\.");
+                    "^You have exceeded your ZeroGPU quota \\([0-9]+s requested vs\\. 0s"
+                        + " left\\)\\.");
     public static final URI ORIGIN = URI.create("https://facebook-melodyflow.hf.space");
     private final URI origin;
     private final Duration observationDeadline;
@@ -68,122 +66,6 @@ public final class MelodyFlowTransport {
                 .build();
     }
 
-    public String upload(Path path, String name, String contentType) throws Exception {
-        String boundary = "djound-" + UUID.randomUUID();
-        // Fixed multipart filename avoids injecting any user-controlled header bytes.
-        byte[] prefix =
-                ("--"
-                                + boundary
-                                + "\r\nContent-Disposition: form-data; name=\"files\"; filename=\""
-                                + (contentType.equals("audio/wav") ? "source.wav" : "source.mp3")
-                                + "\"\r\nContent-Type: "
-                                + contentType
-                                + "\r\n\r\n")
-                        .getBytes(StandardCharsets.UTF_8);
-        var body =
-                HttpRequest.BodyPublishers.concat(
-                        HttpRequest.BodyPublishers.ofByteArray(prefix),
-                        HttpRequest.BodyPublishers.ofFile(path),
-                        HttpRequest.BodyPublishers.ofString("\r\n--" + boundary + "--\r\n"));
-        var result =
-                json.readTree(
-                        exchange(
-                                "/gradio_api/upload",
-                                body,
-                                "multipart/form-data; boundary=" + boundary));
-        if (!result.isArray() || result.size() != 1 || !result.get(0).isTextual())
-            throw unknown("The source upload acknowledgement was malformed.");
-        String uploaded = result.get(0).asString();
-        if (!uploaded.startsWith("/tmp/gradio/")
-                || uploaded.contains("\r")
-                || uploaded.contains("\n")
-                || uploaded.length() > 4096)
-            throw unknown("The source upload locator was invalid.");
-        return uploaded;
-    }
-
-    public String submit(
-            String uploaded, String name, String type, String instructions, double duration)
-            throws Exception {
-        var file =
-                Map.of(
-                        "path",
-                        uploaded,
-                        "orig_name",
-                        name,
-                        "mime_type",
-                        type,
-                        "meta",
-                        Map.of("_type", "gradio.FileData"));
-        var payload =
-                Map.of(
-                        "data",
-                        List.of(
-                                "facebook/melodyflow-t24-30secs",
-                                instructions,
-                                "euler",
-                                125,
-                                0.0,
-                                true,
-                                0.2,
-                                duration,
-                                file));
-        JsonNode result =
-                json.readTree(
-                        exchange(
-                                "/gradio_api/call/predict",
-                                HttpRequest.BodyPublishers.ofString(
-                                        json.writeValueAsString(payload)),
-                                "application/json"));
-        String event = result.path("event_id").asString("");
-        if (!event.matches("[A-Za-z0-9_-]{1,128}"))
-            throw unknown("The generation acknowledgement did not contain a usable event handle.");
-        return event;
-    }
-
-    private String exchange(String path, HttpRequest.BodyPublisher body, String type)
-            throws Exception {
-        long started = System.nanoTime();
-        try (var client = client()) {
-            var response =
-                    client.send(
-                            HttpRequest.newBuilder(origin.resolve(path))
-                                    .timeout(Duration.ofSeconds(30))
-                                    .header("Content-Type", type)
-                                    .POST(body)
-                                    .build(),
-                            HttpResponse.BodyHandlers.ofInputStream());
-            try (var in = response.body()) {
-                if (response.statusCode() == 429)
-                    throw new ApiProblem(
-                            503,
-                            "CAPACITY_UNAVAILABLE",
-                            "The anonymous provider rejected the request because capacity is"
-                                    + " unavailable.",
-                            "WAIT");
-                if (response.statusCode() != 200)
-                    throw unknown("The provider did not acknowledge the request successfully.");
-                return bounded(
-                        in,
-                        remaining(started, Duration.ofSeconds(30)),
-                        () -> {
-                            byte[] bytes = in.readNBytes(1024 * 1024 + 1);
-                            if (bytes.length > 1024 * 1024)
-                                throw unknown("The provider response exceeded its byte limit.");
-                            return new String(bytes, StandardCharsets.UTF_8);
-                        });
-            } finally {
-                client.shutdownNow();
-            }
-        }
-    }
-
-    /**
-     * Read the full queue once. Gradio 5.49.1 uses event_id as session_hash when the
-     * simple POST omits a session. Its simplified GET discards output.error; the full
-     * queue preserves it. Neither endpoint is replayable. The caller persists the
-     * observation-start before entering, and never falls back to a second GET.
-     */
     public String observe(String eventId) throws Exception {
         if (!eventId.matches("[A-Za-z0-9_-]{1,128}")) throw unknown("Invalid saved event handle.");
         long started = System.nanoTime();
@@ -191,7 +73,9 @@ public final class MelodyFlowTransport {
             var response =
                     client.send(
                             HttpRequest.newBuilder(
-                                            origin.resolve("/gradio_api/queue/data?session_hash=" + eventId))
+                                            origin.resolve(
+                                                    "/gradio_api/queue/data?session_hash="
+                                                            + eventId))
                                     .timeout(observationDeadline)
                                     .header("Accept", "text/event-stream")
                                     .GET()
@@ -253,10 +137,12 @@ public final class MelodyFlowTransport {
                                     503,
                                     "CAPACITY_UNAVAILABLE",
                                     "MelodyFlow's anonymous GPU quota is exhausted. Your recordings"
-                                            + " and draft remain saved. No reliable reset time was supplied.",
+                                        + " and draft remain saved. No reliable reset time was"
+                                        + " supplied.",
                                     "WAIT");
                         throw unknown(
-                                "The provider reported an error without reliable execution evidence.");
+                                "The provider reported an error without reliable execution"
+                                    + " evidence.");
                     }
                     if (kind.equals("process_completed")) {
                         JsonNode result = message.path("output").path("data");

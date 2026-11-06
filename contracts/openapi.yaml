@@ -2,7 +2,7 @@ openapi: 3.1.0
 info:
   title: Djound local application API
   version: 0.1.0
-  description: Local single-person audio workspace with explicit sample mode and an opt-in anonymous MelodyFlow adapter for short clips. Live submissions require a separately provisioned bounded allowance.
+  description: Local audio workspace for recording uploads, reviewed arrangements, stem mixing and versioned playback. Local inference uses Basic Pitch and optional Qwen. Historical recordings retain their original provenance.
 servers:
   - url: /
 paths:
@@ -497,7 +497,7 @@ components:
       type: object
       required: [mode, configuration, eligibility, reasonCode, observedAt, providerResetAt, nextProbeAt, supportsStatusCheck, canRecheck, canSubmit, canSubmitWithAcknowledgement, canCreateExploration, activeAttemptId, activeExplorationId, unknownOutcome, submissionAllowance, fixtureControlsEnabled, inputPolicy]
       properties:
-        mode: { type: string, enum: [UNCONFIGURED, FIXTURE, LIVE, LOCAL] }
+        mode: { type: string, enum: [UNCONFIGURED, FIXTURE, LOCAL] }
         configuration: { type: string, enum: [UNCONFIGURED, CONFIGURED] }
         eligibility: { type: string, enum: [ELIGIBLE, BLOCKED, UNKNOWN] }
         reasonCode: { type: [string, 'null'] }
@@ -515,7 +515,7 @@ components:
         canSubmit: { type: boolean }
         canSubmitWithAcknowledgement:
           type: boolean
-          description: True only when acknowledgement of the unresolved outcome is the sole remaining submission blocker.
+          description: True only when acknowledgement of the unresolved outcome is the sole remaining submission blocker. An unresolved historical LIVE attempt is informational for new LOCAL renders.
         canCreateExploration: { type: boolean }
         activeAttemptId: { type: [string, 'null'] }
         activeExplorationId:
@@ -646,7 +646,7 @@ components:
         acknowledgedUnknownAttemptId:
           type: string
           minLength: 1
-          description: Explicit acknowledgement captured with this deliberate command. Retired only if the new command is accepted; omitted legacy commands retain their fingerprint encoding.
+          description: Explicit acknowledgement captured with this deliberate command. A LOCAL creation preserves a historical LIVE unknown outcome even if its ID is echoed. Omitted legacy fields retain their original fingerprint encoding.
     CreationReceipt:
       type: object
       required: [requestId, attemptId, statusUrl, consumedDraftRevision, nextDraftRevision, replayed]
@@ -715,7 +715,7 @@ components:
         acknowledgedUnknownAttemptId:
           type: string
           minLength: 1
-          description: Explicit acknowledgement captured with this deliberate retry. Never added or changed during receipt replay.
+          description: Explicit acknowledgement captured with this deliberate retry. A LOCAL retry preserves a historical LIVE unknown outcome. Receipt replay uses the original command.
     RetryReceipt:
       type: object
       required: [requestId, attemptId, statusUrl, replayed]

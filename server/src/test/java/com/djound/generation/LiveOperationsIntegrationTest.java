@@ -57,12 +57,13 @@ class LiveOperationsIntegrationTest {
                     String path = exchange.getRequestURI().getPath();
                     exchange.getRequestBody().readAllBytes();
                     byte[] response;
-                    if (path.equals("/gradio_api/upload"))
-                        response = "[\"/tmp/gradio/test/source.wav\"]".getBytes();
-                    else if (path.equals("/gradio_api/call/predict")) {
+                    if (!exchange.getRequestMethod().equals("GET")) {
                         posts.incrementAndGet();
-                        response = "{\"event_id\":\"test-event\"}".getBytes();
-                    } else if (path.equals("/gradio_api/queue/data")) {
+                        exchange.sendResponseHeaders(405, -1);
+                        exchange.close();
+                        return;
+                    }
+                    if (path.equals("/gradio_api/queue/data")) {
                         assertEquals(
                                 "session_hash=test-event", exchange.getRequestURI().getRawQuery());
                         observations.incrementAndGet();
@@ -91,7 +92,7 @@ class LiveOperationsIntegrationTest {
                     }
                 });
         peer.start();
-        launch("LIVE");
+        launch("FIXTURE");
         jdbc().sql(
                         "INSERT INTO live_submission_allowance(installation_id,submission_limit)"
                                 + " SELECT installation_id,2 FROM workspace WHERE id=1")
@@ -132,13 +133,7 @@ class LiveOperationsIntegrationTest {
     }
 
     LiveOperations operations() {
-        return new LiveOperations(
-                jdbc(),
-                app.getBean(MediaStore.class),
-                app.getBean(LiveAllowance.class),
-                app.getBean(GenerationConfiguration.class),
-                new MelodyFlowTransport(origin, Duration.ofSeconds(2)),
-                app.getBean(PlatformTransactionManager.class));
+        return new LiveOperations(jdbc(), new MelodyFlowTransport(origin, Duration.ofSeconds(2)));
     }
 
     PublicationStore publication() {
@@ -162,11 +157,31 @@ class LiveOperationsIntegrationTest {
                                                 Path.of("../fixtures/audio/source-study.wav"))),
                                 "draft",
                                 "live-local-source");
-        return service()
-                .create(
-                        source.explorationId(),
-                        new Models.CreateRequestCommand("warm strings", null, 1L, 1L),
-                        "live-local-request");
+        var receipt =
+                service()
+                        .create(
+                                source.explorationId(),
+                                new Models.CreateRequestCommand("warm strings", null, 1L, 1L),
+                                "live-local-request");
+        // An older installation admitted this request before retirement.
+        jdbc().sql(
+                        "UPDATE generation_request SET provenance='LIVE',"
+                            + " adapter_configuration_id='melodyflow-anonymous-v1' WHERE id=?")
+                .param(receipt.requestId())
+                .update();
+        return receipt;
+    }
+
+    Models.Attempt acknowledged() {
+        var owner = service().claimNext();
+        app.getBean(LiveAllowance.class).reserve(owner);
+        jdbc().sql(
+                        "INSERT INTO"
+                            + " generation_operation(id,attempt_id,adapter_configuration_id,provenance,event_id)"
+                            + " VALUES('historical-event',?,'melodyflow-anonymous-v1','LIVE','test-event')")
+                .param(owner.id())
+                .update();
+        return service().saveHandle(owner, "historical-event");
     }
 
     @Test
@@ -177,10 +192,8 @@ class LiveOperationsIntegrationTest {
                 app.getBean(Explorations.class)
                         .get(service().get(receipt.attemptId()).explorationId())
                         .original();
-        var owner = service().claimNext();
+        var owner = acknowledged();
         var operation = operations();
-        operation.submit(owner);
-        owner = service().get(owner.id());
         assertEquals("RUNNING", owner.state());
         String handle = service().savedHandle(owner.id());
         operation.observe(handle);
@@ -220,7 +233,7 @@ class LiveOperationsIntegrationTest {
                 Files.readAllBytes(Path.of("../fixtures/audio/source-study.wav")),
                 Files.readAllBytes(app.getBean(MediaStore.class).path(originalKey)));
         assertEquals("Version 1", recording.title());
-        assertEquals(1, posts.get());
+        assertEquals(0, posts.get());
         assertEquals(1, observations.get());
         assertEquals(1, downloads.get());
         assertEquals(1L, app.getBean(LiveAllowance.class).view().get("used"));
@@ -231,7 +244,7 @@ class LiveOperationsIntegrationTest {
                                 new Models.CreateRequestCommand("warm strings", null, 1L, 1L),
                                 "live-local-request")
                         .replayed());
-        assertEquals(1, posts.get());
+        assertEquals(0, posts.get());
     }
 
     @org.junit.jupiter.params.ParameterizedTest
@@ -255,6 +268,7 @@ class LiveOperationsIntegrationTest {
                 .putInt(frames * 2);
         output = wave;
         var receipt = accept();
+        acknowledged();
         new GenerationRunner(
                         service(),
                         app.getBean(FixtureOperations.class),
@@ -283,16 +297,18 @@ class LiveOperationsIntegrationTest {
                             .renditions()
                             .isEmpty());
         }
-        assertEquals(1, posts.get());
+        assertEquals(0, posts.get());
         assertEquals(1L, app.getBean(LiveAllowance.class).view().get("used"));
     }
 
     @Test
-    void staleOwnerCannotReserveOrTransmit() throws Exception {
-        accept();
-        var owner = service().claimNext();
-        service().fail(owner, "GENERATION_FAILED", "owner retired before upload");
-        assertThrows(StaleAttemptOwner.class, () -> operations().submit(owner));
+    void historicalAcceptedWorkIsClosedWithoutSubmittingOrSpendingAllowance() throws Exception {
+        var receipt = accept();
+        app.getBean(GenerationRunner.class).tick();
+        var closed = service().get(receipt.attemptId());
+        assertEquals("FAILED", closed.state());
+        assertEquals("RETRY_CONTEXT_UNAVAILABLE", closed.outcome().code());
+        assertFalse(closed.canRetry());
         assertEquals(0, posts.get());
         assertEquals(0L, app.getBean(LiveAllowance.class).view().get("used"));
         assertEquals(

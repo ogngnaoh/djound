@@ -56,6 +56,7 @@ public class ApiController {
         result.put("supportsStatusCheck", capacity.supportsStatusCheck());
         result.put("canRecheck", capacity.canRecheck());
         var unknown = generations.unknownOutcome();
+        boolean requiresAcknowledgement = generations.requiresAcknowledgement(unknown);
         result.put("unknownOutcome", unknown);
         result.put(
                 "canSubmit",
@@ -63,7 +64,7 @@ public class ApiController {
                         && !preparation
                         && allowed
                         && active == null
-                        && unknown == null
+                        && !requiresAcknowledgement
                         && capacity.allowsSubmission());
         result.put(
                 "canSubmitWithAcknowledgement",
@@ -71,7 +72,7 @@ public class ApiController {
                         && !preparation
                         && allowed
                         && active == null
-                        && unknown != null
+                        && requiresAcknowledgement
                         && capacity.allowsSubmission());
         result.put("canCreateExploration", active == null && !preparation);
         result.put("activeAttemptId", active);

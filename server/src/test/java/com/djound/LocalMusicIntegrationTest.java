@@ -788,6 +788,73 @@ else:
         assertEquals(1, ex().get(id).renditions().size());
     }
 
+    @org.junit.jupiter.params.ParameterizedTest
+    @org.junit.jupiter.params.provider.ValueSource(booleans = {false, true})
+    void independentLocalCreateAndRetryPreserveUnknownHostedHistory(boolean includeHistoricalId)
+            throws Exception {
+        String legacy = source("historic-live-source");
+        String original = ex().get(legacy).original().id();
+        db().sql(
+                        """
+                        INSERT INTO generation_request(id,exploration_id,source_recording_id,source_revision,
+                            basis_recording_id,submitted_text,inherited_direction,direction,assembled_instructions,
+                            assembler_version,adapter_configuration_id,provenance,created_at)
+                        VALUES('older-request',?,?,1,?,'piano','','piano','piano','literal-v1','melodyflow-anonymous-v1','LIVE',now())
+                        """)
+                .params(legacy, original, original)
+                .update();
+        db().sql(
+                        """
+                        INSERT INTO generation_attempt(id,request_id,exploration_id,state,outcome_code,outcome_detail,created_at,updated_at)
+                        VALUES('older-unknown','older-request',?,'FAILED','OUTCOME_UNKNOWN','The hosted event was interrupted.',now(),now())
+                        """)
+                .param(legacy)
+                .update();
+        db().sql("UPDATE workspace SET unknown_outcome_attempt_id='older-unknown' WHERE id=1")
+                .update();
+        var marker = gen().unknownOutcome();
+        var api = app.getBean(ApiController.class);
+        String id = source();
+        var p = planned(id, confirmed(id));
+        assertEquals(marker, api.workspace().get("unknownOutcome"));
+        assertEquals(true, api.workspace().get("canSubmit"));
+        assertEquals(false, api.workspace().get("canSubmitWithAcknowledgement"));
+        String historicalId = includeHistoricalId ? marker.attemptId() : null;
+        var body =
+                new Models.CreateRequestCommand(
+                        p.text(),
+                        p.basisRecordingId(),
+                        p.sourceRevision(),
+                        p.draftRevision(),
+                        historicalId,
+                        p.id());
+        Files.writeString(root.resolve("fail-render"), "exercise deliberate local retry");
+        var receipt = api.createRequest(id, body, "independent-local-create").getBody();
+        var failed = finished(receipt.attemptId());
+        assertEquals("LOCAL_ENGINE_FAILED", failed.outcome().code());
+        assertTrue(failed.canRetry());
+        Files.delete(root.resolve("fail-render"));
+        var retryBody = new Models.RetryCommand(failed.id(), historicalId);
+        var retry = api.retry(receipt.requestId(), retryBody, "independent-local-retry").getBody();
+        assertEquals("SUCCEEDED", finished(retry.attemptId()).state());
+        assertTrue(
+                api.retry(receipt.requestId(), retryBody, "independent-local-retry")
+                        .getBody()
+                        .replayed());
+        assertEquals(1, ex().get(id).renditions().size());
+        assertEquals(marker, gen().unknownOutcome());
+        assertEquals("OUTCOME_UNKNOWN", api.attempt(marker.attemptId()).outcome().code());
+        assertEquals(
+                0L,
+                db().sql(
+                                """
+                                SELECT count(*) FROM generation_attempt WHERE acknowledged_unknown_attempt_id IS NOT NULL
+                                    OR acknowledged_by_attempt_id IS NOT NULL OR acknowledged_at IS NOT NULL
+                                """)
+                        .query(Long.class)
+                        .single());
+    }
+
     @Test
     void startupFailsInterruptedLocalJobsWithoutReexecutingOrCreatingRemoteDebt() throws Exception {
         String id = source();

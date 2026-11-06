@@ -10,22 +10,16 @@ public record GenerationConfiguration(String mode, long delayMs, boolean reviewC
             @Value("${djound.mode}") String mode,
             @Value("${djound.fixture-delay-ms}") long delayMs,
             @Value("${djound.fixture-review-controls}") boolean reviewControls) {
-        if (!mode.equals("UNCONFIGURED")
-                && !mode.equals("FIXTURE")
-                && !mode.equals("LIVE")
-                && !mode.equals("LOCAL"))
+        if (mode.equals("LIVE"))
             throw new IllegalArgumentException(
-                    "DJOUND_MODE must be UNCONFIGURED, FIXTURE, LIVE, or LOCAL");
+                    "DJOUND_MODE=LIVE is retired. Use LOCAL to create music or UNCONFIGURED to play"
+                        + " saved recordings.");
+        if (!mode.equals("UNCONFIGURED") && !mode.equals("FIXTURE") && !mode.equals("LOCAL"))
+            throw new IllegalArgumentException(
+                    "DJOUND_MODE must be UNCONFIGURED, FIXTURE, or LOCAL");
         if (delayMs < 0 || delayMs > 30000)
             throw new IllegalArgumentException(
                     "DJOUND_FIXTURE_DELAY_MS must be between 0 and 30000");
-        if (mode.equals("LIVE")) {
-            if (!"1".equals(System.getProperty("jdk.httpclient.redirects.retrylimit"))
-                    || !"true".equals(System.getProperty("jdk.httpclient.disableRetryConnect"))
-                    || !"false".equals(System.getProperty("jdk.httpclient.enableAllMethodRetry")))
-                throw new IllegalArgumentException(
-                        "LIVE requires explicit JVM no-retry launch properties");
-        }
         this.mode = mode;
         this.delayMs = delayMs;
         this.reviewControls = reviewControls;
