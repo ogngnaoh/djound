@@ -60,6 +60,10 @@ if (base/('pause-'+op)).exists():
  child=subprocess.Popen([sys.executable,'-c','import time;time.sleep(60)'])
  (base/'child.pid').write_text(str(child.pid));(base/'started').write_text(op);time.sleep(60)
 result={'schemaVersion':1,'status':'succeeded','operation':op,'provenance':{'engine':'explicit-test-double'}}
+if op=='audition':
+ (base/'audition-input.json').write_text(json.dumps(r))
+ until=time.monotonic()+10
+ while (base/'hold-audition').exists() and time.monotonic()<until: time.sleep(.02)
 if op=='plan':
  recipe=dict(r['parentRecipe']);recipe['instrument']='electric_piano'
  result.update(recipe=recipe,explanation='Switch the confirmed melody to electric piano.')
@@ -67,8 +71,10 @@ if op=='plan':
 else:
  path=out/'audio.wav'
  with wave.open(str(path),'wb') as w:
-  w.setparams((1,2,44100,0,'NONE','not compressed'));w.writeframes(b''.join(struct.pack('<h',int(8000*math.sin(i*2*math.pi*440/44100))) for i in range(44100)))
+  channels=2 if op=='audition' else 1
+  w.setparams((channels,2,44100,0,'NONE','not compressed'));w.writeframes(b''.join(struct.pack('<h',int(8000*math.sin(i*2*math.pi*440/44100)))*channels for i in range(44100)))
  result.update(audioPath=str(path),duration=1.0,notes=[{'start':0.1,'end':0.8,'pitch':69,'velocity':80}])
+ if op=='audition' and (base/'bad-output').exists(): result['audioPath']=str(base/'audition-input.json')
 (out/'result.json').write_text(json.dumps(result))
 """);
         app = launch();
@@ -184,6 +190,181 @@ else:
                 p.draftRevision(),
                 null,
                 p.id());
+    }
+
+    @Test
+    void toneAuditionServesOnlyAnOwnedFullMixWithoutSavingAVersion() throws Exception {
+        String id = source();
+        var notes = confirmed(id);
+        var plan = planned(id, notes);
+        var attempt = finished(gen().create(id, command(plan), "audition-basis-key").attemptId());
+        var basis = ex().recording(attempt.resultRecordingId());
+        var draft =
+                ex().saveDraft(
+                                id,
+                                new Models.DraftUpdate(
+                                        "tone test", basis.id(), ex().get(id).draft().revision()));
+        var command =
+                new ToneAuditionCommand(
+                        1L, notes.revision(), draft.revision(), basis.id(), "lead", "warm");
+        var json = new tools.jackson.databind.ObjectMapper();
+        var url =
+                java.net.URI.create(
+                        "http://127.0.0.1:"
+                                + app.getEnvironment().getProperty("local.server.port")
+                                + "/api/explorations/"
+                                + id
+                                + "/local/tone-auditions");
+        var post =
+                java.net.http.HttpRequest.newBuilder(url)
+                        .header("Content-Type", "application/json")
+                        .POST(
+                                java.net.http.HttpRequest.BodyPublishers.ofString(
+                                        json.writeValueAsString(command)))
+                        .build();
+        var prior = auditionCounts();
+        var response =
+                java.net.http.HttpClient.newHttpClient()
+                        .send(post, java.net.http.HttpResponse.BodyHandlers.ofByteArray());
+        assertEquals(200, response.statusCode());
+        assertEquals("no-store", response.headers().firstValue("Cache-Control").orElseThrow());
+        assertEquals("audio/wav", response.headers().firstValue("Content-Type").orElseThrow());
+        assertArrayEquals(
+                "RIFF".getBytes(java.nio.charset.StandardCharsets.US_ASCII),
+                Arrays.copyOf(response.body(), 4));
+        assertEquals(44 + 44100 * 4, response.body().length);
+        var injected = (tools.jackson.databind.node.ObjectNode) json.valueToTree(command);
+        injected.put("sourceAudio", "outside.wav");
+        var invalid = java.net.http.HttpRequest.newBuilder(url).header("Content-Type", "application/json")
+                .POST(java.net.http.HttpRequest.BodyPublishers.ofString(json.writeValueAsString(injected))).build();
+        assertEquals(400, java.net.http.HttpClient.newHttpClient()
+                .send(invalid, java.net.http.HttpResponse.BodyHandlers.discarding()).statusCode());
+        var input = json.readTree(Files.readString(root.resolve("audition-input.json")));
+        assertEquals(attempt.id(), input.path("basisAttemptId").asText());
+        assertEquals(basis.sha256(), input.path("basisAudioSha256").asText());
+        assertEquals("warm", input.path("tone").asText());
+        assertEquals("lead", input.path("stem").asText());
+        assertEquals("electric_piano", input.path("parentRecipe").path("instrument").asText());
+        assertFalse(input.has("sourceAudio"));
+        try (var dirs = Files.newDirectoryStream(root.resolve("local-jobs"), "audition_*")) {
+            assertFalse(dirs.iterator().hasNext());
+        }
+        assertEquals(prior, auditionCounts());
+        assertEquals(
+                "PLAN_INVALID",
+                assertThrows(
+                                ApiProblem.class,
+                                () ->
+                                        local().auditionTone(
+                                                        id,
+                                                        new ToneAuditionCommand(
+                                                                1L,
+                                                                notes.revision(),
+                                                                draft.revision(),
+                                                                basis.id(),
+                                                                "drums",
+                                                                "bright")))
+                        .code());
+        Files.createFile(root.resolve("bad-output"));
+        assertEquals(
+                "OUTPUT_INVALID",
+                assertThrows(ApiProblem.class, () -> local().auditionTone(id, command)).code());
+        try (var dirs = Files.newDirectoryStream(root.resolve("local-jobs"), "audition_*")) {
+            assertFalse(dirs.iterator().hasNext());
+        }
+        String foreign = source("audition-other-source");
+        assertEquals(
+                "AUDITION_BASIS_CHANGED",
+                assertThrows(
+                                ApiProblem.class,
+                                () ->
+                                        local().auditionTone(
+                                                        foreign,
+                                                        new ToneAuditionCommand(
+                                                                1L,
+                                                                1L,
+                                                                1L,
+                                                                basis.id(),
+                                                                "lead",
+                                                                "bright")))
+                        .code());
+        var latest =
+                local().saveNotes(id, new NotesCommand(1L, notes.revision(), notes.notes(), true));
+        assertEquals(
+                "NOTES_CHANGED",
+                assertThrows(
+                                ApiProblem.class,
+                                () ->
+                                        local().auditionTone(
+                                                        id,
+                                                        new ToneAuditionCommand(
+                                                                1L,
+                                                                latest.revision(),
+                                                                draft.revision(),
+                                                                basis.id(),
+                                                                "lead",
+                                                                "warm")))
+                        .code());
+    }
+
+    private Map<String, Object> auditionCounts() {
+        return db().sql(
+                        """
+                        SELECT (SELECT COUNT(*) FROM recording) AS recordings,
+                               (SELECT COUNT(*) FROM generation_request) AS requests,
+                               (SELECT COUNT(*) FROM local_plan) AS plans,
+                               (SELECT COUNT(*) FROM local_job) AS jobs
+                        """)
+                .query()
+                .singleRow();
+    }
+
+    @Test
+    void concurrentAuditionIsRejectedAndDraftChangesDiscardInFlightBytes() throws Exception {
+        String id = source();
+        var notes = confirmed(id);
+        var attempt =
+                finished(
+                        gen().create(id, command(planned(id, notes)), "concurrent-audition-key")
+                                .attemptId());
+        var basis = attempt.resultRecordingId();
+        var draft =
+                ex().saveDraft(
+                                id,
+                                new Models.DraftUpdate(
+                                        "Compare tone", basis, ex().get(id).draft().revision()));
+        var request =
+                new ToneAuditionCommand(
+                        1L, notes.revision(), draft.revision(), basis, "lead", "bright");
+        var previous = auditionCounts();
+        var held = Files.createFile(root.resolve("hold-audition"));
+        var task =
+                java.util.concurrent.CompletableFuture.supplyAsync(
+                        () -> local().auditionTone(id, request));
+        try {
+            long start = System.nanoTime();
+            while (!Files.exists(root.resolve("audition-input.json"))
+                    && System.nanoTime() - start < TimeUnit.SECONDS.toNanos(8)) Thread.sleep(20);
+            assertTrue(Files.exists(root.resolve("audition-input.json")));
+            assertEquals(
+                    "AUDITION_BUSY",
+                    assertThrows(ApiProblem.class, () -> local().auditionTone(id, request)).code());
+            ex().saveDraft(
+                            id,
+                            new Models.DraftUpdate(
+                                    "Changed while previewing", basis, draft.revision()));
+        } finally {
+            Files.deleteIfExists(held);
+        }
+        var raised =
+                assertThrows(
+                        java.util.concurrent.ExecutionException.class,
+                        () -> task.get(8, TimeUnit.SECONDS));
+        assertEquals("STALE_DRAFT", ((ApiProblem) raised.getCause()).code());
+        assertEquals(previous, auditionCounts());
+        try (var dirs = Files.newDirectoryStream(root.resolve("local-jobs"), "audition_*")) {
+            assertFalse(dirs.iterator().hasNext());
+        }
     }
 
     @Test

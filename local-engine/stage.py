@@ -22,7 +22,10 @@ def main():
     operation = request['operation']
     result = {'schemaVersion': 1, 'operation': operation}
     try:
-        if operation == 'plan':
+        if operation == 'audition':
+            from audition import audition
+            fields = audition(request, output)
+        elif operation == 'plan':
             from planner import plan
             fields = plan(request.get('prompt'), request.get('parentRecipe'), output,
                           notes=request.get('notes'), duration=request.get('duration'))

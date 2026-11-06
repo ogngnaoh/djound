@@ -20,6 +20,7 @@ import java.util.concurrent.atomic.AtomicBoolean;
 
 @Service
 public class LocalMusic {
+    private static final int MAX_AUDITION_BYTES = 2_200_000;
     private final JdbcClient db;
     private final TransactionTemplate tx;
     private final LocalWorker worker;
@@ -27,6 +28,7 @@ public class LocalMusic {
     private final GenerationConfiguration config;
     private final ObjectMapper json = new ObjectMapper();
     private final AtomicBoolean running = new AtomicBoolean();
+    private final AtomicBoolean auditioning = new AtomicBoolean();
 
     public LocalMusic(
             JdbcClient db,
@@ -334,6 +336,157 @@ public class LocalMusic {
                                     "duration",
                                     n.durationSeconds()));
                 });
+    }
+
+    /** Auditions return only the finished mix. They never enter the publication workflow. */
+    public byte[] auditionTone(String id, ToneAuditionCommand command) {
+        enabled();
+        if (command == null
+                || command.expectedSourceRevision() == null
+                || command.expectedSourceRevision() < 1
+                || command.expectedNoteRevision() == null
+                || command.expectedNoteRevision() < 1
+                || command.expectedDraftRevision() == null
+                || command.expectedDraftRevision() < 1
+                || command.basisRecordingId() == null
+                || command.basisRecordingId().isBlank()
+                || command.basisRecordingId().length() > 128)
+            throw new ApiProblem(
+                    400,
+                    "INVALID_REQUEST",
+                    "Choose a current version to audition.",
+                    "REFRESH_EXPLORATION");
+        if (!auditioning.compareAndSet(false, true))
+            throw problem("AUDITION_BUSY", "Another tone audition is in progress.");
+        String audition = "audition_" + UUID.randomUUID();
+        try {
+            var request =
+                    tx.execute(
+                            s -> {
+                                guard();
+                                idle();
+                                return auditionRequest(id, command);
+                            });
+            worker.requireAuditionSpace();
+            var result =
+                    worker.execute(audition, request, () -> Thread.currentThread().isInterrupted());
+            Path output = worker.audio(audition, result.path("audioPath").asText(""));
+            if (!output.equals(worker.directory(audition).toRealPath().resolve("output/audio.wav"))
+                    || Files.size(output) > MAX_AUDITION_BYTES)
+                throw problem(
+                        "OUTPUT_INVALID", "The local audition returned an invalid audio file.");
+            var wav = media.validateFile(output, "audio.wav");
+            double duration = (double) request.get("duration");
+            if (wav.bytes() > MAX_AUDITION_BYTES
+                    || !"audio/wav".equals(wav.contentType())
+                    || wav.channels() != 2
+                    || wav.sampleRate() != 44100
+                    || Math.abs(wav.preciseSeconds() - duration) > 1.1 / 44100)
+                throw problem("OUTPUT_INVALID", "The local audition does not match this clip.");
+            byte[] bytes;
+            try (var input = Files.newInputStream(output)) {
+                bytes = input.readNBytes(Math.toIntExact(wav.bytes()) + 1);
+                if (bytes.length != wav.bytes())
+                    throw problem("OUTPUT_INVALID", "The audition changed while being read.");
+            }
+            tx.executeWithoutResult(
+                    s -> {
+                        guard();
+                        if (!request.equals(auditionRequest(id, command)))
+                            throw problem(
+                                    "AUDITION_CHANGED",
+                                    "The selected version changed during the audition.");
+                    });
+            return bytes;
+        } catch (ApiProblem e) {
+            throw e;
+        } catch (Exception e) {
+            if (e instanceof InterruptedException) Thread.currentThread().interrupt();
+            throw new ApiProblem(
+                    503,
+                    "AUDITION_UNAVAILABLE",
+                    "The local preview could not be prepared.",
+                    "RETRY");
+        } finally {
+            try {
+                worker.discardAudition(audition);
+            } catch (java.io.IOException e) {
+                throw new ApiProblem(
+                        503,
+                        "AUDITION_STORAGE_UNAVAILABLE",
+                        "The local preview could not be cleared.",
+                        "RETRY");
+            } finally {
+                auditioning.set(false);
+            }
+        }
+    }
+
+    private Map<String, Object> auditionRequest(String id, ToneAuditionCommand command) {
+        var exploration = exploration(id, command.expectedSourceRevision());
+        if (number(exploration, "draft_revision") != command.expectedDraftRevision())
+            throw problem("STALE_DRAFT", "The direction changed. Review the current draft.");
+        if (!command.basisRecordingId().equals(exploration.get("draft_basis_id")))
+            throw problem(
+                    "AUDITION_BASIS_CHANGED",
+                    "Select the current draft basis to audition a track.");
+        var notes =
+                currentNotes(
+                        id, command.expectedSourceRevision(), command.expectedNoteRevision(), true);
+        var source =
+                db
+                        .sql(
+                                """
+                                SELECT a.id AS attempt, r.sha256, p.recipe_json, p.note_revision
+                                FROM recording r
+                                JOIN generation_attempt a ON a.id=r.attempt_id AND a.result_recording_id=r.id
+                                    AND a.state='SUCCEEDED' AND a.exploration_id=r.exploration_id
+                                JOIN generation_request q ON q.id=a.request_id AND q.id=r.request_id AND q.provenance='LOCAL'
+                                    AND q.exploration_id=r.exploration_id
+                                JOIN local_plan p ON p.id=q.local_plan_id AND p.exploration_id=r.exploration_id
+                                    AND p.source_recording_id=q.source_recording_id AND p.source_revision=q.source_revision
+                                WHERE r.id=? AND r.exploration_id=? AND r.kind='RENDITION' AND r.provenance='LOCAL'
+                                    AND q.source_recording_id=? AND q.source_revision=?
+                                """)
+                        .params(
+                                command.basisRecordingId(),
+                                id,
+                                exploration.get("original_id"),
+                                command.expectedSourceRevision())
+                        .query()
+                        .listOfRows()
+                        .stream()
+                        .findFirst()
+                        .orElseThrow(
+                                () ->
+                                        problem(
+                                                "AUDITION_BASIS_UNAVAILABLE",
+                                                "Choose a saved local version of this recording."));
+        if (number(source, "note_revision") != notes.revision())
+            throw problem(
+                    "NOTES_CHANGED",
+                    "This version uses an earlier melody. Choose a version with the current"
+                        + " confirmed notes.");
+        var parent = validateRecipe(map((String) source.get("recipe_json")));
+        validateArrangementTiming(parent, notes.durationSeconds());
+        LocalMix.requireAudibleToneTarget(parent, command.stem(), command.tone());
+        return Map.of(
+                "schemaVersion",
+                1,
+                "operation",
+                "audition",
+                "basisAttemptId",
+                source.get("attempt"),
+                "basisAudioSha256",
+                source.get("sha256"),
+                "parentRecipe",
+                parent,
+                "duration",
+                notes.durationSeconds(),
+                "stem",
+                command.stem(),
+                "tone",
+                command.tone());
     }
 
     private Map<String, Object> planningPayload(String id, PlanCommand command) {

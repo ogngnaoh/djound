@@ -8,6 +8,7 @@ import {
   type ReactNode,
 } from "react";
 import type { Track } from "./types";
+import { auditionStart } from "./auditionEligibility";
 import { Button } from "../components/ui/button";
 import { Slider } from "../components/ui/slider";
 import "./player-controls.css";
@@ -40,7 +41,8 @@ type AudioState = {
   restart: () => void;
   setVolume: (n: number) => void;
   retry: () => void;
-  clear: () => void;
+  clear: (onlyTrackId?: string) => void;
+  reserveAudition: () => AbortController;
 };
 const Context = createContext<AudioState | null>(null);
 export function useAudio() {
@@ -56,7 +58,8 @@ export function AudioProvider({
   failed?: boolean;
 }) {
   const audio = useRef<HTMLAudioElement>(null),
-    current = useRef<Track | null>(null);
+    current = useRef<Track | null>(null),
+    pendingAudition = useRef<AbortController | null>(null);
   const [track, setTrack] = useState<Track | null>(null),
     [playing, setPlaying] = useState(false),
     [loading, setLoading] = useState(false),
@@ -66,6 +69,12 @@ export function AudioProvider({
     [volume, setVolumeState] = useState(0.7);
   const fail = useRef(failed);
   fail.current = failed;
+  const reserveAudition = useCallback(() => {
+    pendingAudition.current?.abort();
+    const controller = new AbortController();
+    pendingAudition.current = controller;
+    return controller;
+  }, []);
   const play = useCallback(() => {
     const a = audio.current;
     if (!a) return;
@@ -76,8 +85,9 @@ export function AudioProvider({
     }
     setError("");
     if (a.ended) a.currentTime = 0;
+    const chosen = current.current;
     void a.play().catch((e) => {
-      if (e.name !== "AbortError") {
+      if (e.name !== "AbortError" && chosen === current.current) {
         setError("This recording could not be played. Retry audio.");
         setPlaying(false);
         setLoading(false);
@@ -88,17 +98,23 @@ export function AudioProvider({
     (t: Track, start = true) => {
       const a = audio.current;
       if (!a) return;
+      pendingAudition.current?.abort();
+      pendingAudition.current = null;
       if (current.current?.id !== t.id || current.current.url !== t.url) {
+        const previous = current.current;
+        const offset = auditionStart(previous, t, a.currentTime, a.ended);
         a.pause();
         current.current = t;
         setTrack(t);
-        setPosition(0);
+        setPosition(offset);
         setDuration(t.duration);
         setPlaying(false);
         setError("");
         setLoading(true);
         a.src = t.url;
         a.load();
+        if (offset) a.currentTime = offset;
+        if (previous?.auditionBasisId) URL.revokeObjectURL(previous.url);
       }
       if (start) play();
     },
@@ -107,6 +123,7 @@ export function AudioProvider({
   const toggle = useCallback(() => {
     const a = audio.current;
     if (!a) return;
+    pendingAudition.current?.abort();
     if (a.paused) play();
     else a.pause();
   }, [play]);
@@ -150,17 +167,29 @@ export function AudioProvider({
     a.load();
     play();
   }, [play]);
-  const clear = useCallback(() => {
+  const clear = useCallback((onlyTrackId?: string) => {
+    if (onlyTrackId && current.current?.id !== onlyTrackId) return;
+    pendingAudition.current?.abort();
+    pendingAudition.current = null;
     audio.current?.pause();
     audio.current?.removeAttribute("src");
+    audio.current?.load();
+    if (current.current?.auditionBasisId)
+      URL.revokeObjectURL(current.current.url);
     current.current = null;
     setTrack(null);
     setPosition(0);
     setPlaying(false);
+    setLoading(false);
     setError("");
   }, []);
   useEffect(() => {
     if (audio.current) audio.current.volume = 0.7;
+    return () => {
+      pendingAudition.current?.abort();
+      if (current.current?.auditionBasisId)
+        URL.revokeObjectURL(current.current.url);
+    };
   }, []);
   return (
     <Context.Provider
@@ -180,6 +209,7 @@ export function AudioProvider({
         setVolume,
         retry,
         clear,
+        reserveAudition,
       }}
     >
       {children}

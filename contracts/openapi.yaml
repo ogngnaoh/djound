@@ -6,6 +6,26 @@ info:
 servers:
   - url: /
 paths:
+  /api/explorations/{id}/local/tone-auditions:
+    post:
+      operationId: auditionLocalTone
+      description: Returns a temporary stereo mix of a saved local version with one audible track's tone selected. Uses the current confirmed melody and saved draft basis. No recording, plan, or generation is created.
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/LocalToneAuditionCommand' }
+      responses:
+        '200':
+          description: Complete stereo PCM16 WAV at 44100 Hz for immediate playback
+          headers:
+            Cache-Control: { schema: { type: string, const: no-store } }
+          content:
+            audio/wav:
+              schema: { type: string, format: binary }
+        default: { $ref: '#/components/responses/Problem' }
   /api/explorations/{id}/local/manual-plans:
     post:
       operationId: createManualLocalPlan
@@ -873,6 +893,17 @@ components:
       required: [expectedSourceRevision]
       properties:
         expectedSourceRevision: { type: integer, minimum: 1 }
+    LocalToneAuditionCommand:
+      type: object
+      additionalProperties: false
+      required: [expectedSourceRevision, expectedNoteRevision, expectedDraftRevision, basisRecordingId, stem, tone]
+      properties:
+        expectedSourceRevision: { type: integer, format: int64, minimum: 1 }
+        expectedNoteRevision: { type: integer, format: int64, minimum: 1 }
+        expectedDraftRevision: { type: integer, format: int64, minimum: 1 }
+        basisRecordingId: { type: string, minLength: 1, maxLength: 128 }
+        stem: { type: string, enum: [lead, bass, drums, chords] }
+        tone: { type: string, enum: [neutral, warm, bright] }
     LocalRevisionCommand:
       type: object
       required: [expectedSourceRevision, expectedNoteRevision]

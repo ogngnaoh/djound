@@ -1,6 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { createStudioService } from "./service.ts";
+import { auditionStart, auditionUnavailable } from "./auditionEligibility.ts";
 import {
   changeBar,
   chartBassNotice,
@@ -669,4 +670,135 @@ test("chart review explains enabled bass resting and resuming without a switch c
     chartBassNotice(changeBar(enabled, 0, "Dm"), enabled),
     undefined,
   );
+});
+
+test("tone audition binds the saved basis and revisions without changing the draft or creating a version", async () => {
+  storage();
+  const project = await createStudioService("prototype", "normal").get(
+    "evening",
+  );
+  const basis = {
+    ...project.tracks[1],
+    recipeKnown: true,
+    noteRevision: project.noteRevision,
+  };
+  const current = {
+    ...project,
+    basisId: basis.id,
+    tracks: [project.tracks[0], basis],
+    draft: "my original words",
+  };
+  const snapshot = structuredClone(current);
+  const { api } = await import("../api.ts");
+  const { POST } = api;
+  const signal = new AbortController().signal;
+  const wav = new Blob(["saved mix"], { type: "audio/wav" });
+  const service = createStudioService("backend", "normal");
+  try {
+    api.POST = (async (path: string, options: any) => {
+      assert.equal(path, "/api/explorations/{id}/local/tone-auditions");
+      assert.deepEqual(options.params, { path: { id: project.id } });
+      assert.deepEqual(options.body, {
+        basisRecordingId: basis.id,
+        expectedNoteRevision: current.noteRevision,
+        expectedSourceRevision: current.sourceRevision,
+        expectedDraftRevision: current.draftRevision,
+        stem: "lead",
+        tone: "neutral",
+      });
+      assert.equal(options.signal, signal);
+      assert.equal(options.parseAs, "blob");
+      assert.equal(options.cache, "no-store");
+      return { data: wav };
+    }) as unknown as typeof api.POST;
+    assert.equal(
+      await service.auditionTone!(current, basis.id, "lead", "neutral", signal),
+      wav,
+    );
+    api.POST = (async () => ({
+      error: { detail: "Dry stems unavailable." },
+    })) as unknown as typeof api.POST;
+    await assert.rejects(
+      service.auditionTone!(current, basis.id, "lead", "warm", signal),
+      /Dry stems unavailable/,
+    );
+    assert.deepEqual(current, snapshot);
+  } finally {
+    api.POST = POST;
+  }
+});
+
+test("auditions compare only one audible stem in the current unchanged arrangement", async () => {
+  storage();
+  const project = await createStudioService("prototype", "normal").get(
+    "evening",
+  );
+  const bright = { gainDb: 0, pan: 0, muted: false, tone: "bright" } as const;
+  const basis = {
+    ...project.tracks[1],
+    recipeKnown: true,
+    noteRevision: project.noteRevision,
+    recipe: { ...DEFAULT_RECIPE, mix: { lead: bright } },
+  };
+  const current = { ...project, basisId: basis.id };
+  const neutral: Recipe = { ...DEFAULT_RECIPE };
+  assert.equal(auditionUnavailable(current, basis, neutral, "lead"), undefined);
+  assert.match(
+    auditionUnavailable(current, basis, neutral, "bass")!,
+    /other changes/,
+  );
+  assert.match(
+    auditionUnavailable(current, basis, { ...neutral, drums: false }, "lead")!,
+    /other changes/,
+  );
+  assert.match(
+    auditionUnavailable(
+      current,
+      basis,
+      { ...neutral, mix: { lead: { ...bright, gainDb: -1 } } },
+      "lead",
+    )!,
+    /other changes/,
+  );
+  assert.match(
+    auditionUnavailable(current, basis, neutral, "chords")!,
+    /track that plays/,
+  );
+  const muted = {
+    ...basis,
+    recipe: { ...basis.recipe, mix: { lead: { ...bright, muted: true } } },
+  };
+  assert.match(
+    auditionUnavailable(current, muted, muted.recipe, "lead")!,
+    /track that plays/,
+  );
+  assert.match(
+    auditionUnavailable(
+      { ...current, noteRevision: 99 },
+      basis,
+      neutral,
+      "lead",
+    )!,
+    /current melody/,
+  );
+  assert.match(
+    auditionUnavailable(
+      { ...current, basisId: "other" },
+      basis,
+      neutral,
+      "lead",
+    )!,
+    /basis to save/,
+  );
+  const preview = {
+    ...basis,
+    kind: "preview" as const,
+    id: "preview",
+    auditionBasisId: basis.id,
+  };
+  assert.equal(auditionStart(basis, preview, 4, false), 4);
+  assert.equal(auditionStart(preview, preview, 5, false), 5);
+  assert.equal(auditionStart(preview, basis, 5, false), 0);
+  assert.equal(auditionStart(preview, preview, 12, true), 0);
+  assert.equal(auditionStart(current.tracks[0], preview, 5, false), 0);
 });

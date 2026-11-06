@@ -49,3 +49,16 @@ def mix(stems, strips):
             raise ValueError('Stems must share a timeline')
         total += component
     return total.astype('<f4')
+
+
+def render_mix(dry_stems, controls):
+    """Apply validated tone and mixer settings without altering the source stems."""
+    strips = {name: Strip(gain_db=strip['gainDb'], pan=strip['pan'], mute=strip['muted'])
+              for name, strip in controls.items()}
+    inputs = dict(dry_stems)
+    tone_results = {}
+    for name, strip in controls.items():
+        if 'tone' in strip and not strip['muted']:
+            from track_tone import shape
+            inputs[name], tone_results[name] = shape(dry_stems[name], strip['tone'])
+    return mix(inputs, strips), tone_results

@@ -86,6 +86,22 @@ public class LocalWorker implements AutoCloseable {
         return root.resolve("local-jobs").resolve(id);
     }
 
+    void requireAuditionSpace() throws java.io.IOException {
+        // Two-channel 12-second PCM16 + float scratch and worker diagnostics.
+        if (Files.getFileStore(root).getUsableSpace() < 24L * 1024 * 1024)
+            throw new ApiProblem(
+                    503,
+                    "AUDITION_STORAGE_UNAVAILABLE",
+                    "Free some local storage before previewing this mix.",
+                    "RETRY");
+    }
+
+    void discardAudition(String id) throws java.io.IOException {
+        if (!id.startsWith("audition_"))
+            throw new IllegalArgumentException("Expected an audition ID");
+        org.springframework.util.FileSystemUtils.deleteRecursively(directory(id));
+    }
+
     public JsonNode execute(String id, Map<String, Object> request, BooleanSupplier cancelled)
             throws Exception {
         if (!readiness().ready())
@@ -117,7 +133,8 @@ public class LocalWorker implements AutoCloseable {
         builder.redirectErrorStream(true).redirectOutput(dir.resolve("worker.log").toFile());
         Process process = builder.start();
         processes.put(id, process);
-        long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(180);
+        long deadline = System.nanoTime()
+                + TimeUnit.SECONDS.toNanos("audition".equals(request.get("operation")) ? 35 : 180);
         try {
             while (!process.waitFor(200, TimeUnit.MILLISECONDS)) {
                 if (closing || cancelled.getAsBoolean())

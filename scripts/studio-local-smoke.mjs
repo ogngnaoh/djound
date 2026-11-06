@@ -47,6 +47,7 @@ const errors = [],
   external = [],
   submissions = [],
   plannerRequests = [],
+  auditions = [],
   timings = [];
 let id,
   lostReceipt,
@@ -144,6 +145,33 @@ async function interpret(text) {
   expect(state.plan.canGenerate, JSON.stringify(state.plan)).toBe(true);
   await expect(button("Create version")).toBeEnabled();
   return state.plan;
+}
+async function auditionTone(basis, tone) {
+  const previousUrl = await page.locator("audio").evaluate(a => a.currentSrc);
+  const before = Date.now();
+  const reply = page.waitForResponse((r) =>
+    r.request().method() === "POST" && r.url().endsWith(`/api/explorations/${id}/local/tone-auditions`));
+  await button("Preview tone").click();
+  const response = await reply;
+  expect(response.status()).toBe(200);
+  expect(response.headers()["content-type"]).toContain("audio/wav");
+  expect(response.headers()["cache-control"]).toContain("no-store");
+  expect(response.request().postDataJSON()).toMatchObject({basisRecordingId: basis.id, stem: "lead", tone});
+  await expect.poll(() => page.locator("audio").evaluate((a, previous) =>
+    !a.paused && a.currentSrc !== previous && a.currentSrc.startsWith("blob:") && a.currentTime > .05,
+    previousUrl)).toBe(true);
+  const clickToPlayingMs = Date.now() - before;
+  // Read the exact Blob that the single transport is playing. Preview responses
+  // use no-store and need not retain a separate network-debugger body.
+  const played = await page.locator("audio").evaluate(async a => {
+    const bytes = await (await fetch(a.currentSrc)).arrayBuffer();
+    const hash = new Uint8Array(await crypto.subtle.digest("SHA-256", bytes));
+    return {size: bytes.byteLength, sha256: Array.from(hash, n => n.toString(16).padStart(2, "0")).join("")};
+  });
+  expect(played.size).toBeGreaterThan(44);
+  expect(played.size).toBe(Number(response.headers()["content-length"]));
+  auditions.push({basisTitle: basis.title, stem: "lead", tone, wavSha256: played.sha256, clickToPlayingMs});
+  return played.sha256;
 }
 async function create(count, loseResponse = false) {
   const previousAttempt = (await exploration()).latestAttempt?.id;
@@ -789,6 +817,20 @@ try {
     const toneControl = page.getByLabel("Track tone", {exact: true});
     await expect(toneControl).toHaveValue("bright");
     await toneControl.selectOption("warm");
+    const beforeAuditions = await exploration();
+    const beforeAuditionSubmissions = submissions.length;
+    const warmAuditionSha = await auditionTone(bright, "warm");
+    await shot("12-tone-audition");
+    await page.locator("audio").evaluate(a => { a.currentTime = 3; });
+    await expect.poll(() => page.locator("audio").evaluate(a => a.currentTime)).toBeGreaterThanOrEqual(3);
+    await toneControl.selectOption("bright");
+    expect(await auditionTone(bright, "bright")).toBe(bright.sha256);
+    await expect(page.locator("audio")).toHaveCount(1);
+    expect(await page.locator("audio").evaluate(a => a.currentTime)).toBeGreaterThanOrEqual(2.9);
+    expect((await exploration()).renditions).toEqual(beforeAuditions.renditions);
+    expect((await exploration()).latestAttempt).toEqual(beforeAuditions.latestAttempt);
+    expect(submissions).toHaveLength(beforeAuditionSubmissions);
+    await toneControl.selectOption("warm");
     await button("Review arrangement").click();
     await expect(button("Create version")).toBeEnabled();
     const warmPlan = (await local()).plan;
@@ -797,6 +839,7 @@ try {
     expect(warmPlan.basisRecordingId).toBe(bright.id);
     expect(plannerRequests.length).toBe(beforeToneControl);
     const warm = await create(12);
+    expect(warm.sha256).toBe(warmAuditionSha);
     expect(warm.localRecipe).toEqual(warmRecipe);
     expect(warm.sha256).not.toBe(bright.sha256);
     expect(warm.sha256).not.toBe(returned.sha256);
@@ -897,6 +940,7 @@ try {
         explorationId: id,
         evidence,
         timings,
+        auditions,
         plans: [firstPlan, secondPlan, correctionProposal, correctedPlan, ...extraPlans],
         snapshot,
         localSnapshot: await local(),
@@ -931,6 +975,7 @@ try {
             "manual mix restoration is byte-identical; a newer melody revision is disclosed before creation",
             "recorded lead with direct swing drums, guided straight drums, and exact restoration on a 120 BPM pickup grid",
             "natural bright and neutral tone phrases and direct warm adjustment preserve the grid; resetting restores the served WAV exactly",
+            "two on-demand full-mix auditions use one aligned player and create no version; the chosen preview matches the saved recording",
             "actual confirmed-note chord suggestion, direct one-bar correction, exact restoration and complete chart removal",
             "one plain text request switches the lead to guitar and lowers only the drums by 6 dB",
           ] : []),

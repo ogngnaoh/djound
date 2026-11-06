@@ -139,6 +139,21 @@ public class ApiController {
         return local.preview(id, command);
     }
 
+    @PostMapping(
+            value = "/explorations/{id}/local/tone-auditions",
+            consumes = MediaType.APPLICATION_JSON_VALUE,
+            produces = "audio/wav")
+    public ResponseEntity<byte[]> auditionLocalTone(
+            @PathVariable String id,
+            @RequestBody com.djound.local.LocalModels.ToneAuditionCommand command) {
+        byte[] audio = local.auditionTone(id, command);
+        return ResponseEntity.ok()
+                .contentType(MediaType.parseMediaType("audio/wav"))
+                .cacheControl(CacheControl.noStore())
+                .contentLength(audio.length)
+                .body(audio);
+    }
+
     @PostMapping("/explorations/{id}/local/plans")
     @ResponseStatus(HttpStatus.ACCEPTED)
     public com.djound.local.LocalModels.Job planLocal(

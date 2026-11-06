@@ -57,6 +57,19 @@ public final class LocalModels {
 
     public record RevisionCommand(Long expectedSourceRevision, Long expectedNoteRevision) {}
 
+    public record ToneAuditionCommand(
+            Long expectedSourceRevision,
+            Long expectedNoteRevision,
+            Long expectedDraftRevision,
+            String basisRecordingId,
+            String stem,
+            String tone) {
+        @com.fasterxml.jackson.annotation.JsonAnySetter
+        public void rejectUnknownField(String name, Object ignored) {
+            throw new IllegalArgumentException("Unknown tone audition field");
+        }
+    }
+
     public record NotesCommand(
             Long expectedSourceRevision,
             Long expectedNoteRevision,

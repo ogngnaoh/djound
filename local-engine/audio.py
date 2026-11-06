@@ -13,7 +13,7 @@ import soundfile as sf
 
 from common import HOME, DEFAULT_RECIPE, EngineError, canonical_hash, digest, notes as validate_notes, recipe as validate_recipe, validate_mix, write_json
 from safe_export import save_safe_wav
-from stem_mixer import Strip, mix
+from stem_mixer import render_mix
 from grooves import groove_notes
 from validate_audio import validate
 
@@ -173,15 +173,7 @@ def render(notes, duration, recipe, output, status='provided_notes', source=None
         sf.write(stem_path, samples, 44100, subtype='FLOAT')
         stems.append({'id': name, 'path': str(stem_path),
                       'pcmSha256': hashlib.sha256(np.ascontiguousarray(samples, dtype='<f4').tobytes()).hexdigest()})
-    strips = {name: Strip(gain_db=strip['gainDb'], pan=strip['pan'], mute=strip['muted'])
-              for name, strip in controls.items()}
-    mix_inputs = dict(dry_audio)
-    tone_results = {}
-    for name, strip in controls.items():
-        if 'tone' in strip and not strip['muted']:
-            from track_tone import shape
-            mix_inputs[name], tone_results[name] = shape(dry_audio[name], strip['tone'])
-    samples = mix(mix_inputs, strips)
+    samples, tone_results = render_mix(dry_audio, controls)
     audio = output / 'audio.wav'
     export = save_safe_wav(audio, samples.T, 44100)
     try:

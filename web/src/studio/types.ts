@@ -18,6 +18,7 @@ export type ChordSuggestion = {
   alternatives: Chord[];
 };
 export type MixStrip = components["schemas"]["LocalMixStrip"];
+export type Tone = NonNullable<MixStrip["tone"]>;
 export type Recipe = {
   instrument: components["schemas"]["LocalRecipe"]["instrument"];
   bass: boolean;
@@ -45,6 +46,8 @@ export type Track = {
   duration: number;
   kept: boolean;
   kind: "original" | "version" | "preview";
+  /** Set only for temporary full mix auditions owned by the player. */
+  auditionBasisId?: string;
   recipe: Recipe;
   /** True when settings are authoritative, including the original local starting recipe. */
   recipeKnown?: boolean;
@@ -98,6 +101,13 @@ export type StudioService = {
     confirm: boolean,
   ): Promise<Project>;
   preview(project: Project, signal?: AbortSignal): Promise<Project>;
+  auditionTone?(
+    project: Project,
+    basisId: string,
+    stem: Stem,
+    tone: Tone,
+    signal: AbortSignal,
+  ): Promise<Blob>;
   propose(
     project: Project,
     text: string,

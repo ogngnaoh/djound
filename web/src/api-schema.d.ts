@@ -4,6 +4,23 @@
  */
 
 export interface paths {
+    "/api/explorations/{id}/local/tone-auditions": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** @description Returns a temporary stereo mix of a saved local version with one audible track's tone selected. Uses the current confirmed melody and saved draft basis. No recording, plan, or generation is created. */
+        post: operations["auditionLocalTone"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/explorations/{id}/local/manual-plans": {
         parameters: {
             query?: never;
@@ -801,6 +818,19 @@ export interface components {
         LocalSourceCommand: {
             expectedSourceRevision: number;
         };
+        LocalToneAuditionCommand: {
+            /** Format: int64 */
+            expectedSourceRevision: number;
+            /** Format: int64 */
+            expectedNoteRevision: number;
+            /** Format: int64 */
+            expectedDraftRevision: number;
+            basisRecordingId: string;
+            /** @enum {string} */
+            stem: "lead" | "bass" | "drums" | "chords";
+            /** @enum {string} */
+            tone: "neutral" | "warm" | "bright";
+        };
         LocalRevisionCommand: {
             expectedSourceRevision: number;
             expectedNoteRevision: number;
@@ -848,6 +878,34 @@ export interface components {
 }
 export type $defs = Record<string, never>;
 export interface operations {
+    auditionLocalTone: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["LocalToneAuditionCommand"];
+            };
+        };
+        responses: {
+            /** @description Complete stereo PCM16 WAV at 44100 Hz for immediate playback */
+            200: {
+                headers: {
+                    "Cache-Control"?: "no-store";
+                    [name: string]: unknown;
+                };
+                content: {
+                    "audio/wav": string;
+                };
+            };
+            default: components["responses"]["Problem"];
+        };
+    };
     createManualLocalPlan: {
         parameters: {
             query?: never;

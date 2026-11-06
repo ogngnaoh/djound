@@ -19,7 +19,7 @@ from edit_commands import PREFIX
 from reviewed_phrases import freeform_requirements, reviewed_phrases
 from setup_assets import is_planner_asset, verify
 
-OPERATIONS = ['transcribe', 'preview', 'plan', 'render']
+OPERATIONS = ['transcribe', 'preview', 'plan', 'render', 'audition']
 OWNER_PID = os.getppid()
 
 
@@ -85,6 +85,10 @@ def request_values(path):
     if path.stat().st_size > 2 * 1024 ** 2:
         raise EngineError('LOCAL_INVALID_REQUEST', 'The local request is too large.')
     request = json.loads(path.read_text())
+    if isinstance(request, dict) and request.get('operation') == 'audition':
+        from audition import validate_request
+        validate_request(request)
+        return request
     allowed = {'schemaVersion', 'operation', 'sourceAudio', 'sourceSha256', 'notes', 'duration', 'prompt', 'parentRecipe', 'recipe'}
     if not isinstance(request, dict) or set(request) - allowed or type(request.get('schemaVersion')) is not int or request.get('schemaVersion') != 1 or request.get('operation') not in OPERATIONS:
         raise EngineError('LOCAL_INVALID_REQUEST', 'The local operation contract is invalid.')

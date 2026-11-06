@@ -2,6 +2,8 @@ import { useState } from "react";
 import type { MixStrip, Recipe, Stem } from "./types";
 
 import { activeStems, isUnity, normalizeMix, UNITY } from "./mixState";
+import { auditionUnavailable } from "./auditionEligibility";
+import { ToneAudition, type AuditionSource } from "./ToneAudition";
 
 const NAMES = { lead: "Lead", bass: "Bass", drums: "Drums", chords: "Chords" };
 
@@ -47,19 +49,28 @@ export function mixChanges(recipe: Recipe, before?: Recipe) {
 export function TrackMix({
   recipe,
   onChange,
+  audition,
 }: {
   recipe: Recipe;
   onChange: (next: Recipe) => void;
+  audition?: AuditionSource;
 }) {
   const [selection, setSelection] = useState<Stem>("lead");
+  const [open, setOpen] = useState(false);
   const active = activeStems(recipe);
   const stem = active.includes(selection) ? selection : "lead";
   const strip = recipe.mix?.[stem] ?? UNITY;
+  const reason =
+    audition &&
+    auditionUnavailable(audition.project, audition.basis, recipe, stem);
   function update(next: MixStrip) {
     onChange(normalizeMix({ ...recipe, mix: { ...recipe.mix, [stem]: next } }));
   }
   return (
-    <details className="mix-inspector">
+    <details
+      className="mix-inspector"
+      onToggle={(event) => setOpen(event.currentTarget.open)}
+    >
       <summary>Track mix</summary>
       <div className="mix-controls">
         <label>
@@ -141,6 +152,24 @@ export function TrackMix({
           </button>
         )}
       </div>
+      {audition &&
+        open &&
+        (reason ? (
+          <p className="small subtle">{reason}</p>
+        ) : (
+          <ToneAudition
+            key={[
+              audition.project.id,
+              audition.basis.id,
+              audition.project.sourceRevision,
+              audition.project.noteRevision,
+              audition.project.draftRevision,
+            ].join("/")}
+            {...audition}
+            stem={stem}
+            tone={strip.tone ?? "neutral"}
+          />
+        ))}
     </details>
   );
 }

@@ -649,7 +649,15 @@ export function Refinement({
                   suggestions={proposal?.chordSuggestions}
                   onChange={setRecipe}
                 />
-                <TrackMix recipe={recipe} onChange={setRecipe} />
+                <TrackMix
+                  recipe={recipe}
+                  onChange={setRecipe}
+                  audition={
+                    !busy && service.auditionTone
+                      ? { project, basis, load: service.auditionTone }
+                      : undefined
+                  }
+                />
               </>
             )}
           </fieldset>

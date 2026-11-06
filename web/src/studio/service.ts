@@ -873,6 +873,28 @@ function backendService(): StudioService {
       await pollJob(data.id, signal);
       return get(project.id);
     },
+    async auditionTone(project, basisId, stem, tone, signal) {
+      const { data, error } = await api.POST(
+        "/api/explorations/{id}/local/tone-auditions",
+        {
+          params: { path: { id: project.id } },
+          body: {
+            expectedSourceRevision: project.sourceRevision,
+            expectedNoteRevision: project.noteRevision,
+            expectedDraftRevision: project.draftRevision,
+            basisRecordingId: basisId,
+            stem,
+            tone,
+          },
+          signal,
+          cache: "no-store",
+          parseAs: "blob",
+        },
+      );
+      if (!(data instanceof Blob) || !data.size)
+        throw failure(error, "A tone preview is unavailable for this version.");
+      return data;
+    },
     async propose(project, text, basisId, recipe, signal, reviewedPlanId) {
       check(signal);
       const p = await service.saveDraft(project, text, basisId);

@@ -14,6 +14,17 @@ final class LocalMix {
 
     private LocalMix() {}
 
+    static void requireAudibleToneTarget(Map<String, Object> recipe, String stem, String tone) {
+        if (stem == null || !TRACKS.contains(stem) || tone == null || !TONES.contains(tone))
+            throw new ApiProblem(
+                    400, "INVALID_REQUEST", "Choose an available track and tone.", "EDIT_TEXT");
+        if (!active(recipe, stem)
+                || (recipe.get("mix") instanceof Map<?, ?> strips
+                        && strips.get(stem) instanceof Map<?, ?> strip
+                        && Boolean.TRUE.equals(strip.get("muted"))))
+            throw invalid("The selected track must be active and unmuted to hear its tone.");
+    }
+
     static Map<String, Object> canonical(Map<String, Object> recipe) {
         if (!recipe.containsKey("mix")) return Map.of();
         if (!(recipe.get("mix") instanceof Map<?, ?> mix) || !TRACKS.containsAll(mix.keySet()))
