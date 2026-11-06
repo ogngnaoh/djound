@@ -77,6 +77,9 @@ def needs_freeform(request):
     text = request['prompt']
     if PREFIX.match(text.lstrip()) or reviewed_phrases(text) is not None:
         return False
+    from musical_direction import direction
+    if direction(text) is not None:
+        return False
     freeform_requirements(text)  # Return a scope error before checking optional weights.
     return True
 
@@ -90,6 +93,8 @@ def request_values(path):
         validate_request(request)
         return request
     allowed = {'schemaVersion', 'operation', 'sourceAudio', 'sourceSha256', 'notes', 'duration', 'prompt', 'parentRecipe', 'recipe'}
+    if isinstance(request, dict) and request.get('operation') == 'plan':
+        allowed.add('basisKind')
     if not isinstance(request, dict) or set(request) - allowed or type(request.get('schemaVersion')) is not int or request.get('schemaVersion') != 1 or request.get('operation') not in OPERATIONS:
         raise EngineError('LOCAL_INVALID_REQUEST', 'The local operation contract is invalid.')
     operation = request['operation']
@@ -98,6 +103,8 @@ def request_values(path):
         if source.stat().st_size > 64 * 1024 ** 2:
             raise EngineError('LOCAL_AUDIO_LIMIT', 'The audio file exceeds the local upload size limit.')
     elif operation == 'plan':
+        if 'basisKind' in request and request['basisKind'] not in ('original', 'rendition'):
+            raise EngineError('LOCAL_INVALID_REQUEST', 'Choose the original recording or an existing rendition.')
         if 'duration' in request and (type(request['duration']) not in (int, float) or not 0 < request['duration'] <= 12):
             raise EngineError('LOCAL_AUDIO_LIMIT', 'Choose a clip up to 12 seconds for this arrangement.')
         if not isinstance(request.get('prompt'), str) or not 1 <= len(request['prompt'].strip()) <= 1000:

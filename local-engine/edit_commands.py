@@ -142,6 +142,8 @@ def summarize(before, after):
                      if chart else 'chord chart removed')
         if chart is None and after['bass']:
             parts.append('bass follows the melody pulse')
+    if before.get('accompanimentStyle') != after.get('accompanimentStyle'):
+        parts.append('swing combo backing' if after.get('accompanimentStyle') else 'standard backing')
     if (after['bass'] and after.get('harmony') and not any(after['harmony']['chords'])
             and (before.get('harmony') != after['harmony'] or not before['bass'])):
         parts.append('bass rests until a chord is selected')
@@ -181,6 +183,7 @@ def apply_chart(action, state, assigned, annotations, notes, duration):
         state['harmony'], annotations['chordSuggestions'] = propose(notes, duration, bpm, downbeat)
     elif verb == 'remove':
         state.pop('harmony', None)
+        state.pop('accompanimentStyle', None)
     else:
         if 'harmony' not in state:
             raise unsupported('Suggest a chord chart before changing a bar.')
@@ -281,7 +284,7 @@ def reviewed_plan(commands, parent, notes=None, duration=None, syntax=None):
         raise
     if syntax:
         annotations['syntax'] = syntax
-    changes = {key: complete.get(key, {} if key == 'mix' else None) for key in (*DEFAULT_RECIPE, 'groove', 'harmony', 'mix')
+    changes = {key: complete.get(key, {} if key == 'mix' else None) for key in (*DEFAULT_RECIPE, 'groove', 'harmony', 'accompanimentStyle', 'mix')
                if complete.get(key) != before.get(key)}
     return {
         'recipe': complete,

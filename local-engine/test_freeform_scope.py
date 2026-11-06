@@ -28,7 +28,7 @@ class FreeformMixerScope(unittest.TestCase):
                         'mute the bass and put the lead on accordion',
                         'use guitar and add bass and reverse the tape',
                         'pan the drums and add a guitar',
-                        'turn up only the bass', 'make the percussion quieter'):
+                        'turn up only the bass', 'make the percussion quieter during the chorus'):
             with self.subTest(request=request):
                 before = deepcopy(self.parent)
                 with self.assertRaises(EngineError) as failure:

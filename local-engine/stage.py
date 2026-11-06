@@ -28,7 +28,7 @@ def main():
         elif operation == 'plan':
             from planner import plan
             fields = plan(request.get('prompt'), request.get('parentRecipe'), output,
-                          notes=request.get('notes'), duration=request.get('duration'))
+                          notes=request.get('notes'), duration=request.get('duration'), basis_kind=request.get('basisKind'))
             if 'duration' in request:
                 fields['recipe'] = recipe(fields['recipe'], request['duration'])
         else:

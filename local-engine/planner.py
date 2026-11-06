@@ -115,7 +115,7 @@ def checked_model_patch(value, parent, prompt, required):
     return complete, patch
 
 
-def plan(prompt, parent, output, notes=None, duration=None):
+def plan(prompt, parent, output, notes=None, duration=None, basis_kind=None):
     if not isinstance(prompt, str) or not prompt.strip() or len(prompt) > 1000:
         raise EngineError('LOCAL_INVALID_REQUEST', 'Describe a concrete arrangement change in 1000 characters or fewer.')
     parent = recipe(DEFAULT_RECIPE if parent is None else parent, duration)
@@ -130,6 +130,10 @@ def plan(prompt, parent, output, notes=None, duration=None):
     guided = guided_plan(prompt, parent, notes=notes, duration=duration)
     if guided is not None:
         return guided
+    from musical_direction import direction, musical_plan
+    musical = direction(prompt)
+    if musical is not None:
+        return musical_plan(musical, parent, notes, duration, basis_kind)
     required = freeform_requirements(prompt)
     # The six-slot model cannot create, replace or remove the chord chart. A
     # surviving harmony track also means a lead solo needs an explicit removal.
