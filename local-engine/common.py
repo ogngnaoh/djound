@@ -13,8 +13,8 @@ DEFAULT_RECIPE = {'instrument': 'piano', 'bass': False, 'drums': False,
 
 
 class EngineError(Exception):
-    def __init__(self, code, message):
-        self.code, self.message = code, message
+    def __init__(self, code, message, *, details=None):
+        self.code, self.message, self.details = code, message, details
         super().__init__(message)
 
 

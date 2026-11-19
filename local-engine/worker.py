@@ -15,6 +15,7 @@ import time
 import zipfile
 
 from common import HERE, HOME, ROOT, EngineError, data_root, digest, inside, notes, recipe, write_json
+from finished_mix import OPERATIONS as FINISHED_MIX_OPERATIONS
 from edit_commands import PREFIX
 from reviewed_phrases import freeform_requirements, reviewed_phrases
 from setup_assets import is_planner_asset, verify
@@ -71,6 +72,27 @@ def readiness(*, check_freeform=True):
     return result
 
 
+def mix_readiness():
+    """Validate this editor's installation without loading a graph or touching app data."""
+    manifest = json.loads((HERE / 'finished-mix-assets.json').read_text())
+    result = {'schemaVersion': 1, 'ready': False, 'model': manifest['model'], 'revision': manifest['revision']}
+    try:
+        if sys.platform != 'darwin' or os.uname().machine != 'arm64' or not shutil.which('ffmpeg'):
+            raise EngineError('MIX_SETUP_REQUIRED', 'The finished mix editor requires Apple Silicon macOS and FFmpeg.')
+        verify_dependencies('requirements-finished-mix.lock')
+        for item in manifest['assets']:
+            model = item['path'].endswith('.onnx')
+            target = Path(os.environ['DJOUND_MIX_MODEL']) if model and os.environ.get('DJOUND_MIX_MODEL') else HOME / item['path']
+            if not verify(target, item):
+                raise EngineError('MIX_SETUP_REQUIRED', 'The finished mix model or its license is missing or changed.')
+        result['ready'] = True
+    except EngineError as error:
+        result['error'] = {'code': error.code, 'message': error.message}
+    except (OSError, ValueError, importlib.metadata.PackageNotFoundError):
+        result['error'] = {'code': 'MIX_SETUP_REQUIRED', 'message': 'Run local-engine/setup_localengine.sh --finished-mix.'}
+    return result
+
+
 def needs_freeform(request):
     if request['operation'] != 'plan':
         return False
@@ -88,6 +110,10 @@ def request_values(path):
     if path.stat().st_size > 2 * 1024 ** 2:
         raise EngineError('LOCAL_INVALID_REQUEST', 'The local request is too large.')
     request = json.loads(path.read_text())
+    if isinstance(request, dict) and request.get('operation') in FINISHED_MIX_OPERATIONS:
+        from finished_mix import validate_request
+        validate_request(request)
+        return request
     if isinstance(request, dict) and request.get('operation') == 'audition':
         from audition import validate_request
         validate_request(request)
@@ -149,8 +175,8 @@ def supervise(request_path, output, operation):
                OMP_NUM_THREADS='2', OPENBLAS_NUM_THREADS='2', VECLIB_MAXIMUM_THREADS='2',
                NUMBA_NUM_THREADS='2', NUMBA_CACHE_DIR=str(HOME / 'numba-cache'),
                PYTHONUNBUFFERED='1', HF_HUB_DISABLE_TELEMETRY='1', DO_NOT_TRACK='1')
-    deadline = 120 if operation == 'transcribe' else 60 if operation == 'plan' else 30
-    memory_limit = (4 if operation == 'plan' else 2) * 1024 ** 3
+    deadline = {'transcribe': 120, 'plan': 60, 'mix-prepare': 150, 'mix-decode': 60}.get(operation, 30)
+    memory_limit = (4 if operation in ('plan', 'mix-prepare') else 2) * 1024 ** 3
     started = time.monotonic()
     process = None
     sampled_rss = 0
@@ -202,13 +228,44 @@ def supervise(request_path, output, operation):
         raise
 
 
+def exclusive_operation(shared, frozen, output, operation, request):
+    with (shared / 'inference.lock').open('a') as lock:
+        # Passage changes across installations can overlap. Stay in the Preparing state while a
+        # short prior inference finishes. The 20 s queue + 150 s inference fit the JVM's 180 s deadline.
+        until = time.monotonic() + (20 if operation == 'mix-prepare' else 0)
+        while True:
+            try:
+                fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+                break
+            except BlockingIOError as error:
+                if time.monotonic() >= until:
+                    raise EngineError('LOCAL_BUSY', 'Another local engine job is running. Wait for it to finish, then retry.') from error
+                if os.getppid() != OWNER_PID:
+                    raise EngineError('LOCAL_CANCELLED', 'The owning application exited before passage preparation.') from error
+                time.sleep(.1)
+        if operation != 'mix-prepare':
+            freeform = needs_freeform(request)
+            checked = readiness(check_freeform=freeform)
+            if not checked['ready']:
+                failure = checked['error']
+                raise EngineError(failure['code'], failure['message'])
+            if freeform and not checked['freeformAvailable']:
+                raise EngineError('LOCAL_PLANNER_UNAVAILABLE', checked['freeformUnavailableReason'])
+        return supervise(frozen, output, operation)
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--check', action='store_true')
+    parser.add_argument('--check-mix', action='store_true', help='Check the finished mix editor installation')
     parser.add_argument('--require-freeform', action='store_true', help='Also require the optional language planner during --check')
     parser.add_argument('--request', type=Path)
     parser.add_argument('--output', type=Path)
     args = parser.parse_args()
+    if args.check_mix:
+        value = mix_readiness()
+        print(json.dumps(value))
+        return 0 if value['ready'] else 1
     if args.check:
         value = readiness()
         print(json.dumps(value))
@@ -237,22 +294,21 @@ def main():
         HOME.mkdir(parents=True, exist_ok=True)
         shared = ROOT / '.runtime/local-inference'
         shared.mkdir(parents=True, exist_ok=True)
-        with (shared / 'inference.lock').open('a') as lock:
-            try:
-                fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
-            except BlockingIOError as error:
-                raise EngineError('LOCAL_BUSY', 'Another local engine job is running. Wait for it to finish.') from error
-            freeform = needs_freeform(request)
-            checked = readiness(check_freeform=freeform)
-            if not checked['ready']:
-                failure = checked['error']
-                raise EngineError(failure['code'], failure['message'])
-            if freeform and not checked['freeformAvailable']:
-                raise EngineError('LOCAL_PLANNER_UNAVAILABLE', checked['freeformUnavailableReason'])
-            result = supervise(frozen, output, operation)
+        if operation in ('mix-decode', 'mix-preview'):
+            # These bounded file operations read immutable inputs and do not use the inference device.
+            # The application supervises this process, including its bounded ffmpeg child.
+            from finished_mix import execute
+            result = {'schemaVersion': 1, 'operation': operation, 'status': 'succeeded', **execute(request, output)}
+        else:
+            result = exclusive_operation(shared, frozen, output, operation, request)
+    except ImportError as error:
+        result = {'schemaVersion': 1, 'status': 'failed', 'operation': operation,
+                  'error': {'code': 'MIX_SETUP_REQUIRED' if operation in FINISHED_MIX_OPERATIONS else 'LOCAL_SETUP_REQUIRED',
+                            'message': f'The local audio runtime is missing {error.name}. Run local-engine/setup_localengine.sh.'}}
     except EngineError as error:
         result = {'schemaVersion': 1, 'status': 'failed', 'operation': operation,
-                  'error': {'code': error.code, 'message': error.message}}
+                  'error': {'code': error.code, 'message': error.message,
+                            **({'details': error.details} if error.details else {})}}
     except Exception:
         import traceback
         traceback.print_exc(file=sys.stderr)

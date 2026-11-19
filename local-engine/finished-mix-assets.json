@@ -1,0 +1,22 @@
+{
+  "model": "audiojs/scnet",
+  "revision": "e71bcdb42bce1d62b7fae25ba90fcbcf90f73f46",
+  "preprocessing": "audiojs/neural-separate@0.7.1 SCNet, selected audio with 2 s of context per side",
+  "preprocessingSource": "https://registry.npmjs.org/@audio/neural-separate/-/neural-separate-0.7.1.tgz",
+  "preprocessingSourceSha256": "1f2fecdf37106bbada43e51825eadfb6e5863b51b8015edd8150298bff1750ea",
+  "upstreamCheckpointSha256": "1bc0d1abb20bfdf966dcd07637bafd03e4bc13653d09ef18bc9b3e342eafe2aa",
+  "assets": [
+    {
+      "path": "finished-mix/scnet.int8.onnx",
+      "url": "https://huggingface.co/audiojs/scnet/resolve/e71bcdb42bce1d62b7fae25ba90fcbcf90f73f46/scnet.int8.onnx",
+      "bytes": 12900277,
+      "sha256": "98228931494151762a1c4ab1ec7899a894b1f81fd4a509921a9d2f9bacc50845"
+    },
+    {
+      "path": "finished-mix/LICENSE",
+      "url": "https://huggingface.co/audiojs/scnet/resolve/e71bcdb42bce1d62b7fae25ba90fcbcf90f73f46/LICENSE",
+      "bytes": 1067,
+      "sha256": "0bdf1b69335198118ab16cfc50d337b496b8c6d90e83beeaba4643781ab62513"
+    }
+  ]
+}

@@ -22,7 +22,10 @@ def main():
     operation = request['operation']
     result = {'schemaVersion': 1, 'operation': operation}
     try:
-        if operation == 'audition':
+        if operation.startswith('mix-'):
+            from finished_mix import execute
+            fields = execute(request, output)
+        elif operation == 'audition':
             from audition import audition
             fields = audition(request, output)
         elif operation == 'plan':

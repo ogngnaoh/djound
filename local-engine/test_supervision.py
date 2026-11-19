@@ -12,6 +12,20 @@ import worker
 
 
 class Supervision(unittest.TestCase):
+    def test_finished_passage_can_wait_behind_another_inference(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            with patch.object(worker.fcntl, 'flock', side_effect=[BlockingIOError, None]) as attempt, \
+                    patch.object(worker.time, 'sleep') as wait, patch.object(worker, 'supervise') as run:
+                worker.exclusive_operation(root, root/'request', root, 'mix-prepare', {})
+                self.assertEqual(attempt.call_count, 2)
+                wait.assert_called_once_with(.1)
+                run.assert_called_once()
+            with patch.object(worker.fcntl, 'flock', side_effect=BlockingIOError), \
+                    self.assertRaises(EngineError) as failure:
+                worker.exclusive_operation(root, root/'request', root, 'render', {})
+            self.assertEqual(failure.exception.code, 'LOCAL_BUSY')
+
     def test_memory_monitor_failure_stops_child(self):
         for monitor in (SimpleNamespace(returncode=1, stdout=''),
                         SimpleNamespace(returncode=0, stdout='unrecognized output')):
