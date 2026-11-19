@@ -2,6 +2,8 @@ package com.djound;
 
 import static org.junit.jupiter.api.Assertions.*;
 
+import com.djound.rendition.RenditionProjects;
+
 import org.junit.jupiter.api.*;
 import org.junit.jupiter.api.io.TempDir;
 import org.springframework.boot.SpringApplication;
@@ -236,6 +238,80 @@ class BackendIntegrationTest {
                                 id,
                                 new com.djound.rendition.RenditionProjects.Command(
                                         "offline", take.id(), "another", null, null)));
+    }
+
+    @Test
+    void longerArrangementsKeepSongTimeAcrossPassagesAndRestart() throws Exception {
+        app.close();
+        Path worker = root.resolve("arrangement-worker.py");
+        Files.writeString(
+                worker,
+                """
+                import json,sys,wave
+                q=json.load(sys.stdin)
+                assert q['supportsArrangedScore'] and q['originalFrames']==88200
+                prompt=q['prompt']
+                with wave.open(q['source'],'rb') as f:
+                    fmt=f.getparams()
+                    audio=bytearray(f.readframes(fmt.nframes))
+                landmarks=[[0,0],[44100,22050],[132300,88200]]
+                result=dict(state='ready',label='Test arrangement',caption='Test performance')
+                if prompt=='longer':
+                    assert q['parentSongTimeMap'] is None and q['parentPlan'] is None
+                    audio.extend(audio[:44100*4])
+                    result.update(parentTimeMap=landmarks,arrangementPlan=dict(version=1,fromUpload=True,ensemble='trio'))
+                else:
+                    assert q['parentSongTimeMap']==landmarks and q['parentPlan']['ensemble']=='trio'
+                    assert q['parentPlan']['fromUpload']==(prompt!='next arrangement')
+                    position=round(q.get('startSeconds',0)*44100)*4
+                    audio[position]^=1
+                    if prompt=='outside': audio[0]^=1
+                    if prompt=='resize': audio.extend(audio[:4])
+                with wave.open(q['output'],'wb') as f:
+                    f.setparams(fmt)
+                    f.writeframes(audio)
+                result['durationSeconds']=len(audio)/(44100*4)
+                print(json.dumps(result))
+                """);
+        String[] settings = {
+            "--djound.mode=LOCAL",
+            "--djound.rendition-worker=" + worker,
+            "--djound.local-python=/usr/bin/python3"
+        };
+        app = launch(root, settings);
+        var projects = app.getBean(RenditionProjects.class);
+        String id = projects.create(wav("tune.wav", 44100, 2, 16, 2), null).id();
+        projects.submit(
+                id, new RenditionProjects.Command("first", "original", "longer", null, null));
+        var first = awaitRendition(projects, id, "first");
+        assertEquals("ready", first.state(), first.error());
+        assertEquals(3., first.durationSeconds());
+        int[][] expected = {{0, 0}, {44100, 22050}, {132300, 88200}};
+        assertArrayEquals(expected, first.songTimeMap());
+        for (String invalid : List.of("outside", "resize")) {
+            projects.submit(
+                    id, new RenditionProjects.Command(invalid, first.id(), invalid, 2.25, 2.75));
+            var rejected = awaitRendition(projects, id, invalid);
+            assertEquals("failed", rejected.state());
+            assertNull(rejected.audioUrl());
+        }
+        projects.submit(
+                id, new RenditionProjects.Command("inside", first.id(), "inside", 2.25, 2.75));
+        var passage = awaitRendition(projects, id, "inside");
+        assertEquals("ready", passage.state(), passage.error());
+        assertArrayEquals(expected, passage.songTimeMap());
+        assertEquals(2.25, passage.appliedStartSeconds());
+        assertEquals(2.75, passage.appliedEndSeconds());
+        app.close();
+        app = launch(root, settings);
+        var reopened = app.getBean(RenditionProjects.class);
+        reopened.submit(
+                id,
+                new RenditionProjects.Command(
+                        "followup", passage.id(), "next arrangement", null, null));
+        var followup = awaitRendition(reopened, id, "followup");
+        assertEquals("ready", followup.state(), followup.error());
+        assertArrayEquals(expected, followup.songTimeMap());
     }
 
     @Test

@@ -781,9 +781,19 @@ components:
         caption: { type: string }
         state: { type: string, enum: [queued, running, ready, failed, clarify] }
         progress: { type: [string, 'null'], description: Current worker-reported stage for a running take when available. }
+        songTimeMap:
+          type: array
+          description: Piecewise-linear landmarks from this take to the uploaded recording. Each pair contains a take frame and an upload frame at 44.1 kHz. A missing map means both clocks are identical.
+          minItems: 2
+          maxItems: 16384
+          items:
+            type: array
+            minItems: 2
+            maxItems: 2
+            items: { type: integer, minimum: 0 }
         audioUrl: { type: [string, 'null'] }
         exportUrl: { type: [string, 'null'] }
-        durationSeconds: { type: [number, 'null'] }
+        durationSeconds: { type: [number, 'null'], maximum: 600, description: Duration of this take on its own playback timeline. }
         startSeconds: { type: [number, 'null'], description: User-supplied start on the parent timeline. }
         endSeconds: { type: [number, 'null'] }
         appliedStartSeconds: { type: [number, 'null'], description: Actual start of the changed range including a range inferred from the prompt. }

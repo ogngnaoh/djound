@@ -791,8 +791,11 @@ export interface components {
             state: "queued" | "running" | "ready" | "failed" | "clarify";
             /** @description Current worker-reported stage for a running take when available. */
             progress?: string | null;
+            /** @description Piecewise-linear landmarks from this take to the uploaded recording. Each pair contains a take frame and an upload frame at 44.1 kHz. A missing map means both clocks are identical. */
+            songTimeMap?: number[][];
             audioUrl: string | null;
             exportUrl: string | null;
+            /** @description Duration of this take on its own playback timeline. */
             durationSeconds: number | null;
             /** @description User-supplied start on the parent timeline. */
             startSeconds: number | null;

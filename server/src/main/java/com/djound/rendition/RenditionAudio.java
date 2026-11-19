@@ -148,8 +148,16 @@ final class RenditionAudio {
     }
 
     Wave verify(Path path) throws IOException {
+        return verify(path, 300, 64);
+    }
+
+    Wave verifyTake(Path path) throws IOException {
+        return verify(path, 600, 128);
+    }
+
+    private Wave verify(Path path, int maxSeconds, int maxMiB) throws IOException {
         if (!Files.isRegularFile(path, LinkOption.NOFOLLOW_LINKS)
-                || Files.size(path) > 64L * 1024 * 1024)
+                || Files.size(path) > (long) maxMiB * 1024 * 1024)
             throw new IOException("The rendition file is missing or too large.");
         try (var input = AudioSystem.getAudioInputStream(path.toFile())) {
             var fmt = input.getFormat();
@@ -160,9 +168,10 @@ final class RenditionAudio {
                     || fmt.getSampleSizeInBits() != 16
                     || fmt.getSampleRate() != RATE
                     || frames <= 0
-                    || frames > RATE * 300
+                    || frames > RATE * maxSeconds
                     || Files.size(path) < frames * 4 + 44)
-                throw new IOException("Expected stereo PCM16 at 44.1 kHz, up to five minutes.");
+                throw new IOException(
+                        "Expected stereo PCM16 at 44.1 kHz, up to " + maxSeconds + " seconds.");
             return new Wave(Math.toIntExact(frames), hash(path));
         } catch (UnsupportedAudioFileException e) {
             throw new IOException("The WAV format is unreadable.", e);
@@ -170,8 +179,12 @@ final class RenditionAudio {
     }
 
     /** Compare decoded sample bytes, so container metadata alone cannot create a new take. */
-    void checkChangedAudio(Path input, Path output, int frames, Double start, Double end)
+    void checkChangedAudio(
+            Path input, Path output, int inputFrames, int outputFrames, Double start, Double end)
             throws IOException {
+        if (start != null && inputFrames != outputFrames)
+            throw new IOException("A passage edit changed the recording's length.");
+        int frames = Math.min(inputFrames, outputFrames);
         int first = start == null ? 0 : (int) Math.round(start * RATE);
         int last = end == null ? frames : (int) Math.round(end * RATE);
         try (var before = AudioSystem.getAudioInputStream(input.toFile());
@@ -188,6 +201,20 @@ final class RenditionAudio {
                         || !Arrays.equals(a, until, size, b, until, size))
                     throw new IOException("Generation changed audio outside the selected range.");
                 if (!Arrays.equals(a, within, until, b, within, until)) changed = true;
+            }
+            // An audible new ending counts as a musical change. Appending only silence or
+            // returning a truncated, otherwise identical prefix cannot create a rendition.
+            for (int left = (outputFrames - frames) * 4; left > 0; ) {
+                int count = Math.min(left, b.length);
+                if (after.readNBytes(b, 0, count) != count)
+                    throw new IOException("The generated audio contains a truncated ending.");
+                if (!changed)
+                    for (int i = 0; i < count; i++)
+                        if (b[i] != 0) {
+                            changed = true;
+                            break;
+                        }
+                left -= count;
             }
             if (!changed)
                 throw new IOException(
@@ -234,7 +261,7 @@ final class RenditionAudio {
             if (!process.waitFor(timeout, TimeUnit.SECONDS))
                 throw new IOException(
                         "The local rendition exceeded its time limit. Try a shorter selection.");
-            if (!Files.isRegularFile(result) || Files.size(result) > 65536)
+            if (!Files.isRegularFile(result) || Files.size(result) > 256 * 1024)
                 throw new IOException("The local rendition worker returned no usable result.");
             JsonNode reply;
             try {

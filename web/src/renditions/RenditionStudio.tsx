@@ -15,6 +15,7 @@ import {
   type RenditionCommand,
 } from "./api";
 import { useRecoverableRequest } from "./useRecoverableRequest";
+import { correspondingPosition } from "./songTime";
 import "./renditions.css";
 
 const styles = [
@@ -72,6 +73,7 @@ function RecordingSession({
   const player = useRef<HTMLAudioElement>(null);
   const direction = useRef<HTMLTextAreaElement>(null);
   const seekOnLoad = useRef<number | null>(null);
+  const lastPosition = useRef(new Map<string, number>());
   const stopAt = useRef<number | null>(null);
   const clearLegacyPlayer = useAudio().clear;
   const [text, setText] = useState("");
@@ -95,9 +97,8 @@ function RecordingSession({
   };
   const activeName = label(activeId);
   const parentId = revising?.parentId ?? activeId;
-  const parentDuration =
-    project.takes.find((t) => t.id === parentId)?.durationSeconds ??
-    project.durationSeconds;
+  const parentTake = project.takes.find((t) => t.id === parentId) ?? null;
+  const parentDuration = parentTake?.durationSeconds ?? project.durationSeconds;
   const previousTake = project.takes.find(
     (take) =>
       take.id === previousId && take.id !== activeId && take.state === "ready",
@@ -151,12 +152,32 @@ function RecordingSession({
     }
   }, [activeUrl]);
 
+  function positionIn(target: Rendition | null) {
+    const audio = player.current;
+    const mediaUrl = audio?.getAttribute("src");
+    const current = project.takes.find(
+      (t) => t.audioUrl && t.audioUrl === mediaUrl,
+    );
+    const seconds = seekOnLoad.current ?? audio?.currentTime ?? 0;
+    return correspondingPosition(
+      seconds,
+      current?.songTimeMap,
+      target?.songTimeMap,
+      lastPosition.current.get(target?.id ?? "original"),
+    );
+  }
+
   function play(take: Rendition | null, from?: number, startPlayback = true) {
     const audio = player.current;
     const url = take ? take.audioUrl : project.originalUrl;
     if (!audio || !url) return;
     const same = audio.getAttribute("src") === url;
-    const position = from ?? (audio.ended ? 0 : audio.currentTime);
+    if (!same)
+      lastPosition.current.set(
+        activeId,
+        seekOnLoad.current ?? audio.currentTime,
+      );
+    const position = from ?? (audio.ended ? 0 : positionIn(take));
     stopAt.current = null;
     setNotice("");
     if (activeId !== (take?.id ?? "original")) {
@@ -198,7 +219,7 @@ function RecordingSession({
     const position =
       !choosePassage && anchor?.requestId === take.requestId
         ? anchor.seconds
-        : player.current?.currentTime || 0;
+        : positionIn(parent);
     const bounds = saved
       ? saved.range
       : take.startSeconds != null && take.endSeconds != null
@@ -247,7 +268,7 @@ function RecordingSession({
     const key = crypto.randomUUID();
     writeLocal("rendition-cursor:" + project.id, {
       requestId: key,
-      seconds: player.current?.currentTime || 0,
+      seconds: positionIn(parentTake),
     });
     void creation.submit({
       key,
@@ -427,10 +448,7 @@ function RecordingSession({
                       resumeRevision(latest, true);
                     else {
                       setRange(
-                        passageAt(
-                          player.current?.currentTime || 0,
-                          parentDuration,
-                        ),
+                        passageAt(positionIn(parentTake), parentDuration),
                       );
                     }
                   }}
@@ -476,10 +494,7 @@ function RecordingSession({
                     size="sm"
                     disabled={!validRange}
                     onClick={() => {
-                      play(
-                        project.takes.find((t) => t.id === parentId) ?? null,
-                        start,
-                      );
+                      play(parentTake, start);
                       stopAt.current = end;
                     }}
                   >

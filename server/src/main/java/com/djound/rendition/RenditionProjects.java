@@ -53,6 +53,7 @@ public final class RenditionProjects implements AutoCloseable {
             String caption,
             String state,
             @JsonInclude(JsonInclude.Include.NON_NULL) String progress,
+            @JsonInclude(JsonInclude.Include.NON_NULL) int[][] songTimeMap,
             String audioUrl,
             String exportUrl,
             Double durationSeconds,
@@ -93,14 +94,17 @@ public final class RenditionProjects implements AutoCloseable {
             Double appliedStartSeconds,
             Double appliedEndSeconds,
             String sha256,
-            String error) {}
+            String error,
+            String songTimeMap,
+            String arrangementPlan) {}
 
     record Earlier(String id, String request, String label, String caption) {}
 
     private static final String PROJECT_FIELDS =
             "id,title,upload_sha,source_sha,frames,favorite_id";
     private static final String JOB_FIELDS =
-            "id,project_id,parent_id,request_id,label,prompt,caption,state,frames,start_seconds,end_seconds,applied_start_seconds,applied_end_seconds,sha256,error";
+            "id,project_id,parent_id,request_id,label,prompt,caption,state,frames,start_seconds,end_seconds,applied_start_seconds,applied_end_seconds,sha256,error,song_time_map::text"
+                + " AS song_time_map,arrangement_plan::text AS arrangement_plan";
 
     RenditionProjects(
             JdbcClient db,
@@ -271,6 +275,7 @@ public final class RenditionProjects implements AutoCloseable {
                 job.caption(),
                 job.state(),
                 "running".equals(job.state()) ? audio.progress(job.id()) : null,
+                RenditionTimeline.storedMap(job.songTimeMap()),
                 ready ? url(job.projectId(), job.id(), "audio") : null,
                 ready ? url(job.projectId(), job.id(), "export") : null,
                 job.frames() == null ? null : seconds(job.frames()),
@@ -490,7 +495,7 @@ public final class RenditionProjects implements AutoCloseable {
             Path original = audio.file(project.id()),
                     source = parent == null ? original : audio.file(parent.id());
             String expectedSha = parent == null ? project.sourceSha() : parent.sha256();
-            var basis = audio.verify(source);
+            var basis = parent == null ? audio.verify(source) : audio.verifyTake(source);
             if (!expectedSha.equals(basis.hash())
                     || parent != null && !RenditionAudio.hash(original).equals(project.sourceSha()))
                 throw new IOException(
@@ -501,6 +506,14 @@ public final class RenditionProjects implements AutoCloseable {
             request.put("original", original.toString());
             request.put("output", temp.toString());
             request.put("parentId", parent == null ? ORIGINAL : parent.id());
+            var parentMap =
+                    parent == null ? null : RenditionTimeline.storedMap(parent.songTimeMap());
+            var parentPlan =
+                    parent == null ? null : RenditionTimeline.storedPlan(parent.arrangementPlan());
+            request.put("parentSongTimeMap", parentMap);
+            request.put("originalFrames", project.frames());
+            request.put("supportsArrangedScore", true);
+            request.put("parentPlan", parentPlan);
             request.put("prompt", job.prompt());
             request.put("parentCaption", parent == null ? "" : parent.caption());
             request.put("history", history(job));
@@ -529,26 +542,49 @@ public final class RenditionProjects implements AutoCloseable {
                     || caption.length() > 4000)
                 throw new IOException(
                         "The local engine returned an incomplete rendition description.");
-            var output = audio.verify(temp);
-            if (output.frames() != basis.frames())
-                throw new IOException("The generated version changed the recording's timeline.");
+            var output = audio.verifyTake(temp);
             double reported = result.path("durationSeconds").asDouble(Double.NaN);
             if (!Double.isFinite(reported) || Math.abs(reported - seconds(output.frames())) > .05)
                 throw new IOException("The local engine returned a mismatched recording duration.");
             Double start = numberOr(result, "appliedStartSeconds", job.startSeconds()),
                     end = numberOr(result, "appliedEndSeconds", job.endSeconds());
-            validateScope(start, end, seconds(output.frames()));
+            validateScope(start, end, seconds(basis.frames()));
             if (job.startSeconds() != null
-                    && (Math.abs(start - job.startSeconds()) > 1.0 / RenditionAudio.RATE
-                            || Math.abs(end - job.endSeconds()) > 1.0 / RenditionAudio.RATE))
+                    && (Math.round(start * RenditionAudio.RATE)
+                                    != Math.round(job.startSeconds() * RenditionAudio.RATE)
+                            || Math.round(end * RenditionAudio.RATE)
+                                    != Math.round(job.endSeconds() * RenditionAudio.RATE)))
                 throw new IOException("The local engine did not honor the selected range.");
-            audio.checkChangedAudio(source, temp, basis.frames(), start, end);
+            boolean scoped = start != null;
+            int[][] mapping =
+                    RenditionTimeline.workerMap(
+                            result.path("parentTimeMap"), output.frames(), basis.frames(), scoped);
+            String songTimeMap =
+                    RenditionTimeline.encoded(RenditionTimeline.toOriginal(mapping, parentMap));
+            var nextPlan = result.path("arrangementPlan");
+            if (scoped && (nextPlan.isMissingNode() || nextPlan.isNull()) && parentPlan != null)
+                nextPlan = parentPlan;
+            if (scoped
+                    && nextPlan instanceof tools.jackson.databind.node.ObjectNode object
+                    && object.has("fromUpload")) object.put("fromUpload", false);
+            String plan = RenditionTimeline.plan(nextPlan);
+            audio.checkChangedAudio(source, temp, basis.frames(), output.frames(), start, end);
             Files.move(temp, audio.file(job.id()), StandardCopyOption.ATOMIC_MOVE);
             db.sql(
                             "UPDATE rendition_take SET"
-                                + " state='ready',label=?,caption=?,frames=?,sha256=?,applied_start_seconds=?,applied_end_seconds=?"
-                                + " WHERE id=? AND state='running'")
-                    .params(label, caption, output.frames(), output.hash(), start, end, job.id())
+                                + " state='ready',label=?,caption=?,frames=?,sha256=?,applied_start_seconds=?,applied_end_seconds=?,song_time_map=CAST(?"
+                                + " AS jsonb),arrangement_plan=CAST(? AS jsonb) WHERE id=? AND"
+                                + " state='running'")
+                    .params(
+                            label,
+                            caption,
+                            output.frames(),
+                            output.hash(),
+                            start,
+                            end,
+                            songTimeMap,
+                            plan,
+                            job.id())
                     .update();
         } catch (Exception e) {
             if (e instanceof InterruptedException) Thread.currentThread().interrupt();
