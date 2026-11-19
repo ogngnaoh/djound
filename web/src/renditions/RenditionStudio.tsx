@@ -3,6 +3,7 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { ArrowLeft, Bookmark, Check, Download, Play } from "lucide-react";
 import { Link, useParams, useSearchParams } from "react-router-dom";
 import { Button } from "../components/ui/button";
+import { readLocal, writeLocal } from "../recovery";
 import { useAudio, clock } from "../studio/Player";
 import { Failure, Loading } from "../studio/Views";
 import {
@@ -23,6 +24,8 @@ const styles = [
   ["Cinematic Strings", "A string ensemble carries the tune"],
 ];
 type TakeRequest = Omit<RenditionCommand, "requestId"> & { key: string };
+type Passage = { start: string; end: string };
+type Revision = { text: string; range: Passage | null };
 const inProgress = (take: Rendition) =>
   take.state === "queued" || take.state === "running";
 
@@ -67,11 +70,11 @@ function RecordingSession({
   const player = useRef<HTMLAudioElement>(null);
   const direction = useRef<HTMLTextAreaElement>(null);
   const seekOnLoad = useRef<number | null>(null);
+  const stopAt = useRef<number | null>(null);
   const clearLegacyPlayer = useAudio().clear;
   const [text, setText] = useState("");
-  const [range, setRange] = useState<{ start: string; end: string } | null>(
-    null,
-  );
+  const [range, setRange] = useState<Passage | null>(null);
+  const [revising, setRevising] = useState<Rendition | null>(null);
   const [notice, setNotice] = useState("");
   const [saving, setSaving] = useState(false);
   const [previousId, setPreviousId] = useState("");
@@ -89,11 +92,29 @@ function RecordingSession({
     return `Take ${index + 1} · ${project.takes[index].label}`;
   };
   const activeName = label(activeId);
+  const parentId = revising?.parentId ?? activeId;
+  const parentDuration =
+    project.takes.find((t) => t.id === parentId)?.durationSeconds ??
+    project.durationSeconds;
   const previousTake = project.takes.find(
     (take) =>
       take.id === previousId && take.id !== activeId && take.state === "ready",
   );
-  const latest = project.takes.find((t) => t.requestId === lastRequest);
+  const newestChild = project.takes
+    .filter((t) => t.parentId === activeId)
+    .at(-1);
+  const latest =
+    project.takes.find((t) => t.requestId === lastRequest) ??
+    (newestChild?.state === "clarify" ? newestChild : undefined);
+  const revisionKey = (id: string) =>
+    "rendition-revision:" + project.id + ":" + id;
+  useEffect(() => {
+    if (revising)
+      writeLocal("rendition-revision:" + project.id + ":" + revising.id, {
+        text,
+        range,
+      });
+  }, [project.id, revising, text, range]);
   const creation = useRecoverableRequest(
     "rendition-take:" + project.id,
     async (cmd: TakeRequest) => {
@@ -104,6 +125,7 @@ function RecordingSession({
         body: JSON.stringify({ requestId, ...body }),
       });
       setLastRequest(requestId);
+      setRevising(null);
       setText((previous) => (previous.trim() === cmd.prompt ? "" : previous));
       await client.invalidateQueries(
         { queryKey: projectKey(project.id) },
@@ -125,22 +147,28 @@ function RecordingSession({
     }
   }, [activeUrl]);
 
-  function play(take: Rendition | null, from?: number) {
+  function play(take: Rendition | null, from?: number, startPlayback = true) {
     const audio = player.current;
     const url = take ? take.audioUrl : project.originalUrl;
     if (!audio || !url) return;
     const same = audio.getAttribute("src") === url;
     const position = from ?? (audio.ended ? 0 : audio.currentTime);
+    stopAt.current = null;
     setNotice("");
-    setRange(null);
-    if (activeId !== (take?.id ?? "original")) setPreviousId(activeId);
+    if (activeId !== (take?.id ?? "original")) {
+      setPreviousId(activeId);
+      if (!revising) setRange(null);
+    }
     setParams({ take: take?.id ?? "original" }, { replace: true });
     if (!same) {
       seekOnLoad.current = position;
       audio.src = url;
     } else if (from !== undefined) {
-      audio.currentTime = Math.max(0, Math.min(from, audio.duration || 0));
+      if (Number.isFinite(audio.duration))
+        audio.currentTime = Math.max(0, Math.min(from, audio.duration));
+      else seekOnLoad.current = from;
     }
+    if (!startPlayback) return;
     void audio.play().catch((error: Error) => {
       if (
         error.name !== "AbortError" &&
@@ -152,21 +180,59 @@ function RecordingSession({
       }
     });
   }
+  function passageAt(position: number, length: number): Passage {
+    const start = Math.max(0, Math.min(Math.floor(position), length - 1));
+    return { start: String(start), end: String(Math.min(start + 10, length)) };
+  }
+  function resumeRevision(take: Rendition, choosePassage = false) {
+    const parent = project.takes.find((t) => t.id === take.parentId) ?? null;
+    const saved = readLocal<Revision | null>(revisionKey(take.id), null);
+    const anchor = readLocal<{ requestId: string; seconds: number } | null>(
+      "rendition-cursor:" + project.id,
+      null,
+    );
+    const position =
+      !choosePassage && anchor?.requestId === take.requestId
+        ? anchor.seconds
+        : player.current?.currentTime || 0;
+    const bounds = saved
+      ? saved.range
+      : take.startSeconds != null && take.endSeconds != null
+        ? { start: String(take.startSeconds), end: String(take.endSeconds) }
+        : null;
+    const next =
+      bounds ??
+      (choosePassage
+        ? passageAt(
+            position,
+            parent?.durationSeconds ?? project.durationSeconds,
+          )
+        : null);
+    play(
+      parent,
+      next ? Math.max(0, Number(next.start) - 2) : position,
+      player.current?.paused === false,
+    );
+    setRevising(take);
+    setText(saved?.text ?? take.request);
+    setRange(next);
+    direction.current?.focus();
+  }
+  const start = Number(range?.start);
+  const end = Number(range?.end);
+  const validRange =
+    !!range?.start &&
+    !!range.end &&
+    Number.isFinite(start) &&
+    Number.isFinite(end) &&
+    start >= 0 &&
+    end > start &&
+    end <= parentDuration;
   function make(prompt: string) {
     if (!prompt.trim()) return;
     const bounds: Pick<TakeRequest, "startSeconds" | "endSeconds"> = {};
     if (range) {
-      const start = Number(range.start);
-      const end = Number(range.end);
-      if (
-        !range.start ||
-        !range.end ||
-        !Number.isFinite(start) ||
-        !Number.isFinite(end) ||
-        start < 0 ||
-        end <= start ||
-        end > duration
-      ) {
+      if (!validRange) {
         setNotice("Choose a start and end within this recording.");
         return;
       }
@@ -174,9 +240,14 @@ function RecordingSession({
       bounds.endSeconds = end;
     }
     setNotice("");
+    const key = crypto.randomUUID();
+    writeLocal("rendition-cursor:" + project.id, {
+      requestId: key,
+      seconds: player.current?.currentTime || 0,
+    });
     void creation.submit({
-      key: crypto.randomUUID(),
-      parentId: activeId,
+      key,
+      parentId,
       prompt: prompt.trim(),
       ...bounds,
     });
@@ -227,6 +298,15 @@ function RecordingSession({
             onError={() =>
               setNotice("This audio could not be opened. Try playing it again.")
             }
+            onTimeUpdate={(e) => {
+              if (
+                stopAt.current !== null &&
+                e.currentTarget.currentTime >= stopAt.current
+              ) {
+                e.currentTarget.pause();
+                stopAt.current = null;
+              }
+            }}
             onLoadedMetadata={(e) => {
               const position = seekOnLoad.current;
               if (position !== null) {
@@ -276,8 +356,23 @@ function RecordingSession({
             )}
           </div>
           <section className="mix-conversation">
-            <h2>Make a version of {activeName}</h2>
-            <div className="rendition-styles">
+            <h2>Make a version of {label(parentId)}</h2>
+            {revising && (
+              <div className="mix-reply">
+                <p>{revising.error}</p>
+                <button
+                  className="text-action"
+                  onClick={() => {
+                    setRevising(null);
+                    setRange(null);
+                    setText("");
+                  }}
+                >
+                  Start a new request
+                </button>
+              </div>
+            )}
+            <div className="rendition-styles" role="group" aria-label="Suggested sounds">
               {styles.map(([style, description]) => (
                 <Button
                   key={style}
@@ -303,7 +398,7 @@ function RecordingSession({
                 placeholder={
                   selected
                     ? "What would you change about this take?"
-                    : "Or describe the sound you want…"
+                    : "Describe the sound you want…"
                 }
                 value={text}
                 onChange={(e) => setText(e.target.value)}
@@ -315,18 +410,20 @@ function RecordingSession({
                   aria-expanded={!!range}
                   onClick={() => {
                     if (range) setRange(null);
+                    else if (
+                      !revising &&
+                      !text.trim() &&
+                      latest?.state === "clarify" &&
+                      latest.parentId === activeId
+                    )
+                      resumeRevision(latest, true);
                     else {
-                      const start = Math.max(
-                        0,
-                        Math.min(
-                          Math.floor(player.current?.currentTime || 0),
-                          duration - 1,
+                      setRange(
+                        passageAt(
+                          player.current?.currentTime || 0,
+                          parentDuration,
                         ),
                       );
-                      setRange({
-                        start: String(start),
-                        end: String(Math.min(start + 10, duration)),
-                      });
                     }
                   }}
                 >
@@ -343,7 +440,7 @@ function RecordingSession({
                       aria-label="Passage start in seconds"
                       type="number"
                       min="0"
-                      max={duration}
+                      max={parentDuration}
                       step="any"
                       value={range.start}
                       onChange={(e) =>
@@ -357,7 +454,7 @@ function RecordingSession({
                       aria-label="Passage end in seconds"
                       type="number"
                       min="0"
-                      max={duration}
+                      max={parentDuration}
                       step="any"
                       value={range.end}
                       onChange={(e) =>
@@ -365,6 +462,21 @@ function RecordingSession({
                       }
                     />
                   </label>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    disabled={!validRange}
+                    onClick={() => {
+                      play(
+                        project.takes.find((t) => t.id === parentId) ?? null,
+                        start,
+                      );
+                      stopAt.current = end;
+                    }}
+                  >
+                    <Play /> Play passage
+                  </Button>
                 </fieldset>
               )}
             </form>
@@ -376,7 +488,7 @@ function RecordingSession({
                 Resume request · {creation.pending.prompt}
               </Button>
             )}
-            {latest && (
+            {latest && latest.id !== revising?.id && (
               <div className="mix-status" role="status">
                 {latest.state === "ready" ? (
                   <Button
@@ -398,7 +510,21 @@ function RecordingSession({
                 ) : inProgress(latest) ? (
                   `Making ${latest.label}…`
                 ) : (
-                  latest.error || latest.caption || "Try another direction."
+                  <>
+                    <p>
+                      {latest.error ||
+                        latest.caption ||
+                        "Try another direction."}
+                    </p>
+                    {latest.state === "clarify" && (
+                      <button
+                        className="text-action"
+                        onClick={() => resumeRevision(latest)}
+                      >
+                        Continue this request
+                      </button>
+                    )}
+                  </>
                 )}
               </div>
             )}
@@ -458,20 +584,7 @@ function RecordingSession({
                   </small>
                   <button
                     className="text-action"
-                    onClick={() => {
-                      setParams({ take: take.parentId }, { replace: true });
-                      setText(take.request);
-                      setRange(
-                        take.startSeconds != null && take.endSeconds != null
-                          ? {
-                              start: String(take.startSeconds),
-                              end: String(take.endSeconds),
-                            }
-                          : null,
-                      );
-                      setNotice("");
-                      direction.current?.focus();
-                    }}
+                    onClick={() => resumeRevision(take)}
                   >
                     Revise request
                   </button>

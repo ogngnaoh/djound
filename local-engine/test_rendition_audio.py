@@ -24,6 +24,13 @@ def wav_bytes(rate, channels, samples):
     return data.getvalue()
 
 
+def timed_samples(frames, base):
+    """Give each second its own stereo values to expose timeline mistakes."""
+    rate = render.RATE
+    return b"".join(struct.pack("<hh", base + sec, -base - sec) * min(rate, frames - sec * rate)
+                    for sec in range((frames + rate - 1) // rate))
+
+
 class TestService(BaseHTTPRequestHandler):
     def log_message(self, *args):
         pass
@@ -103,6 +110,7 @@ class RenditionAdapterTest(unittest.TestCase):
     def test_full_cover_uploads_original_and_receives_new_pcm(self):
         self.run_take(cover_strength=0.8)
         self.assertEqual(self.source.read_bytes(), self.service.fields["src_audio"])
+        self.assertNotIn("ref_audio", self.service.fields)
         self.assertEqual(b"cover", self.service.fields["task_type"])
         self.assertEqual(b"[Instrumental]", self.service.fields["lyrics"])
         self.assertEqual(b"1", self.service.fields["batch_size"])
@@ -126,6 +134,7 @@ class RenditionAdapterTest(unittest.TestCase):
     def test_repaint_preserves_all_samples_outside_interval(self):
         self.run_take(start=0.25, end=0.75)
         self.assertEqual(b"repaint", self.service.fields["task_type"])
+        self.assertNotIn("ref_audio", self.service.fields)
         self.assertEqual(b"explicit", self.service.fields["chunk_mask_mode"])
         self.assertEqual(b"0.25", self.service.fields["repainting_start"])
         self.assertEqual(b"0.75", self.service.fields["repainting_end"])
@@ -135,6 +144,50 @@ class RenditionAdapterTest(unittest.TestCase):
         self.assertEqual(self.pcm[last:], data[last:])
         self.assert_generated(data[first + 2000:first + 2004])
         self.assertEqual(self.pcm[first:first + 4], data[first:first + 4])
+
+    def test_reference_passage_uploads_matching_original_window_as_cover(self):
+        rate = render.RATE
+        parent = timed_samples(60 * rate, 2000)
+        original = timed_samples(60 * rate, 4000)
+        wet = timed_samples(26 * rate, 8000)
+        self.source.write_bytes(wav_bytes(rate, 2, parent))
+        reference = self.source.with_name("original.wav")
+        reference.write_bytes(wav_bytes(rate, 2, original))
+        self.service.audio = wav_bytes(rate, 2, wet)
+        render.render_take(self.source, self.target, "Piano", duration=60, start=30, end=32, reference=reference)
+        fields = self.service.fields
+        self.assertEqual(b"cover", fields["task_type"])
+        self.assertEqual(b"0.8", fields["audio_cover_strength"])
+        self.assertEqual(26, float(fields["audio_duration"]))
+        self.assertTrue({"repainting_start", "repainting_end", "chunk_mask_mode"}.isdisjoint(fields))
+        with wave.open(io.BytesIO(fields["src_audio"]), "rb") as wav:
+            self.assertEqual(26 * rate, wav.getnframes())
+            self.assertEqual(original[4 * 18 * rate:4 * 44 * rate], wav.readframes(wav.getnframes()))
+        with wave.open(io.BytesIO(fields["ref_audio"]), "rb") as wav:
+            self.assertEqual(26 * rate, wav.getnframes())
+            self.assertEqual(parent[4 * 18 * rate:4 * 44 * rate], wav.readframes(wav.getnframes()))
+        with wave.open(str(self.target), "rb") as wav:
+            self.assertEqual(60 * rate, wav.getnframes())
+            result = wav.readframes(wav.getnframes())
+        self.assertEqual(parent[:4 * 30 * rate], result[:4 * 30 * rate])
+        self.assertEqual(parent[4 * 32 * rate:], result[4 * 32 * rate:])
+        start, end = 30 * rate + 441, 32 * rate - 441
+        self.assertEqual(wet[(start - 18 * rate) * 4:(end - 18 * rate) * 4], result[start * 4:end * 4])
+
+    def test_upload_selected_as_its_own_melody_reference_has_no_separate_timbre_track(self):
+        self.run_take(start=.2, end=.8, reference=self.source)
+        self.assertEqual(b"cover", self.service.fields["task_type"])
+        self.assertNotIn("ref_audio", self.service.fields)
+
+    def test_reference_cover_rejects_short_context_even_after_selected_phrase(self):
+        reference = self.source.with_name("original.wav")
+        reference.write_bytes(wav_bytes(render.RATE, 2, timed_samples(render.RATE, 9000)))
+        self.target.write_bytes(b"previous take")
+        # Only the last real context frame is missing; the requested middle phrase is complete.
+        self.service.audio = wav_bytes(render.RATE, 2, self.pcm[:-4])
+        with self.assertRaisesRegex(RuntimeError, "requested timeline"):
+            self.run_take(start=.25, end=.75, reference=reference)
+        self.assertEqual(b"previous take", self.target.read_bytes())
 
     def test_foreign_file_and_failed_job_cannot_replace_previous_take(self):
         self.target.write_bytes(b"previous")
@@ -163,32 +216,43 @@ class NativeContextTest(unittest.TestCase):
         self.output = self.source.with_name("out.wav")
         self.enterContext(patch.dict(os.environ, {"DJOUND_RENDITION_BACKEND": "native"}))
 
-    def exercise(self, frames, first, last, left, right, mask_start, mask_end):
+    def exercise(self, frames, first, last, left, right, mask_start, mask_end, *, timbre_span=None):
         rate = render.RATE
-        # Each source second has its own stereo samples, exposing a crop from the wrong time.
-        source = b"".join(struct.pack("<hh", 4000 + sec, -2000 - sec) * min(rate, frames - sec * rate)
-                          for sec in range((frames + rate - 1) // rate))
+        source = timed_samples(frames, 4000)
         self.source.write_bytes(wav_bytes(rate, 2, source))
+        reference = None
+        conditioning = source
+        if timbre_span is not None:
+            reference = self.source.with_name("original.wav")
+            conditioning = timed_samples(frames, 10000)
+            reference.write_bytes(wav_bytes(rate, 2, conditioning))
         size = right - left
         padded = (size + 3527) // 3528 * 3528
-        # Make wet samples depend on their local second, too, to expose a wrong splice offset.
-        generated = b"".join(struct.pack("<hh", -9000 - sec, 6000 + sec) * min(rate, padded - sec * rate)
-                             for sec in range((padded + rate - 1) // rate))
+        generated = timed_samples(padded, -9000)
 
-        def synth(model_input, download, caption, *, duration, start, end, deadline, cover_strength):
-            self.assertEqual(cover_strength, 0.8 if first is None else 0.55)
+        def synth(model_input, download, caption, *, duration, start, end, deadline, cover_strength, timbre_reference):
+            expected_strength = 0.9 if reference else (0.8 if first is None else 0.55)
+            self.assertEqual(cover_strength, expected_strength)
             self.assertEqual((start, end), (mask_start, mask_end))
             self.assertEqual(padded, round(duration * rate))
             with wave.open(str(model_input), "rb") as wav:
                 self.assertEqual(wav.getnframes(), padded)
-                self.assertEqual(wav.readframes(size), source[4 * left:4 * right])
+                self.assertEqual(wav.readframes(size), conditioning[4 * left:4 * right])
                 self.assertEqual(wav.readframes(padded - size), bytes((padded - size) * 4))
+            if timbre_span is None:
+                self.assertIsNone(timbre_reference)
+            else:
+                a, b = timbre_span
+                with wave.open(str(timbre_reference), "rb") as wav:
+                    self.assertEqual((2, 2, rate, b - a), wav.getparams()[:4])
+                    self.assertEqual(source[4 * a:4 * b], wav.readframes(b - a))
             download.write_bytes(wav_bytes(rate, 2, generated))
 
         with patch.object(render, "generate_native", autospec=True, side_effect=synth) as synth_call:
             render.render_take(self.source, self.output, "Instrumental piano", duration=frames / rate,
                                start=None if first is None else first / rate, end=None if last is None else last / rate,
-                               **({"cover_strength": 0.8} if first is None else {}))
+                               cover_strength=0.9 if reference else (0.8 if first is None else 0.55),
+                               reference=reference)
         synth_call.assert_called_once()
         with wave.open(str(self.output), "rb") as wav:
             self.assertEqual(wav.getnframes(), frames)
@@ -215,6 +279,44 @@ class NativeContextTest(unittest.TestCase):
         rate = render.RATE
         self.exercise(60 * rate, 13 * rate, 48 * rate, 0, 60 * rate, 13, 48)
 
+    def test_reference_uses_cover_for_the_corresponding_middle_ending_and_full_timeline(self):
+        rate = render.RATE
+        self.exercise(60 * rate, 30 * rate, 32 * rate, 18 * rate, 44 * rate, None, None,
+                      timbre_span=(18 * rate, 44 * rate))
+        self.exercise(60 * rate + 17, 59 * rate, 60 * rate + 17, round(34.96 * rate), 60 * rate + 17,
+                      None, None, timbre_span=(round(34.96 * rate), 60 * rate + 17))
+        self.exercise(rate + 17, None, None, 0, rate + 17, None, None, timbre_span=(0, rate + 17))
+
+    def test_wide_reference_covers_limit_parent_timbre_to_thirty_seconds_around_the_edit(self):
+        rate = render.RATE
+        self.exercise(90 * rate, 54 * rate, 70 * rate, 42 * rate, 82 * rate, None, None,
+                      timbre_span=(47 * rate, 77 * rate))
+        self.exercise(60 * rate, None, None, 0, 60 * rate, None, None, timbre_span=(15 * rate, 45 * rate))
+
+    def test_missing_misaligned_or_overwritten_reference_is_rejected_before_generation(self):
+        rate = render.RATE
+        self.source.write_bytes(wav_bytes(rate, 2, timed_samples(rate, 1000)))
+        original = self.source.with_name("original.wav")
+        self.output.write_bytes(b"previous take")
+        with patch.object(render, "generate_native") as synth:
+            def take(target):
+                render.render_take(self.source, target, "Jazz", duration=1, start=.2, end=.8, reference=original)
+            with self.assertRaisesRegex(ValueError, "reference recording is missing"):
+                take(self.output)
+            original_bytes = wav_bytes(rate, 2, timed_samples(rate + 1, 3000))
+            original.write_bytes(original_bytes)
+            with self.assertRaisesRegex(ValueError, "matching timelines"):
+                take(self.output)
+            with self.assertRaisesRegex(ValueError, "separately"):
+                take(original)
+            alias = self.source.with_name("reference-link.wav")
+            alias.hardlink_to(original)
+            with self.assertRaisesRegex(ValueError, "separately"):
+                take(alias)
+            self.assertEqual(original_bytes, original.read_bytes())
+            self.assertEqual(b"previous take", self.output.read_bytes())
+            synth.assert_not_called()
+
     def test_fractional_last_patch_is_padded_only_on_input(self):
         rate = render.RATE
         self.exercise(rate + 17, None, None, 0, rate + 17, None, None)
@@ -224,7 +326,7 @@ class NativeContextTest(unittest.TestCase):
     def test_ten_minute_cover_needs_no_crop_or_padding(self):
         basis, scratch = Mock(), Mock()
         frames = 600 * render.RATE
-        self.assertEqual((basis, 0, frames, frames), render._native_input(basis, frames, None, None, scratch))
+        self.assertEqual((basis, 0, frames, frames), render._model_input(basis, frames, None, None, scratch))
 
     def test_invalid_strength_is_rejected_before_synthesis(self):
         for strength in (float("nan"), float("inf"), -0.1, 1.1, "0.8", True):

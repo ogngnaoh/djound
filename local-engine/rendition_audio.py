@@ -22,6 +22,8 @@ RATE = 44100
 VAE_FRAME = RATE // 25
 NATIVE_PATCH = 2 * VAE_FRAME
 REPAINT_CONTEXT = 12 * RATE
+TIMBRE_FRAMES = 30 * RATE  # ACE-Step's reference encoder uses 30 seconds of acoustic context.
+MELODY_COVER_STRENGTH = 0.8
 MAX_SECONDS = 600  # Published upper bound for the ACE-Step 1.5 API.
 MAX_DOWNLOAD = 256 * 1024 * 1024  # 600s of 48 kHz stereo float32 WAV plus its header.
 JSON_LIMIT = 1024 * 1024
@@ -95,23 +97,32 @@ class _AceClient:
             raise RuntimeError(f"ACE-Step rejected the request: {str(reason or 'invalid API response')[:240]}")
         return payload.get("data")
 
-    def submit(self, audio, fields):
+    def submit(self, audio, fields, *, timbre_reference=None):
         boundary = secrets.token_hex(24)
-        parts = [f'--{boundary}\r\nContent-Disposition: form-data; name="{key}"\r\n\r\n{value}\r\n'
-                 for key, value in fields.items()]
-        parts.append(f'--{boundary}\r\nContent-Disposition: form-data; name="src_audio"; filename="source.wav"\r\n'
-                     'Content-Type: audio/wav\r\n\r\n')
-        prefix = "".join(parts).encode()
-        suffix = f"\r\n--{boundary}--\r\n".encode()
+        fields_body = "".join(f'--{boundary}\r\nContent-Disposition: form-data; name="{key}"\r\n\r\n{value}\r\n'
+                              for key, value in fields.items()).encode()
+        files = [("src_audio", "source.wav", audio)]
+        if timbre_reference is not None:
+            files.append(("ref_audio", "timbre.wav", timbre_reference))
+        uploads = []
+        for name, filename, path in files:
+            header = (f'--{boundary}\r\nContent-Disposition: form-data; name="{name}"; filename="{filename}"\r\n'
+                      'Content-Type: audio/wav\r\n\r\n').encode()
+            uploads.append((header, path))
+        suffix = f"--{boundary}--\r\n".encode()
+        length = len(fields_body) + sum(len(header) + path.stat().st_size + 2 for header, path in uploads) + len(suffix)
         headers = {"Content-Type": "multipart/form-data; boundary=" + boundary,
-                   "Content-Length": str(len(prefix) + audio.stat().st_size + len(suffix))}
+                   "Content-Length": str(length)}
 
         def upload():
-            yield prefix
-            with audio.open("rb") as stream:
-                while chunk := stream.read(BLOCK):
-                    _remaining(self.deadline)
-                    yield chunk
+            yield fields_body
+            for header, path in uploads:
+                yield header
+                with path.open("rb") as stream:
+                    while chunk := stream.read(BLOCK):
+                        _remaining(self.deadline)
+                        yield chunk
+                yield b"\r\n"
             yield suffix
 
         with closing(upload()) as chunks:
@@ -236,7 +247,7 @@ def _round_up(frames, grid):
     return ((frames + grid - 1) // grid) * grid
 
 
-def _native_input(basis, frames, start, end, target):
+def _model_input(basis, frames, start, end, target):
     """Return the model input, its origin on the full timeline, and the real and padded sizes."""
     left, right = 0, frames
     if start is not None:
@@ -254,10 +265,21 @@ def _native_input(basis, frames, start, end, target):
     with wave.open(str(basis), "rb") as reader, wave.open(str(target), "wb") as writer:
         writer.setparams((2, 2, RATE, padded, "NONE", "not compressed"))
         _copy_pcm(reader, left, right, writer)
-        # The native VAE drops fractional latent frames. Give it a complete last
+        # The VAE can drop fractional latent frames. Give it a complete last
         # patch so the decoder generates every sample of the requested recording.
         writer.writeframesraw(bytes((padded - size) * 4))
     return target, left, size, padded
+
+
+def _timbre_excerpt(parent, offset, size, start, end, target):
+    """Sample the selected parent's sound inside the melody window, centered on the edit."""
+    center = offset + size // 2 if start is None else (start + end) // 2
+    length = min(TIMBRE_FRAMES, size)
+    begin = max(offset, min(center - length // 2, offset + size - length))
+    with wave.open(str(parent), "rb") as reader, wave.open(str(target), "wb") as writer:
+        writer.setparams((2, 2, RATE, length, "NONE", "not compressed"))
+        _copy_pcm(reader, begin, begin + length, writer)
+    return target
 
 
 def _publish(source, generated, frames, start, end, target, *, wet_offset=0):
@@ -283,8 +305,9 @@ def _publish(source, generated, frames, start, end, target, *, wet_offset=0):
 
 
 def render_take(source: Path, destination: Path, caption: str, *, start: float | None = None,
-                end: float | None = None, duration: float, cover_strength: float = 0.55) -> None:
-    """Write a complete stereo PCM16 take atomically after an actual ACE-Step generation."""
+                end: float | None = None, duration: float, cover_strength: float = 0.55,
+                reference: Path | None = None) -> None:
+    """Publish on the parent's timeline. A separate reference supplies melody while the parent supplies timbre."""
     if not math.isfinite(duration) or not 0 < duration <= MAX_SECONDS:
         raise ValueError("Choose a positive duration of up to ten minutes.")
     if not isinstance(caption, str) or not caption.strip() or len(caption) > 4096:
@@ -293,8 +316,10 @@ def render_take(source: Path, destination: Path, caption: str, *, start: float |
         raise ValueError("Cover strength must be a finite number from 0 to 1.")
     if (start is None) != (end is None) or (start is not None and not 0 <= start < end <= duration):
         raise ValueError("Choose a valid passage within the source recording.")
-    if source.resolve() == destination.resolve():
-        raise ValueError("Save a new take separately from its source.")
+    for recording in (source, reference):
+        if recording is not None and (recording.resolve() == destination.resolve() or
+                                      (destination.exists() and recording.exists() and destination.samefile(recording))):
+            raise ValueError("Save a new take separately from its parent and melody reference.")
     timeout = float(os.environ.get("DJOUND_ACE_TIMEOUT_SECONDS", "1200"))
     if not math.isfinite(timeout) or timeout <= 0:
         raise ValueError("DJOUND_ACE_TIMEOUT_SECONDS must be a positive number.")
@@ -304,37 +329,55 @@ def render_take(source: Path, destination: Path, caption: str, *, start: float |
         basis, frames = _canonical(source, work / "basis.wav", deadline)
         if not 0 < frames <= MAX_SECONDS * RATE or abs(frames - round(duration * RATE)) > RATE // 10:
             raise ValueError("The provided duration does not match the source recording.")
-        fields = {"task_type": "cover" if start is None else "repaint", "prompt": caption.strip(),
-                  "lyrics": "[Instrumental]", "vocal_language": "unknown", "thinking": "false",
-                  "use_cot_caption": "false", "use_cot_language": "false", "use_cot_metas": "false",
-                  "audio_duration": str(frames / RATE), "audio_format": "wav", "batch_size": "1"}
         first = last = None
-        if start is None:
-            # Balance the source contour against the caption's request for new instrumentation.
-            fields["audio_cover_strength"] = str(cover_strength)
-        else:
+        if start is not None:
             first, last = round(start * RATE), min(round(end * RATE), frames)
             if not 0 <= first < last <= frames:
                 raise ValueError("The selected passage contains no audio samples.")
-            fields.update(repainting_start=str(first / RATE), repainting_end=str(last / RATE), chunk_mask_mode="explicit")
+        model_input = basis
+        if reference is not None:
+            if not reference.is_file():
+                raise ValueError("The original melody reference recording is missing.")
+            model_input, reference_frames = _canonical(reference, work / "reference.wav", deadline)
+            if reference_frames != frames:
+                raise ValueError("The original melody reference and parent must have matching timelines.")
+            cover_strength = max(cover_strength, MELODY_COVER_STRENGTH)
+
+        native = _use_native()
+        offset, real_size, padded = 0, frames, frames
+        if native or reference is not None:
+            model_input, offset, real_size, padded = _model_input(model_input, frames, first, last, work / "context.wav")
+        timbre = None
+        if reference is not None and not reference.samefile(source):
+            timbre = _timbre_excerpt(basis, offset, real_size, first, last, work / "timbre.wav")
+        # Repaint masks the requested music. Cover keeps the original phrase available to the model.
+        repaint = first is not None and reference is None
         download = work / "generated.wav"
-        offset, real_size = 0, frames
-        if _use_native():
-            model_input, offset, real_size, padded = _native_input(basis, frames, first, last, work / "context.wav")
+        if native:
             # The native mask uses whole 40ms VAE frames. Publish only the
             # requested sample interval even when it begins or ends between frames.
-            mask_start = None if first is None else ((first - offset) // VAE_FRAME * VAE_FRAME) / RATE
-            mask_end = None if last is None else _round_up(last - offset, VAE_FRAME) / RATE
+            mask_start = ((first - offset) // VAE_FRAME * VAE_FRAME) / RATE if repaint else None
+            mask_end = _round_up(last - offset, VAE_FRAME) / RATE if repaint else None
             generate_native(model_input, download, caption.strip(), duration=padded / RATE,
-                            start=mask_start, end=mask_end, deadline=deadline, cover_strength=cover_strength)
+                            start=mask_start, end=mask_end, deadline=deadline, cover_strength=cover_strength,
+                            timbre_reference=timbre)
         else:
+            fields = {"task_type": "repaint" if repaint else "cover", "prompt": caption.strip(),
+                      "lyrics": "[Instrumental]", "vocal_language": "unknown", "thinking": "false",
+                      "use_cot_caption": "false", "use_cot_language": "false", "use_cot_metas": "false",
+                      "audio_duration": str(padded / RATE), "audio_format": "wav", "batch_size": "1"}
+            if repaint:
+                fields.update(repainting_start=str(first / RATE), repainting_end=str(last / RATE), chunk_mask_mode="explicit")
+            else:
+                fields["audio_cover_strength"] = str(cover_strength)
             client = _AceClient(deadline)
-            task = client.submit(basis, fields)
+            task = client.submit(model_input, fields, timbre_reference=timbre)
             client.download_take(task, download)
         generated, length = _canonical(download, work / "decoded.wav", deadline, generated=True)
         # ACE's audio token grid may add a partial trailing cell. Never stretch, loop,
         # or fill a missing requested passage with the input.
-        if abs(length - real_size) > RATE // 4 or length < (last - offset if last is not None else frames):
+        required = last - offset if repaint else real_size
+        if abs(length - real_size) > RATE // 4 or length < required:
             raise RuntimeError("ACE-Step returned audio that does not cover the requested timeline.")
         output = work / "ready.wav"
         _publish(basis, generated, frames, first, last, output, wet_offset=offset)

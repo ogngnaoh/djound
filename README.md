@@ -5,7 +5,7 @@ bring a recording you love and hear it played another way. the aim is a performa
 ## reimagine a recording
 
 1. choose **New project** or **Reimagine a recording** in the library and bring an MP3, WAV, or M4A. a song, a friend's performance, or a hummed voice memo can be the starting point. the importer accepts mono or stereo recordings from one second to five minutes, up to 64 MiB.
-2. choose a style to hear an instrumental take. try **Solo Piano** on a sung demo and listen for the phrase you used to sing. the model can change the phrasing, lose some of the tune, or leave traces of the voice. try another take if the first one misses what you love about the recording.
+2. describe the sound you want or tap a suggestion to hear an instrumental take. “make it jazz” leaves the choice of players open. **Jazz Trio** asks for piano, bass and drums. on a sung demo, try “give the tune to a cello.” listen for the phrase you used to sing. the model can lose some of the tune or leave traces of the voice.
 3. play the take you want to change and describe the next move. try “keep the piano, but make the ending quieter.” choose a passage if you want exact boundaries. you can switch back to the original at the same playback time or pick an earlier take and start another version from it.
 4. choose **Keep as favorite** to reopen the project on that take. every completed version stays in the project. **Download this take** saves the selected stereo WAV to send to a friend.
 

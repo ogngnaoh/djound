@@ -46,7 +46,7 @@ def _synth_lease(executable, deadline):
 
 def generate_native(source: Path, destination: Path, caption: str, *, duration: float,
                     start: float | None = None, end: float | None = None, deadline: float,
-                    cover_strength: float = 0.55) -> None:
+                    cover_strength: float = 0.55, timbre_reference: Path | None = None) -> None:
     """Produce a full-timeline raw 48 kHz WAV. The caller canonicalizes it and splices the selected range."""
     if not native_available():
         raise RuntimeError("Set up the native ACE-Step rendition engine with bash local-engine/renditions.sh setup.")
@@ -85,6 +85,8 @@ def generate_native(source: Path, destination: Path, caption: str, *, duration: 
         # bound transient activation memory on the 16 GiB target.
         args = [str(executable), "--models", str(registry), "--src-audio", str(source),
                 "--vae-chunk", "256", "--vae-overlap", "64", "--request", str(request)]
+        if timbre_reference is not None:
+            args.extend(["--ref-audio", str(timbre_reference.resolve(strict=True))])
         with _synth_lease(executable, deadline) as lease:
             try:
                 result = subprocess.run(args, cwd=work, stdin=subprocess.DEVNULL, stdout=sys.stderr,

@@ -2,6 +2,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <math.h>
+#include <string.h>
 #define TSF_IMPLEMENTATION
 #include "tsf.h"
 
@@ -10,7 +11,48 @@ typedef struct { int frame, channel, on, pitch, velocity; } Event;
 
 static int fail(const char *message) { fprintf(stderr, "%s\n", message); return 1; }
 
+/* Stream one program on the source timeline. No song-length sample allocation. */
+static int render_guide(const char *bank_path, const char *events_path, const char *output_path) {
+    FILE *events = fopen(events_path, "r");
+    int frames, program, count;
+    if (!events || fscanf(events, "%d %d %d", &frames, &program, &count) != 3 ||
+        frames < 1 || frames > 300 * 44100 || program < 0 || program > 127 ||
+        count < 2 || count > MAX_EVENTS) return fail("Invalid guide schedule");
+    tsf *synth = tsf_load_filename(bank_path);
+    if (!synth) return fail("Cannot load guide soundfont");
+    tsf_set_output(synth, TSF_STEREO_INTERLEAVED, 44100, -6.0f);
+    if (!tsf_set_max_voices(synth, 128) || !tsf_channel_set_bank_preset(synth, 0, 0, program))
+        return fail("Guide instrument unavailable");
+    FILE *out = fopen(output_path, "wbx");
+    if (!out) return fail("Cannot open guide output");
+    int position = 0;
+    short buffer[1024 * 2];
+    for (int i = 0; i <= count; ++i) {
+        int frame = frames, on = 0, pitch = 0, velocity = 0;
+        if (i < count && (fscanf(events, "%d %d %d %d", &frame, &on, &pitch, &velocity) != 4 ||
+            frame < position || frame > frames || (on != 0 && on != 1) || pitch < 0 || pitch > 127 ||
+            velocity < 1 || velocity > 127)) return fail("Invalid guide event");
+        while (position < frame) {
+            int block = frame - position < 1024 ? frame - position : 1024;
+            tsf_render_short(synth, buffer, block, 0);
+            if (fwrite(buffer, 2 * sizeof(short), block, out) != (size_t)block)
+                return fail("Cannot write guide samples");
+            position += block;
+        }
+        if (i < count) {
+            if (on && !tsf_channel_note_on(synth, 0, pitch, velocity / 127.0f))
+                return fail("Cannot play guide note");
+            if (!on) tsf_channel_note_off(synth, 0, pitch);
+        }
+    }
+    fclose(events);
+    tsf_close(synth);
+    return fclose(out) == 0 ? 0 : fail("Cannot finish guide");
+}
+
 int main(int argc, char **argv) {
+    if (argc == 2 && strcmp(argv[1], "--guide-version") == 0) { puts("1"); return 0; }
+    if (argc == 5 && strcmp(argv[1], "--guide") == 0) return render_guide(argv[2], argv[3], argv[4]);
     if (argc != 4) return fail("Usage: renderer soundfont events.txt output.f32");
     FILE *events = fopen(argv[2], "r");
     if (!events) return fail("Cannot read events");

@@ -11,7 +11,7 @@ import rendition_worker as worker
 class RenditionPlannerTest(unittest.TestCase):
     def test_an_unlisted_arrangement_uses_the_listeners_words_and_selected_take(self):
         request = "Fingerpicked guitar and cello; let the cello sing the tune."
-        result = {"scope": "whole", "caption": "Chamber folk duet for guitar and cello.", "label": "Chamber folk"}
+        result = {"scope": "whole", "caption": "Chamber folk duet for guitar and cello.", "label": "Chamber folk", "reference": "parent"}
         with patch.object(worker, "infer_plan", return_value=(result, "local model")) as interpret:
             decision = worker.plan_take({"prompt": request, "parentCaption": "A string quartet"}, 40)
         context = interpret.call_args.args[0]
@@ -22,11 +22,12 @@ class RenditionPlannerTest(unittest.TestCase):
 
     def test_combined_original_melody_and_new_style_are_planned_together(self):
         request = "Closer to the original melody, but play it as an oud and cello duet"
-        result = {"scope": "whole", "caption": "An oud and cello duet.", "label": "Oud and cello"}
+        result = {"scope": "whole", "caption": "An oud and cello duet.", "label": "Oud and cello", "reference": "original"}
         with patch.object(worker, "infer_plan", return_value=(result, "local model")) as interpret:
             decision = worker.plan_take({"prompt": request, "parentCaption": "Old arrangement"}, 40)
         self.assertEqual(request, interpret.call_args.args[0]["listener_request"])
         self.assertEqual("An oud and cello duet.", decision["caption"])
+        self.assertEqual("original", decision["melodyReference"])
 
     def test_parent_placeholder_cannot_become_the_new_arrangement_description(self):
         request = "Let a bowed cello play the tune with fingerpicked guitar."
@@ -68,11 +69,35 @@ class RenditionPlannerTest(unittest.TestCase):
             decision = worker.plan_take({"prompt": "Keep the ending but soften the opening"}, 35)
         self.assertEqual("clarify", decision["state"])
 
-    def test_original_reference_does_not_discard_a_selected_performance(self):
+    def test_selected_original_reference_keeps_the_selected_time_bounds(self):
         with patch.object(worker, "infer_plan", side_effect=AssertionError):
             decision = worker.plan_take({"prompt": "Closer to the original melody",
                                          "startSeconds": 2, "endSeconds": 7}, 10)
-        self.assertEqual("clarify", decision["state"])
+        self.assertEqual("planned", decision["state"])
+        self.assertEqual((2, 7, "original"),
+                         (decision["appliedStartSeconds"], decision["appliedEndSeconds"], decision["melodyReference"]))
+
+    def test_a_request_for_an_original_chorus_needs_a_range_before_render(self):
+        with patch.object(worker, "infer_plan", side_effect=AssertionError):
+            result = worker.plan_take({"prompt": "I miss the way the original chorus begins."}, 31)
+        self.assertEqual("clarify", result["state"])
+
+    def test_a_paraphrased_reference_uses_both_the_parent_and_the_selected_range(self):
+        request = "That bit I hummed in my voice memo belongs here. Keep the duo."
+        reply = {"scope":"selection", "caption":"A cello leads the duo.", "label":"The old tune",
+                 "reference":"original"}
+        with patch.object(worker, "infer_plan", return_value=(reply, "local model")):
+            decision = worker.plan_take({"prompt":request, "parentCaption":"A cello duo.",
+                                         "startSeconds":3, "endSeconds":8}, 31)
+        self.assertEqual("original", decision["melodyReference"])
+        self.assertEqual((3, 8), (decision["appliedStartSeconds"], decision["appliedEndSeconds"]))
+
+    def test_mentioning_the_original_can_explicitly_leave_it_out(self):
+        reply = {"scope":"ending", "caption":"A softer take.", "label":"Soft ending", "reference":"parent"}
+        with patch.object(worker, "infer_plan", return_value=(reply, "local model")):
+            decision = worker.plan_take({"prompt":"Don't use the original. Soften the ending.",
+                                         "parentCaption":"A cello duo."}, 31)
+        self.assertEqual("parent", decision["melodyReference"])
 
     def test_reanchoring_supplies_the_original_recording_and_keeps_the_style(self):
         with tempfile.TemporaryDirectory() as temp:
@@ -82,7 +107,8 @@ class RenditionPlannerTest(unittest.TestCase):
                     out.setparams((2, 2, 44100, 0, "NONE", "not compressed"))
                     out.writeframes(bytes(4 * 44100))
             def render(source, destination, caption, **options):
-                self.assertEqual(source, original.resolve())
+                self.assertEqual(source, take.resolve())
+                self.assertEqual(original.resolve(), options["reference"])
                 self.assertIn("Warm piano trio", caption)
                 self.assertEqual(0.8, options["cover_strength"])
                 destination.write_bytes(source.read_bytes())

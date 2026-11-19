@@ -35,11 +35,17 @@ class NativeRenditionTest(unittest.TestCase):
                                deadline=time.monotonic() + 3, **scope)
 
     def test_reads_source_conditions_cover_or_repaint_and_uses_only_pinned_models(self):
-        for scope in ({}, {"cover_strength": .8}, {"start": .25, "end": .5}):
+        timbre = self.home / "folk-parent-clip.wav"
+        timbre.touch()
+        for scope in ({}, {"cover_strength": .8, "timbre_reference": timbre}, {"start": .25, "end": .5}):
             with self.subTest(scope=scope):
                 def fake_cli(args, **kwargs):
                     self.assertEqual(str(self.binary), args[0])
                     self.assertEqual(str(self.basis), args[args.index("--src-audio") + 1])
+                    if "timbre_reference" in scope:
+                        self.assertEqual(str(timbre), args[args.index("--ref-audio") + 1])
+                    else:
+                        self.assertNotIn("--ref-audio", args)
                     registry = Path(args[args.index("--models") + 1])
                     self.assertEqual(set(native.MODELS), {f.name for f in registry.iterdir()})
                     request = Path(args[args.index("--request") + 1])
