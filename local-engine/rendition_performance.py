@@ -71,10 +71,19 @@ def perform_score(parent, original, destination, work, *, direction, caption, pa
         parent_plan = scored_ancestor["plan"]
         basis = Path(scored_ancestor["scoreSource"]).resolve(strict=True)
         from_upload = basis.samefile(original)
+        if recover_original and not from_upload:
+            return {"state": "clarify", "error": "The saved passage follows an arrangement of an earlier take. "
+                    "To use the upload’s melody, ask “Bring back the original melody and make a fresh "
+                    "interpretation of the whole take,” or select Original to start from the upload."}
     transcription = work / "source-notes.json"
     report_stage("melody")
     trace_version = parent_plan.get("melodyTraceVersion", 1) if parent_plan else MELODY_TRACE_VERSION
-    if not transcribe_recording(basis, transcription, deadline=deadline, trace_version=trace_version):
+    # A separated singer or a mix contour belongs to a particular recording.
+    # A freshly rendered instrumental take used as a new input gets its own analysis.
+    same_input = parent_plan and (scored_ancestor or (parent_plan.get("fromUpload") and from_upload))
+    trace_source = parent_plan.get("melodyTraceSource") if same_input else None
+    if not transcribe_recording(basis, transcription, deadline=deadline, trace_version=trace_version,
+                                trace_source=trace_source):
         if scored_ancestor:
             return {"state": "clarify", "error": "I couldn't recover this take's score. You can ask for a fresh interpretation of the whole take."}
         return None
@@ -88,6 +97,8 @@ def perform_score(parent, original, destination, work, *, direction, caption, pa
     plan.pop("scoreSourceTakeId", None)
     plan["fromUpload"] = from_upload
     plan["melodyTraceVersion"] = trace_version
+    if "melodySource" in notes:
+        plan["melodyTraceSource"] = notes["melodySource"]
     tracks, seconds, mapping = arrange(notes, analysis, plan)
     if scored_ancestor:
         frames = scored_ancestor["frames"]

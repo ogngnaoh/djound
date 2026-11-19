@@ -31,6 +31,95 @@ class PerformanceTest(unittest.TestCase):
                       duration=2)
         music.perform_take(self.parent, self.destination, "cello duet", **{**fields, **changes})
 
+    def test_melody_source_choice_is_pinned_only_for_the_same_recording(self):
+        original = self.root / "upload.wav"
+        self.write(original, 8, 2)
+        with (patch.object(music, "guide_available", return_value=True),
+              patch("rendition_score_render.score_available", return_value=True),
+              patch("rendition_melody.transcribe_recording", return_value=False) as transcribe):
+            for from_upload, recover, basis, pin in ((True, False, original, "separated_voice"),
+                                                      (False, False, self.parent, None),
+                                                      (False, True, original, None)):
+                old = {"fromUpload": from_upload, "melodyTraceVersion": 3, "melodyTraceSource": "separated_voice"}
+                music.perform_score(self.parent, original, self.destination, self.root, direction="Piano",
+                                    caption="Piano", parent_caption="A song", parent_plan=old,
+                                    parent_map=None, recover_original=recover)
+                self.assertEqual(basis, transcribe.call_args.args[0])
+                self.assertEqual(3, transcribe.call_args.kwargs["trace_version"])
+                self.assertEqual(pin, transcribe.call_args.kwargs["trace_source"])
+
+    def test_retained_score_uses_its_verified_source_and_original_trace_version(self):
+        upload = self.root / "upload.wav"
+        earlier = self.root / "earlier.wav"
+        self.write(upload, 21, 2)
+        self.write(earlier, 31, 2)
+        for basis, restore, plan, version, analyzer in (
+            (upload, True, {"melodyTraceVersion": 3, "melodyTraceSource": "separated_voice"}, 3, "separated_voice"),
+            (earlier, False, {"melodyTraceVersion": 3, "melodyTraceSource": "mix"}, 3, "mix"),
+            (upload, True, {}, 1, None),
+            (earlier, False, {"melodyTraceVersion": 2}, 2, None),
+        ):
+            ancestor = {"plan": {**plan, "fromUpload": basis == upload}, "scoreSource": str(basis)}
+            with (self.subTest(basis=basis, version=version),
+                  patch.object(music, "guide_available", return_value=True),
+                  patch("rendition_score_render.score_available", return_value=True),
+                  patch("rendition_melody.transcribe_recording", return_value=False) as transcribe):
+                music.perform_score(self.parent, upload, self.destination, self.root, direction="Piano",
+                                    caption="Piano", parent_caption="A song", parent_plan=None,
+                                    parent_map=None, recover_original=restore, scored_ancestor=ancestor,
+                                    passage_policy="develop")
+                self.assertEqual(basis.resolve(), transcribe.call_args.args[0])
+                self.assertEqual(version, transcribe.call_args.kwargs["trace_version"])
+                self.assertEqual(analyzer, transcribe.call_args.kwargs["trace_source"])
+
+    def test_original_melody_conflict_and_fresh_retry_go_to_the_requested_recording(self):
+        import rendition_worker
+
+        upload, earlier = self.root / "upload.wav", self.root / "earlier.wav"
+        self.write(upload, 21, 2)
+        self.write(earlier, 31, 2)
+        request = {"source": str(self.parent), "original": str(upload), "supportsArrangedScore": True,
+                   "parentCaption": "An instrumental take.", "scoredAncestor": {
+                       "scoreSource": str(earlier), "plan": {"fromUpload": False, "melodyTraceVersion": 2},
+                       "frames": 88200, "editedFrames": [[66150, 88200]]}}
+        with (patch.object(music, "guide_available", return_value=True),
+              patch("rendition_score_render.score_available", return_value=True),
+              patch("rendition_melody.transcribe_recording") as transcribe):
+            for suffix in ("", " and keep my edited passage exactly"):
+                result = rendition_worker.run({**request, "output": str(self.destination),
+                                               "prompt": "Bring back the original melody" + suffix})
+                self.assertEqual("clarify", result["state"])
+                self.assertIn("fresh interpretation", result["error"])
+                self.assertFalse(self.destination.exists())
+            transcribe.assert_not_called()
+
+        def transcribe(source, path, **options):
+            self.assertEqual(3, options["trace_version"])
+            self.assertIsNone(options["trace_source"])
+            path.write_text(json.dumps({"frames": 88200, "melodySource": "single", "melody": [(0, .3, 60, .8)]}))
+            return True
+
+        def render(tracks, seconds, output, **options):
+            self.write(output, 41, seconds)
+
+        tracks = [{"program": 0, "notes": [(0, .3, 60, 80)]}]
+        plans = [{"realization": "score", "bpm": 120, "phrasing": "flowing"} for _ in range(2)]
+        with (patch.object(music, "guide_available", return_value=True),
+              patch("rendition_score_render.score_available", return_value=True),
+              patch("rendition_melody.transcribe_recording", side_effect=transcribe) as extractor,
+              patch("rendition_score_plan.plan_arrangement", side_effect=plans),
+              patch("rendition_score.arrange", return_value=(tracks, 2, [[0, 0], [88200, 88200]])),
+              patch("rendition_score_render.render_score", side_effect=render)):
+            for direction, basis in (("Bring back the original melody", upload), ("Solo piano", self.parent)):
+                output = self.root / (basis.stem + "-fresh.wav")
+                result = rendition_worker.run({**request, "output": str(output),
+                                               "prompt": direction + " and make a fresh interpretation of the whole take."})
+                self.assertEqual("ready", result["state"])
+                self.assertEqual(basis.resolve(), extractor.call_args.args[0])
+                self.assertEqual(basis == upload, result["arrangementPlan"]["fromUpload"])
+                self.assertNotIn("retainedPassageFrames", result["arrangementPlan"])
+                self.assertTrue(output.is_file())
+
     def test_finished_score_caption_names_only_sounding_players_and_their_performed_direction(self):
         import rendition_worker
 

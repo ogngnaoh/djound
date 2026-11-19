@@ -371,7 +371,7 @@ def run(request, plan_only=False):
             metadata = perform_score(source, original, output, work, direction=named_direction,
                                      caption=caption, parent_caption=request.get("parentCaption") or "",
                                      parent_plan=None if policy == "fresh" else request.get("parentPlan"), parent_map=parent_map,
-                                     recover_original=reference is not None and policy != "fresh",
+                                     recover_original=reference is not None,
                                      scored_ancestor=request.get("scoredAncestor") if policy in ("keep", "develop") else None,
                                      passage_policy=policy)
             if metadata:
