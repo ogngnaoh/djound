@@ -144,13 +144,29 @@ def perform_score(parent, original, destination, work, *, direction, caption, pa
     previous_score = None
     if same_input and parent_plan.get("realization", "score") == "score":
         previous_score = arrange(notes, analysis, parent_plan)
+    performance = arrange(notes, analysis, plan)
+    if previous_score and not scored_ancestor:
+        # Compare the parts a listener would hear. Cue text, model provenance, and an unused
+        # score setting can all change while the musicians play the exact same performance.
+        def repeats_parent(candidate, performed):
+            return (candidate.get("realization") == "score" and
+                    candidate.get("room", .44) == parent_plan.get("room", .44) and
+                    performed[:2] == previous_score[:2])
+
+        if repeats_parent(plan, performance):
+            plan = plan_arrangement(analysis, direction, parent_caption, deadline=deadline, reconsider=True)
+            if plan is not None:
+                performance = arrange(notes, analysis, plan)
+            if plan is None or repeats_parent(plan, performance):
+                return {"state": "clarify", "error": "The players would perform this the same way again. "
+                        "Which change would you like to hear in the pace, the instruments, or how they play the tune?"}
     plan.pop("retainedPassageFrames", None)
     plan.pop("scoreSourceTakeId", None)
     plan["fromUpload"] = from_upload
     plan["melodyTraceVersion"] = trace_version
     if "melodySource" in notes:
         plan["melodyTraceSource"] = notes["melodySource"]
-    tracks, seconds, mapping = arrange(notes, analysis, plan)
+    tracks, seconds, mapping = performance
     if scored_ancestor:
         frames = scored_ancestor["frames"]
         if (mapping != Timeline(analysis, parent_plan).frames() or round(seconds * audio.RATE) != frames

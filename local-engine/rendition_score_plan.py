@@ -637,14 +637,38 @@ def _run(request):
         names = _catalog()[0]
         context["currentScore"]["players"] = [names[old["leadProgram"]]] + [
             f"{r['kind']}: {names[r['program']] if r['program'] is not None else 'drum kit'}" for r in old["roles"]]
-    director = _Director(context)
+    reconsider = bool(old and request.get("reconsider"))
+    if reconsider:
+        # Write the destination before showing the old band. Otherwise a vivid description of
+        # a finished performance can convince the director it already fulfills a new purpose.
+        director = _Director({"source": source, "listener": direction, "task": (
+            "Imagine the performance the listener wants, using the recording's melody. "
+            "Translate their intended listening experience into concrete tempo, texture, "
+            "energy and instrumental parts. Write a chart that can deliver that experience.")})
+        scope = director.choose(
+            f"Read only this request: «{direction}». Is it a brief for a whole interpretation, "
+            "or does the listener specify what to keep or which individual part or setting to change?",
+            {"interpret": "a listening situation, overall sound or genre with the musical choices left to the performers",
+             "targeted": "a specific instrument, part, tempo, or edit relative to something the listener wants to keep"})
+        if scope == "interpret":
+            old = None
+        else:
+            director.context += "\nSelected take for the targeted edit: " + json.dumps(
+                {"description": context["currentTake"], "score": context["currentScore"]}, ensure_ascii=False)
+            if director.choose(f"Does the selected take already fulfill the exact instruction «{direction}»?",
+                               {"change": "there is a requested musical change still to make",
+                                "satisfied": "the named setting is already present and no change was requested"}) == "satisfied":
+                return None
+    else:
+        director = _Director(context)
     plan = _arrange(analysis, direction, old, director)
     plan["conductorCue"] = " ".join(director.brief.split())[:1400]
     plan["director"] = director.identity
     return plan
 
 
-def plan_arrangement(analysis: dict, direction: str, parent_caption: str = "", *, deadline: float | None = None) -> dict:
+def plan_arrangement(analysis: dict, direction: str, parent_caption: str = "", *, deadline: float | None = None,
+                     reconsider: bool = False) -> dict | None:
     """Return a v1 score. A short-lived local model releases its memory before audio rendering."""
     if not isinstance(direction, str) or not direction.strip() or len(direction) > 4000:
         raise ValueError("Describe the desired arrangement in up to 4000 characters.")
@@ -663,6 +687,8 @@ def plan_arrangement(analysis: dict, direction: str, parent_caption: str = "", *
         raise TimeoutError("The arrangement planner exceeded its deadline.")
     request = {"analysis": retained, "sourceSnapshot": compact, "direction": direction.strip(),
                "parentCaption": parent_caption.strip()[:1800]}
+    if reconsider:
+        request["reconsider"] = True
     try:
         proc = subprocess.run([sys.executable, "-B", str(Path(__file__).resolve())], text=True,
                               input=json.dumps(request, allow_nan=False), capture_output=True, timeout=seconds,
@@ -673,6 +699,8 @@ def plan_arrangement(analysis: dict, direction: str, parent_caption: str = "", *
     if proc.returncode:
         raise RuntimeError("The local language planner could not arrange the recording.")
     result = json.loads(proc.stdout)
+    if reconsider and result is None:
+        return None
     if "error" in result:
         raise ValueError(result["error"])
     return result
