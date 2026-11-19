@@ -18,6 +18,17 @@ spec.loader.exec_module(runtime)
 
 
 class RuntimeCheckTest(unittest.TestCase):
+    def test_either_local_editor_can_launch_with_its_own_runtime(self):
+        environment = {'DJOUND_LOCAL_PYTHON': '/melody/python', 'DJOUND_MIX_PYTHON': '/mix/python',
+                       'DJOUND_LOCAL_WORKER': '/worker'}
+        with patch.object(runtime, 'ready_engine', side_effect=[False, True]) as ready:
+            self.assertEqual(runtime.local_editors(environment), ['finished mixes'])
+        self.assertEqual(ready.call_args_list[1].args, ('/mix/python', '/worker', '--check-mix'))
+        with patch.object(runtime, 'ready_engine', side_effect=[True, False]):
+            self.assertEqual(runtime.local_editors(environment), ['melody arrangements'])
+        with patch.object(runtime, 'ready_engine', return_value=False):
+            self.assertEqual(runtime.local_editors(environment), [])
+
     def test_occupied_port_is_rejected_without_stopping_the_listener(self):
         with socket.socket() as listener:
             listener.bind(('127.0.0.1', 0))

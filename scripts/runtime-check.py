@@ -90,6 +90,22 @@ def read_status(port):
               'This does not confirm provider capacity.')
 
 
+def ready_engine(python, worker, flag):
+    try:
+        result = command([python, worker, flag], timeout=30)
+        return json.loads(result.stdout).get('ready') is True
+    except (AttributeError, OSError, ValueError, subprocess.SubprocessError):
+        return False
+
+
+def local_editors(environment):
+    python = environment.get('DJOUND_LOCAL_PYTHON') or str(ROOT / '.runtime/local-engine/venv/bin/python')
+    mix_python = environment.get('DJOUND_MIX_PYTHON') or python
+    worker = environment.get('DJOUND_LOCAL_WORKER') or str(ROOT / 'local-engine/worker.py')
+    return [label for label, executable, flag in (('melody arrangements', python, '--check'),
+             ('finished mixes', mix_python, '--check-mix')) if ready_engine(executable, worker, flag)]
+
+
 def check(port, mode):
     problems = []
     jars = list((ROOT / 'server/target').glob('djound-*.jar'))
@@ -118,16 +134,12 @@ def check(port, mode):
     if (data.exists() and not data.is_dir()) or not ancestor.is_dir() or not os.access(ancestor, os.W_OK):
         problems.append('DJOUND_DATA_DIR must be a directory in a writable location; no files were changed.')
     if mode == 'LOCAL':
-        python = os.environ.get('DJOUND_LOCAL_PYTHON', str(ROOT / '.runtime/local-engine/venv/bin/python'))
-        worker = os.environ.get('DJOUND_LOCAL_WORKER', str(ROOT / 'local-engine/worker.py'))
-        try:
-            result = command([python, worker, '--check'], timeout=30)
-            ready = json.loads(result.stdout)
-            if ready.get('ready') is not True:
-                raise ValueError('Local engine readiness failed.')
-        except (OSError, ValueError, subprocess.SubprocessError):
-            problems.append('Local music tools are not ready. Follow the local setup in README.md. '
-                            'the readiness check never downloads or runs models.')
+        editors = local_editors(os.environ)
+        if editors:
+            print('Local editing available for ' + ' and '.join(editors) + '.')
+        else:
+            problems.append('Set up a local editor with local-engine/setup_localengine.sh --finished-mix '
+                            'for stereo mixes or --audio-only for melody arrangements.')
     try:
         host = os.environ.get('DOCKER_HOST', '')
         endpoint = command(['docker', 'context', 'inspect', '--format', '{{.Endpoints.docker.Host}}']).stdout.strip()

@@ -30,3 +30,9 @@ These model weights and rendering resources are not committed to the source repo
 ## Other software dependencies
 
 JavaScript, Java and Python dependencies retain their upstream licenses. Versions are recorded in the [web manifest](web/package.json), [Java manifest](server/pom.xml) and [engine requirements](local-engine/requirements.lock). The featured film was rendered with Remotion 4.0.541. [Remotion license](https://github.com/remotion-dev/remotion/blob/v4.0.541/LICENSE.md)
+
+## Finished mix separation
+
+SCNet small by Weinan Tong and coauthors estimates drums, bass, other instruments and vocals. Its [author's license clarification](https://github.com/starrytong/SCNet/issues/35) grants MIT terms for the released checkpoints and redistribution of ONNX conversions with attribution. Copyright (c) 2024 starrytong. The original model was trained on MUSDB18-HQ. The converted [audiojs model card](https://huggingface.co/audiojs/scnet/tree/e71bcdb42bce1d62b7fae25ba90fcbcf90f73f46) identifies the upstream checkpoint and conversion procedure. The installer verifies the model and license against the [finished mix manifest](local-engine/finished-mix-assets.json) and stores the MIT license beside the weights.
+
+The SCNet processing in Djound follows the format and overlap-add behavior published in [@audio/neural-separate 0.7.1](https://www.npmjs.com/package/@audio/neural-separate/v/0.7.1), copyright 2026 Dmitry Iv. and audiojs contributors, and [Music-Source-Separation-Training](https://github.com/ZFTurbo/Music-Source-Separation-Training), copyright (c) 2024 Roman Solovyev (ZFTurbo). Their MIT terms are reproduced in the [SCNet processing notice](local-engine/licenses/scnet-processing.txt).
