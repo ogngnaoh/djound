@@ -1,0 +1,61 @@
+{
+  "model": "mlx-community/Qwen3-4B-Instruct-2507-4bit",
+  "revision": "50d427756c6b1b2fe0c0a10f67fbda1fc8e82c1b",
+  "assets": [
+    {
+      "path": "added_tokens.json",
+      "bytes": 707,
+      "git_blob_sha1": "b54f9135e44c1e81047e8d05cb027af8bc039eed"
+    },
+    {
+      "path": "chat_template.jinja",
+      "bytes": 4040,
+      "git_blob_sha1": "a18870ad4ba26ac6c43758fc506c1bb6ff206bb4"
+    },
+    {
+      "path": "config.json",
+      "bytes": 938,
+      "git_blob_sha1": "ce8b8eccd1cdf6d8a30767f58e8ff858dd15eab5"
+    },
+    {
+      "path": "generation_config.json",
+      "bytes": 238,
+      "git_blob_sha1": "432531a002c181a19de338313d2375e9d7494d7e"
+    },
+    {
+      "path": "merges.txt",
+      "bytes": 1671853,
+      "git_blob_sha1": "31349551d90c7606f325fe0f11bbb8bd5fa0d7c7"
+    },
+    {
+      "path": "model.safetensors",
+      "bytes": 2263022417,
+      "sha256": "2a73c6c248601ab904e035548abd8e6abb65ea27dcb5f342fb0a8910eb44173f"
+    },
+    {
+      "path": "model.safetensors.index.json",
+      "bytes": 63964,
+      "git_blob_sha1": "4741a210f9920c2949ca73bbb2a7ce9583e7fd83"
+    },
+    {
+      "path": "special_tokens_map.json",
+      "bytes": 613,
+      "git_blob_sha1": "ac23c0aaa2434523c494330aeb79c58395378103"
+    },
+    {
+      "path": "tokenizer.json",
+      "bytes": 11422654,
+      "sha256": "aeb13307a71acd8fe81861d94ad54ab689df773318809eed3cbe794b4492dae4"
+    },
+    {
+      "path": "tokenizer_config.json",
+      "bytes": 5440,
+      "git_blob_sha1": "474bbcd82077828bdec32b8dbc1826cdff2a792a"
+    },
+    {
+      "path": "vocab.json",
+      "bytes": 2776833,
+      "git_blob_sha1": "4783fe10ac3adce15ac8f358ef5462739852c569"
+    }
+  ]
+}

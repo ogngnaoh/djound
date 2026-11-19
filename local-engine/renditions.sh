@@ -67,6 +67,9 @@ if [[ "$1" == setup || "$1" == setup-http ]]; then
   # Reuse the same interpreter, pinned packages and hash-verified assets as the other local editors.
   uv pip install --python "$planner/venv/bin/python" -r "$code/requirements.lock"
   "$planner/venv/bin/python" "$code/setup_assets.py"
+  director_args=(--score-director)
+  if [[ -n "${DJOUND_SCORE_DIRECTOR_CACHE:-}" ]]; then director_args+=(--reuse-cache "$DJOUND_SCORE_DIRECTOR_CACHE"); fi
+  "$planner/venv/bin/python" "$code/setup_assets.py" "${director_args[@]}"
 fi
 
 if [[ "$1" == setup ]]; then

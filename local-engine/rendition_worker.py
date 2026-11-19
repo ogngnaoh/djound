@@ -7,6 +7,7 @@ import math
 from pathlib import Path
 import re
 import sys
+import tempfile
 import wave
 
 from common import HERE, HOME
@@ -282,12 +283,29 @@ def run(request, plan_only=False):
         caption += " The arrangement being revised: " + request["parentCaption"][:400]
     caption = caption[:3600] + " " + ARRANGEMENT_DIRECTION
     named_direction = decision["caption"] if decision["planner"] in ("style", "original-reference") else request["prompt"]
-    perform_take(source, output, caption, description=decision["caption"], prompt=request["prompt"].strip(),
-                 named_direction=named_direction,
-                 duration=duration, start=decision["appliedStartSeconds"], end=decision["appliedEndSeconds"],
-                 original_reference=reference,
-                 keep_ensemble=bool(reference and reference != source and decision["keepEnsemble"]))
-    return {**decision, "state": "ready", "durationSeconds": audio_duration(output)}
+    original = Path(request["original"]).resolve(strict=True)
+    keep_ensemble = bool(reference and reference != source and decision["keepEnsemble"])
+    parent_map = request.get("parentSongTimeMap")
+    with tempfile.TemporaryDirectory(prefix=".score-", dir=output.parent) as folder:
+        work = Path(folder)
+        if request.get("supportsArrangedScore") is True and decision["appliedStartSeconds"] is None and not keep_ensemble:
+            from rendition_performance import perform_score
+            metadata = perform_score(source, original, output, work, direction=named_direction,
+                                     caption=caption, parent_caption=request.get("parentCaption") or "",
+                                     parent_plan=request.get("parentPlan"), parent_map=parent_map,
+                                     recover_original=reference is not None)
+            if metadata:
+                return {**decision, **metadata, "state": "ready", "durationSeconds": audio_duration(output)}
+        if reference is not None and parent_map and any(a != b for a, b in parent_map):
+            from rendition_audio import rendition_deadline
+            from rendition_timeline import align_original_guide
+            reference = work / "original-on-take.wav"
+            if not align_original_guide(original, reference, parent_map, deadline=rendition_deadline()):
+                return {"state": "clarify", "error": "I couldn't follow the original tune across these two performances. Which phrase should I use?"}
+        perform_take(source, output, caption, description=decision["caption"], prompt=request["prompt"].strip(),
+                     named_direction=named_direction, duration=duration, start=decision["appliedStartSeconds"],
+                     end=decision["appliedEndSeconds"], original_reference=reference, keep_ensemble=keep_ensemble)
+        return {**decision, "state": "ready", "durationSeconds": audio_duration(output)}
 
 
 def main():

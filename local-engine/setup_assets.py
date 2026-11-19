@@ -1,7 +1,9 @@
 """Explicit, verified model/renderer downloads. Never runs inference."""
 import argparse
+import errno
 import hashlib
 import json
+import os
 from pathlib import Path
 import shutil
 import subprocess
@@ -24,9 +26,48 @@ def verify(path, item):
     return hashlib.sha1(f'blob {len(raw)}\0'.encode() + raw).hexdigest() == item['git_blob_sha1']
 
 
-def prepare_renderer():
-    binary = HOME / 'renderer'
-    source = HERE / 'renderer.c'
+def install_score_director(cache):
+    manifest = json.loads((HERE / 'score-director-assets.json').read_text())
+    target = HOME / 'score-director'
+    identity = {key: manifest[key] for key in ('model', 'revision')}
+    HOME.mkdir(parents=True, exist_ok=True)
+    with tempfile.TemporaryDirectory(prefix='.director-', dir=HOME) as tmp:
+        staged = Path(tmp) / 'ready'
+        staged.mkdir()
+        for item in manifest['assets']:
+            name = item['path']
+            if target.exists():
+                if not verify(target / name, item):
+                    raise ValueError(f'Existing arrangement model asset differs: {name}')
+                continue
+            output = staged / name
+            if cache:
+                if not verify(cache / name, item):
+                    raise ValueError(f'Cached arrangement model asset differs: {name}')
+                try:
+                    os.link((cache / name).resolve(strict=True), output)
+                except OSError as error:
+                    if error.errno != errno.EXDEV:
+                        raise
+                    shutil.copyfile(cache / name, output)
+            else:
+                url = f'https://huggingface.co/{manifest["model"]}/resolve/{manifest["revision"]}/{name}'
+                subprocess.run(['curl', '--fail', '--location', '--silent', '--show-error', '--proto', '=https',
+                                '--proto-redir', '=https', '--max-time', '1800', '--max-filesize', str(item['bytes']),
+                                url, '-o', output], check=True)
+            if not verify(output, item):
+                raise ValueError(f'Arrangement model failed verification: {name}')
+        if not target.exists():
+            write_json(staged / '.djound-verified.json', identity)
+            staged.rename(target)
+        elif json.loads((target / '.djound-verified.json').read_text()) != identity:
+            raise ValueError('The existing arrangement model receipt differs from its pinned release.')
+    print('Verified recording arrangement model:', manifest['model'])
+
+
+def prepare_renderer(name='renderer', key='renderer'):
+    binary = HOME / name
+    source = HERE / (name + '.c')
     source_hash = digest(source)
     receipt = HOME / 'setup.json'
     if receipt.is_file() and binary.is_file():
@@ -34,8 +75,8 @@ def prepare_renderer():
             saved = json.loads(receipt.read_text())
         except (OSError, ValueError):
             saved = {}
-        if saved.get('rendererSourceSha256') == source_hash and saved.get('rendererSha256') == digest(binary):
-            return source_hash, saved['rendererSha256']
+        if saved.get(key + 'SourceSha256') == source_hash and saved.get(key + 'Sha256') == digest(binary):
+            return source_hash, saved[key + 'Sha256']
     with tempfile.TemporaryDirectory(prefix='.renderer-', dir=HOME) as folder:
         staged = Path(folder) / 'renderer'
         subprocess.run(['cc', '-O2', '-std=c99', '-I', str(HOME), str(source), '-lm', '-o', str(staged)],
@@ -51,7 +92,11 @@ def main():
     parser.add_argument('--audio-only', action='store_true', help='Skip the optional freeform planner weights')
     parser.add_argument('--finished-mix', action='store_true', help='Install just the finished mix separator')
     parser.add_argument('--planner-only', action='store_true', help='Install only the language planner weights')
+    parser.add_argument('--score-director', action='store_true', help='Install the recording arrangement model')
     args = parser.parse_args()
+    if args.score_director:
+        install_score_director(args.reuse_cache)
+        return
     manifest = json.loads((HERE / 'assets.json').read_text())
     mix_assets = json.loads((HERE / 'finished-mix-assets.json').read_text())['assets']
     if args.planner_only:
@@ -105,8 +150,10 @@ def main():
                 if stage.exists():
                     shutil.rmtree(stage)
     source_hash, binary_hash = prepare_renderer()
+    score_source, score_binary = prepare_renderer('score_renderer', 'scoreRenderer')
     write_json(HOME / 'setup.json', {'schemaVersion': 1, 'assets': records,
                                    'rendererSourceSha256': source_hash, 'rendererSha256': binary_hash,
+                                   'scoreRendererSourceSha256': score_source, 'scoreRendererSha256': score_binary,
                                    'model': manifest['model'], 'revision': manifest['revision']})
     print('Local engine assets prepared. No inference or audio upload occurred.')
 

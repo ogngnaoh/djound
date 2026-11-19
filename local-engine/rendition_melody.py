@@ -2,6 +2,7 @@
 
 from collections import deque
 from importlib.util import find_spec
+import json
 import math
 import os
 from pathlib import Path
@@ -34,16 +35,16 @@ def guide_available() -> bool:
         return False
 
 
-def _frame_count(source):
+def _frame_count(source, limit=MAX_FRAMES):
     with wave.open(str(source), "rb") as wav:
         if (
             wav.getframerate() != RATE
             or wav.getsampwidth() != 2
             or wav.getnchannels() not in (1, 2)
             or wav.getcomptype() != "NONE"
-            or not 0 < wav.getnframes() <= MAX_FRAMES
+            or not 0 < wav.getnframes() <= limit
         ):
-            raise ValueError("The melody guide requires a PCM16 44.1 kHz recording up to five minutes.")
+            raise ValueError("Choose a PCM16 44.1 kHz recording within the supported duration.")
         return wav.getnframes()
 
 
@@ -51,6 +52,15 @@ def build_melody_guide(
     source: Path, output: Path, *, program: int, deadline: float, preserve_register: bool = False
 ) -> bool:
     """Write the complete guide atomically. False means the recording lacks a reliable musical line."""
+    return _extract_to_file(source, output, program, deadline, preserve_register, notes_only=False)
+
+
+def transcribe_recording(source: Path, output: Path, *, deadline: float) -> bool:
+    """Extract the tune and other pitched events into a private score input."""
+    return _extract_to_file(source, output, 0, deadline, False, notes_only=True)
+
+
+def _extract_to_file(source, output, program, deadline, preserve_register, *, notes_only):
     if type(preserve_register) is not bool:
         raise ValueError("Specify whether to keep the recorded octave.")
     if type(program) is not int or not 0 <= program <= 127:
@@ -60,7 +70,7 @@ def build_melody_guide(
     source, output = Path(source).resolve(strict=True), Path(output).absolute()
     if source == output.resolve() or (output.exists() and source.samefile(output)):
         raise ValueError("Choose a separate output for the melody guide.")
-    frames = _frame_count(source)
+    frames = _frame_count(source, 600 * RATE if notes_only else MAX_FRAMES)
     if not guide_available():
         raise RuntimeError("Set up the local melody transcriber, renderer and instrument bank.")
     with tempfile.TemporaryDirectory(prefix=".melody-", dir=output.parent) as folder:
@@ -91,6 +101,7 @@ def build_melody_guide(
                     work,
                     str(program),
                     str(int(preserve_register)),
+                    "notes" if notes_only else "audio",
                 ],
                 cwd=work,
                 env=env,
@@ -117,8 +128,8 @@ def build_melody_guide(
             raise RuntimeError(
                 "Could not render the melody guide." + (" " + detail[-1][:240] if detail else "")
             )
-        staged = work / "guide.wav"
-        if _frame_count(staged) != frames:
+        staged = work / ("notes.json" if notes_only else "guide.wav")
+        if not notes_only and _frame_count(staged) != frames:
             raise ValueError("The melody guide has an incomplete timeline.")
         staged.replace(output)
         return True
@@ -387,11 +398,11 @@ def _synthesize(notes, path, program, frames, preserve_register=False):
             out.writeframesraw(block)
 
 
-def _extract(source, work, program, preserve_register):
+def _extract(source, work, program, preserve_register, *, notes_only=False):
     import numpy as np
     import soundfile as sf
 
-    frames = _frame_count(source)
+    frames = _frame_count(source, 600 * RATE if notes_only else MAX_FRAMES)
     with sf.SoundFile(source) as wav:
         if not any(np.max(np.abs(block)) > 0.0003 for block in wav.blocks(blocksize=RATE, dtype="float32")):
             return False
@@ -406,10 +417,15 @@ def _extract(source, work, program, preserve_register):
     )
     if not _reliable(notes, frames / RATE):
         return False
-    _synthesize(notes, work / "guide.wav", program, frames, preserve_register)
+    if notes_only:
+        with (work / "notes.json").open("w") as file:
+            json.dump({"frames": frames, "melody": notes, "candidates": events}, file, allow_nan=False)
+    else:
+        _synthesize(notes, work / "guide.wav", program, frames, preserve_register)
     return True
 
 
 if __name__ == "__main__":
-    ok = _extract(Path(sys.argv[1]), Path(sys.argv[2]), int(sys.argv[3]), bool(int(sys.argv[4])))
+    ok = _extract(Path(sys.argv[1]), Path(sys.argv[2]), int(sys.argv[3]), bool(int(sys.argv[4])),
+                  notes_only=sys.argv[5:] == ["notes"])
     sys.exit(0 if ok else NO_LINE)

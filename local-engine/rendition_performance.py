@@ -1,5 +1,6 @@
 """Perform a listener's instrumental arrangement on the selected recording's timeline."""
 from pathlib import Path
+import json
 import tempfile
 import wave
 
@@ -11,6 +12,47 @@ from rendition_progress import report_stage
 def _frames(path):
     with wave.open(str(path), "rb") as recording:
         return recording.getnframes()
+
+
+def perform_score(parent, original, destination, work, *, direction, caption, parent_caption,
+                  parent_plan, parent_map, recover_original):
+    """Let a local arranger revise the playing decisions and render them against the source phrases."""
+    from rendition_melody import transcribe_recording
+    from rendition_score import analyze, arrange
+    from rendition_score_plan import plan_arrangement
+    from rendition_score_render import render_score, score_available
+
+    if not (guide_available() and score_available()):
+        return None
+    deadline = audio.rendition_deadline()
+    from_upload = (original == parent or recover_original or bool(parent_plan and parent_plan.get("fromUpload")))
+    basis = original if from_upload else parent
+    transcription = work / "source-notes.json"
+    report_stage("melody")
+    if not transcribe_recording(basis, transcription, deadline=deadline):
+        return None
+    notes = json.loads(transcription.read_text())
+    analysis = analyze(notes)
+    if parent_plan:
+        analysis["parentPlan"] = parent_plan
+    report_stage("arranging")
+    plan = plan_arrangement(analysis, direction, parent_caption, deadline=deadline)
+    plan["fromUpload"] = from_upload
+    tracks, seconds, mapping = arrange(notes, analysis, plan)
+    if from_upload and parent_map:
+        from rendition_timeline import relative_map
+        mapping = relative_map(mapping, parent_map)
+    report_stage("rendering")
+    score = work / "arrangement.wav"
+    render_score(tracks, seconds, score, deadline=deadline, room=plan.get("room", .44))
+    if plan.get("realization") == "produced":
+        # Preserve the newly arranged pulse and phrasing as the source of a sound-designed take.
+        audio.render_take(score, destination, caption, duration=seconds,
+                          cover_strength=.82, cover_noise_strength=.30, deadline=deadline)
+    else:
+        score.replace(destination)
+    report_stage("finishing")
+    return {"parentTimeMap": mapping, "arrangementPlan": plan}
 
 
 def _play_duet(guide, work, program, lane, direction, seconds, deadline):
@@ -44,7 +86,7 @@ def perform_take(parent, destination, caption, *, description, prompt, duration,
     whole = start is None
     # Repaints develop the chosen performance in place. Only a request for the
     # upload's theme needs another melody guide for a passage.
-    if (whole or original_reference is not None) and guide_available():
+    if (whole or original_reference is not None) and duration <= 300 and guide_available():
         with tempfile.TemporaryDirectory(prefix=".arrange-", dir=destination.parent) as folder:
             if _perform_with_guide(parent, original_reference, destination, Path(folder), caption,
                                    description, prompt, named_direction or prompt, keep_ensemble,
