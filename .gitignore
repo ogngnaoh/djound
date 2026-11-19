@@ -39,6 +39,7 @@
 !/fixtures/audio/source-study.wav
 !/fixtures/audio/sample-pulse.wav
 !/fixtures/audio/sample-warm.wav
+!/tests/fixtures/controlled-vocal-and-band.flac
 !/web/public/audio/original.wav
 !/web/public/audio/pulse.wav
 !/web/public/audio/warm.wav
