@@ -57,6 +57,47 @@ class MelodyGuideTest(unittest.TestCase):
         self.assertFalse(melody._reliable([(a, b, p + i, 0.16) for i, (a, b, p, c) in enumerate(stable)], 1.8))
         self.assertTrue(melody._reliable([(a, b, p + i, c) for i, (a, b, p, c) in enumerate(stable)], 1.8))
 
+    def test_saved_mix_and_historical_traces_do_not_acquire_a_new_singer(self):
+        events = [(0, .4, 67, .7), (.5, .9, 69, .8), (1, 1.4, 71, .7)]
+        with (patch.object(melody, "_singer_in_mix", side_effect=AssertionError("Wrong analysis source")),
+              patch.object(melody, "_fundamental", return_value=([], [], [])) as f0,
+              patch.object(melody, "_single_voice", return_value=False)):
+            for version, source in ((1, None), (2, None), (3, "mix")):
+                found, kind = melody._recorded_line(self.source, self.root, events, 1.5, version, source, 25)
+                self.assertEqual(("mix", [67, 69, 71]), (kind, [n[2] for n in found]))
+            self.assertEqual(2, f0.call_count)
+
+    def test_a_missing_or_damaged_optional_separator_cannot_change_a_pinned_vocal_take(self):
+        from rendition_sketch import SeparatorUnavailable
+
+        events = [(0, .4, 67, .7), (.5, .9, 69, .8), (1, 1.4, 71, .7)]
+        with (patch.object(melody, "_fundamental", return_value=([], [], [])),
+              patch.object(melody, "_single_voice", return_value=False),
+              patch("rendition_sketch.vocal_reference", side_effect=SeparatorUnavailable("Unverified weights"))):
+            for installed in (False, True):
+                with self.subTest(installed=installed), patch("rendition_sketch.backing_available", return_value=installed):
+                    _, kind = melody._recorded_line(self.source, self.root, events, 1.5, 3, None, 25)
+                    self.assertEqual("mix", kind)
+                    with self.assertRaisesRegex(ValueError, "saved vocal melody"):
+                        melody._recorded_line(self.source, self.root, events, 1.5, 3, "separated_voice", 25)
+
+    def test_stem_must_be_audible_pitched_and_supported_in_the_recording(self):
+        import numpy as np
+
+        times = np.arange(100) / 50
+        pitches = np.repeat([60., 63., 65., 67.], 25)
+        events = [(a/2, (a+1)/2, int(pitches[a*25]), .8) for a in range(4)]
+        with (patch("rendition_sketch.backing_available", return_value=True),
+              patch("rendition_sketch.vocal_reference") as separate,
+              patch.object(melody, "_fundamental", return_value=(times, pitches, np.ones(100))) as f0,
+              patch.object(melody, "_voiced_notes", return_value=events) as notes):
+            for share, keys, accepted in ((.01, events, False), (.6, [(0, 2, 80, .7)], False), (.6, events, True)):
+                separate.return_value = (times[::5], np.full(20, .1 * share), np.full(20, .1))
+                line = melody._singer_in_mix(self.source, self.root, keys, 2, 25)
+                self.assertEqual(events if accepted else [], line)
+            self.assertEqual(2, f0.call_count)
+            self.assertEqual(1, notes.call_count)
+
     def test_timeout_and_invalid_destination_leave_files_untouched(self):
         self.recording([64, 67, 69])
         self.output.write_bytes(b"prior")
@@ -106,6 +147,26 @@ class MelodyGuideTest(unittest.TestCase):
                 self.assertEqual(actual, expected)
                 if shift:
                     self.assertNotEqual(actual, render(program, pitches, True, name + "unchanged"))
+
+    def test_instrument_can_answer_below_the_singer_and_overlap_a_phrase_boundary(self):
+        voice = [(0, .45, 70, .92), (.5, 1., 72, .89), (5., 5.4, 70, .91), (6.6, 7., 72, .9)]
+        # The pickup starts just before the voice releases; the cadence rings past its return.
+        answer = [(.92, 1.57, 54, .84), (1.60, 2.26, 57, .83), (2.32, 2.95, 59, .82),
+                  (3.03, 3.65, 55, .88), (3.72, 4.29, 57, .86), (4.36, 5.24, 54, .85)]
+        breath = [(5.5 + i * .27, 5.73 + i * .27, p, .9) for i, p in enumerate((67, 69, 72, 70))]
+        result = melody._with_instrumental_phrases(voice, answer + breath, 7.)
+        added = [note for note in result if note not in voice]
+        self.assertEqual([54, 57, 59, 55, 57, 54], [note[2] for note in added])
+        self.assertEqual((1., 5.), (added[0][0], added[-1][1]))
+        self.assertTrue(all(note in result for note in voice))
+
+    def test_repeating_backing_does_not_become_the_lead_during_a_vocal_rest(self):
+        voice = [(0, .45, 70, .9), (.53, .95, 72, .9), (.99, 1.42, 74, .9),
+                 (8., 8.41, 70, .9), (8.45, 8.9, 72, .9), (9., 9.51, 74, .9)]
+        for pitches in ((36, 43), (50, 54, 57)):
+            backing = [(1.8 + .5 * i, 2.22 + .5 * i, pitches[i % len(pitches)], .85) for i in range(12)]
+            with self.subTest(pitches=pitches):
+                self.assertEqual(voice, melody._with_instrumental_phrases(voice, backing, 10.))
 
     @unittest.skipUnless(melody.guide_available(), "local melody assets are optional")
     def test_real_recording_becomes_a_timed_instrumental_line(self):

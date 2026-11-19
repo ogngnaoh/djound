@@ -20,7 +20,8 @@ MAX_FRAMES = 300 * RATE
 MODEL = Path("basic-pitch/basic_pitch/saved_models/icassp_2022/nmp.onnx")
 BANK = "FluidR3_GM.sf2"
 NO_LINE = 3
-MELODY_TRACE_VERSION = 2
+MELODY_TRACE_VERSION = 3
+TRACE_SOURCES = ("single", "mix", "separated_voice")
 
 
 def guide_available() -> bool:
@@ -56,15 +57,19 @@ def build_melody_guide(
     return _extract_to_file(source, output, program, deadline, preserve_register, notes_only=False)
 
 
-def transcribe_recording(source: Path, output: Path, *, deadline: float, trace_version=MELODY_TRACE_VERSION) -> bool:
+def transcribe_recording(source: Path, output: Path, *, deadline: float, trace_version=MELODY_TRACE_VERSION,
+                         trace_source=None) -> bool:
     """Extract the tune and other pitched events into a private score input."""
-    return _extract_to_file(source, output, 0, deadline, False, notes_only=True, trace_version=trace_version)
+    return _extract_to_file(source, output, 0, deadline, False, notes_only=True, trace_version=trace_version,
+                            trace_source=trace_source)
 
 
 def _extract_to_file(source, output, program, deadline, preserve_register, *, notes_only,
-                     trace_version=MELODY_TRACE_VERSION):
-    if type(trace_version) is not int or trace_version not in (1, MELODY_TRACE_VERSION):
+                     trace_version=MELODY_TRACE_VERSION, trace_source=None):
+    if type(trace_version) is not int or trace_version not in (1, 2, 3):
         raise ValueError("This saved take uses an unsupported melody transcription.")
+    if trace_source is not None and (trace_version < 3 or trace_source not in TRACE_SOURCES):
+        raise ValueError("This saved take has an unknown melody source.")
     if type(preserve_register) is not bool:
         raise ValueError("Specify whether to keep the recorded octave.")
     if type(program) is not int or not 0 <= program <= 127:
@@ -107,6 +112,8 @@ def _extract_to_file(source, output, program, deadline, preserve_register, *, no
                     str(int(preserve_register)),
                     "notes" if notes_only else "audio",
                     str(trace_version),
+                    trace_source or "auto",
+                    str(deadline),
                 ],
                 cwd=work,
                 env=env,
@@ -407,6 +414,105 @@ def _reliable(notes, duration):
     )
 
 
+def _singer_in_mix(source, work, events, duration, deadline):
+    """Use the estimated voice only while there is audible and pitched vocal evidence."""
+    import numpy as np
+    from rendition_sketch import SeparatorUnavailable, backing_available, vocal_reference
+
+    if not backing_available():
+        return []
+    stem = work / "singer.wav"
+    try:
+        centers, vocal_level, mix_level = vocal_reference(source, stem, deadline)
+    except SeparatorUnavailable:
+        return []
+    # A separator can leave pitched traces of an instrument in its vocal output.
+    # Require sustained energy relative to the actual recording as well as a coherent line.
+    share = vocal_level / np.maximum(mix_level, .0005)
+    present = (share >= .16) & (vocal_level >= .0008)
+    if np.count_nonzero(present) * .1 < min(1.5, duration * .35):
+        return []
+    times, pitch, confidence = _fundamental(stem)
+    heard = (np.interp(times, centers, share) >= .16) & (np.interp(times, centers, vocal_level) >= .0008)
+    confidence = np.where(heard, confidence, 0.)
+    voiced = np.isfinite(pitch) & (confidence >= .15)
+    if voiced.sum() * .02 < min(1.5, duration * .35):
+        return []
+    supported = np.zeros(len(times), bool)
+    for start, end, key, strength in events:
+        if strength >= .22:
+            lo, hi = times.searchsorted((start, end))
+            supported[lo:hi] |= abs(pitch[lo:hi] - key) <= 1
+    if supported[voiced].mean() < .35:
+        return []
+    line = _voiced_notes(stem, times, pitch, confidence)
+    return line if _reliable(line, duration) else []
+
+
+def _with_instrumental_phrases(voice, events, duration):
+    """Return the lead to an instrument when it plays a distinct phrase in a vocal rest."""
+    from bisect import bisect_left
+    from statistics import median
+
+    note_length = median(end - start for start, end, _, _ in voice)
+    gaps = []
+    for i in range(len(voice) + 1):
+        start = voice[i - 1][1] if i else 0.
+        end = voice[i][0] if i < len(voice) else duration
+        if end - start >= max(2., 4 * note_length):
+            gaps.append((i, start, end))
+    if not gaps:
+        return voice
+    written = _select_polyphonic(events, duration, trace_version=2)
+    onsets = [note[0] for note in written]
+    result = list(voice)
+    for i, start, end in gaps:
+        neighbors = voice[max(0, i - 3):i + 3]
+        vocal_register = median(note[2] for note in neighbors)
+        phrases = []
+        # Allow an early pickup within onset uncertainty. A held accompaniment
+        # from under the singer should not acquire a new attack at the boundary.
+        for a, b, pitch, confidence in written[bisect_left(onsets, start - .12):bisect_left(onsets, end)]:
+            if a < start and i and pitch == voice[i - 1][2]:
+                continue
+            a, b = max(start, a), min(end, b)
+            if b - a < .08:
+                continue
+            if (not phrases or a - phrases[-1][-1][1] > max(.65, 2 * note_length)
+                    or abs(pitch - phrases[-1][-1][2]) > 12):
+                phrases.append([])
+            phrases[-1].append((a, b, pitch, confidence))
+        for phrase in phrases:
+            if not _reliable(phrase, phrase[-1][1] - phrase[0][0]):
+                continue
+            pitches = [p for a, b, p, c in phrase if b - a >= .1 and c >= .32]
+            if median(pitches) <= vocal_register - 7:
+                # A lower instrument may answer in its own register. Require it
+                # to develop beyond an alternating bass or a cycling arpeggio.
+                if len(set(pitches)) < 3 or any(
+                    pitches[period:] == pitches[:-period] for period in range(1, min(4, len(pitches) // 2) + 1)
+                ):
+                    continue
+            result.extend(phrase)
+    return sorted(result)
+
+
+def _recorded_line(source, work, events, duration, trace_version, trace_source, deadline):
+    if trace_source == "mix":
+        return _select_polyphonic(events, duration, trace_version=trace_version), "mix"
+    if trace_source != "separated_voice":
+        times, pitch, confidence = _fundamental(source)
+        if trace_source == "single" or _single_voice(times, pitch, confidence, events):
+            return _voiced_notes(source, times, pitch, confidence), "single"
+    if trace_version >= 3:
+        voice = _singer_in_mix(source, work, events, duration, deadline)
+        if voice:
+            return _with_instrumental_phrases(voice, events, duration), "separated_voice"
+        if trace_source == "separated_voice":
+            raise ValueError("The saved vocal melody could not be recovered. Check the local separator installation.")
+    return _select_polyphonic(events, duration, trace_version=trace_version), "mix"
+
+
 def _synthesize(notes, path, program, frames, preserve_register=False):
     events = []
     for start, end, pitch, confidence in notes:
@@ -431,10 +537,14 @@ def _synthesize(notes, path, program, frames, preserve_register=False):
             out.writeframesraw(block)
 
 
-def _extract(source, work, program, preserve_register, *, notes_only=False, trace_version=MELODY_TRACE_VERSION):
+def _extract(source, work, program, preserve_register, *, notes_only=False, trace_version=MELODY_TRACE_VERSION,
+             trace_source=None, deadline=None):
     import numpy as np
     import soundfile as sf
 
+    if deadline is None:
+        from rendition_audio import rendition_deadline
+        deadline = rendition_deadline()
     frames = _frame_count(source, 600 * RATE if notes_only else MAX_FRAMES)
     with sf.SoundFile(source) as wav:
         if not any(np.max(np.abs(block)) > 0.0003 for block in wav.blocks(blocksize=RATE, dtype="float32")):
@@ -442,17 +552,15 @@ def _extract(source, work, program, preserve_register, *, notes_only=False, trac
     events = _candidates(source)
     if not events:
         return False
-    times, pitch, confidence = _fundamental(source)
-    notes = (
-        _voiced_notes(source, times, pitch, confidence)
-        if _single_voice(times, pitch, confidence, events)
-        else _select_polyphonic(events, frames / RATE, trace_version=trace_version)
-    )
+    notes, chosen = _recorded_line(source, work, events, frames / RATE, trace_version, trace_source, deadline)
     if not _reliable(notes, frames / RATE):
         return False
     if notes_only:
         with (work / "notes.json").open("w") as file:
-            json.dump({"frames": frames, "melody": notes, "candidates": events}, file, allow_nan=False)
+            data = {"frames": frames, "melody": notes, "candidates": events}
+            if trace_version >= 3:
+                data["melodySource"] = chosen
+            json.dump(data, file, allow_nan=False)
     else:
         _synthesize(notes, work / "guide.wav", program, frames, preserve_register)
     return True
@@ -461,5 +569,7 @@ def _extract(source, work, program, preserve_register, *, notes_only=False, trac
 if __name__ == "__main__":
     ok = _extract(Path(sys.argv[1]), Path(sys.argv[2]), int(sys.argv[3]), bool(int(sys.argv[4])),
                   notes_only=len(sys.argv) > 5 and sys.argv[5] == "notes",
-                  trace_version=int(sys.argv[6]) if len(sys.argv) > 6 else MELODY_TRACE_VERSION)
+                  trace_version=int(sys.argv[6]) if len(sys.argv) > 6 else MELODY_TRACE_VERSION,
+                  trace_source=None if len(sys.argv) <= 7 or sys.argv[7] == "auto" else sys.argv[7],
+                  deadline=float(sys.argv[8]) if len(sys.argv) > 8 else time.monotonic() + 1200)
     sys.exit(0 if ok else NO_LINE)

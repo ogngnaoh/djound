@@ -23,6 +23,12 @@ def read(path):
         return sketch._read(wav, 0, sketch._frames(wav))
 
 
+def write_mono(path, raw, width=2, rate=sketch.RATE):
+    with wave.open(str(path), "wb") as wav:
+        wav.setparams((1, width, rate, 0, "NONE", "not compressed"))
+        wav.writeframes(raw)
+
+
 class ArrangementSketchTest(unittest.TestCase):
     def setUp(self):
         folder = tempfile.TemporaryDirectory()
@@ -53,6 +59,83 @@ class ArrangementSketchTest(unittest.TestCase):
             yield 0, np.stack([found[i] for i in groups], axis=1).astype("float32")
 
         return separate
+
+    def test_mono_vocal_reference_uses_only_its_own_scratch(self):
+        def separate(wav, stats, deadline, groups):
+            yield 0, sketch._read(wav, 0, wav.getnframes())[:, None, :]
+
+        previous_scratch = self.tmp / "stereo-reference.wav"
+        for filename, values in [("stereo-reference.wav", [9, -5, 7]), ("memo.wav", [-20, 1, 85])]:
+            with self.subTest(filename=filename):
+                source = self.tmp / filename
+                samples = np.array(values, dtype="<i2")
+                write_mono(source, samples.tobytes())
+                existing = {path: path.read_bytes() for path in {source, previous_scratch}}
+                output = source.with_suffix(".voice.wav")
+                before = set(self.tmp.iterdir())
+                with patch.object(sketch, "_separated", side_effect=separate):
+                    times, voice, mix = sketch.vocal_reference(source, output, self.deadline)
+                for path, data in existing.items():
+                    self.assertEqual(path.read_bytes(), data)
+                self.assertEqual(set(self.tmp.iterdir()) - before, {output})
+                np.testing.assert_array_equal(read(output) * 32768, np.repeat(samples[:, None], 2, axis=1))
+                np.testing.assert_array_equal(voice, mix)
+                np.testing.assert_allclose(times, [len(samples) / (2 * sketch.RATE)])
+
+    def test_vocal_reference_rejects_unsupported_or_incomplete_mono_before_separation(self):
+        source = self.tmp / "memo.wav"
+        for reason, width, rate, frames in [
+            ("width", 1, sketch.RATE, 4), ("rate", 2, 8000, 4), ("empty", 2, sketch.RATE, 0),
+            ("long", 2, sketch.RATE, 9), ("truncated", 2, sketch.RATE, 8),
+        ]:
+            with self.subTest(reason=reason):
+                write_mono(source, bytes(width * frames), width, rate)
+                if reason == "truncated":
+                    source.write_bytes(source.read_bytes()[:-2])
+                original = source.read_bytes()
+                before = set(self.tmp.iterdir())
+                with patch.object(sketch, "MAX_FRAMES", 8), patch.object(sketch, "_separated") as model:
+                    with self.assertRaises(ValueError):
+                        sketch.vocal_reference(source, self.output, self.deadline)
+                    model.assert_not_called()
+                self.assertEqual(set(self.tmp.iterdir()), before)
+                self.assertEqual(source.read_bytes(), original)
+
+    def test_vocal_reference_does_not_publish_a_failed_or_short_estimate(self):
+        for reason in ("exception", "short", "gap"):
+            with self.subTest(reason=reason):
+                def separate(wav, stats, deadline, groups):
+                    yield int(reason == "gap"), sketch._read(wav, 0, 8)[:, None, :]
+                    if reason == "exception":
+                        raise RuntimeError("separation interrupted")
+
+                before = set(self.tmp.iterdir())
+                with patch.object(sketch, "_separated", side_effect=separate), self.assertRaises(RuntimeError):
+                    sketch.vocal_reference(self.draft, self.output, self.deadline)
+                self.assertEqual(set(self.tmp.iterdir()), before)
+
+    def test_vocal_reference_preserves_input_alias_and_competing_output(self):
+        self.output.symlink_to(self.draft)
+        original = self.draft.read_bytes()
+        with patch.object(sketch, "_separated") as model, self.assertRaisesRegex(ValueError, "separately"):
+            sketch.vocal_reference(self.draft, self.output, self.deadline)
+        model.assert_not_called()
+        self.assertTrue(self.output.is_symlink())
+        self.assertEqual(self.draft.read_bytes(), original)
+        self.output.unlink()
+
+        def competing_writer(wav, stats, deadline, groups):
+            self.output.write_bytes(b"another completed reference")
+            yield 0, sketch._read(wav, 0, wav.getnframes())[:, None, :]
+
+        before = set(self.tmp.iterdir())
+        with patch.object(sketch, "_separated", side_effect=competing_writer), self.assertRaises(FileExistsError):
+            sketch.vocal_reference(self.draft, self.output, self.deadline)
+        with patch.object(sketch, "_separated") as model, self.assertRaises(FileExistsError):
+            sketch.vocal_reference(self.draft, self.output, self.deadline)
+        model.assert_not_called()
+        self.assertEqual(self.output.read_bytes(), b"another completed reference")
+        self.assertEqual(set(self.tmp.iterdir()) - before, {self.output})
 
     def test_cache_avoids_second_draft_inference_and_restores_the_missing_rhythm(self):
         source = [self.drums, self.bass, self.line * 0.5]

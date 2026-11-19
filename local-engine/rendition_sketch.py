@@ -25,6 +25,10 @@ RHYTHM_TARGETS = (0.3, 0.48)
 MAX_RHYTHM_GAIN = (3.0, 1.4)
 
 
+class SeparatorUnavailable(RuntimeError):
+    """The verified model or execution provider could not be opened."""
+
+
 def backing_available() -> bool:
     """Cheap setup check. The separator verifies its model hash when it opens the CPU session."""
     if not all(find_spec(name) is not None for name in ("numpy", "onnxruntime", "scipy")):
@@ -94,7 +98,7 @@ def _separated(wav, statistics, deadline, groups):
     try:
         engine = scnet.session("CPUExecutionProvider")
     except EngineError as exc:
-        raise RuntimeError(
+        raise SeparatorUnavailable(
             "Install the verified SCNet accompaniment model before arranging this take."
         ) from exc
     frames = _frames(wav)
@@ -144,6 +148,64 @@ def _separated(wav, statistics, deadline, groups):
             yield first, chunk
     finally:
         timeout.cancel()
+
+
+def vocal_reference(source, output, deadline):
+    """Write the estimated singer on the mix timeline and measure its level against the mix."""
+    from contextlib import ExitStack
+
+    import numpy as np
+    from scnet import SOURCES
+
+    source, output = Path(source), Path(output)
+    _protect(output, source)
+    if os.path.lexists(output):
+        raise FileExistsError(f"The vocal reference already exists at {output}.")
+    with tempfile.TemporaryDirectory(prefix=".vocal-", dir=output.parent) as tmp, ExitStack() as inputs:
+        recording = inputs.enter_context(wave.open(str(source), "rb"))
+        frames = recording.getnframes()
+        # The separator expects stereo. A mono upload has identical left and right evidence.
+        if recording.getnchannels() == 1:
+            if (recording.getsampwidth(), recording.getframerate(), recording.getcomptype()) != (2, RATE, "NONE"):
+                raise ValueError("The vocal reference needs 44.1 kHz PCM16 audio.")
+            if not 0 < frames <= MAX_FRAMES:
+                raise ValueError("The vocal reference needs a recording up to ten minutes.")
+            stereo = Path(tmp) / "stereo.wav"
+            with wave.open(str(stereo), "wb") as copy:
+                copy.setparams((2, 2, RATE, frames, "NONE", "not compressed"))
+                for start in range(0, frames, BLOCK):
+                    _check(deadline)
+                    count = min(BLOCK, frames - start)
+                    block = recording.readframes(count)
+                    if len(block) != count * 2:
+                        raise ValueError("The vocal reference recording is incomplete.")
+                    copy.writeframesraw(np.repeat(np.frombuffer(block, "<i2"), 2).tobytes())
+            recording = inputs.enter_context(wave.open(str(stereo), "rb"))
+
+        stats = _statistics(recording, deadline)
+        ready = Path(tmp) / "singer.wav"
+        levels = []
+        hop = RATE // 10
+        with wave.open(str(ready), "wb") as singer:
+            singer.setparams(recording.getparams())
+            for start, grouped in _separated(recording, stats, deadline, (SOURCES["vocals"],)):
+                if singer.tell() != start:
+                    raise RuntimeError("The vocal reference did not cover the recording's complete timeline.")
+                voice = grouped[:, 0]
+                mix = _read(recording, start, len(voice))
+                for i in range(0, len(voice), hop):
+                    end = min(i + hop, len(voice))
+                    v, m = voice[i:end], mix[i:end]
+                    levels.append(((start + (i + end) / 2) / RATE,
+                                   float(np.sqrt(v.var(axis=0).mean())), float(np.sqrt(m.var(axis=0).mean()))))
+                singer.writeframesraw(np.rint(np.clip(voice, -1, 32767 / 32768) * 32768).astype("<i2").tobytes())
+            if singer.tell() != frames:
+                raise RuntimeError("The vocal reference did not cover the recording's complete timeline.")
+        result = np.asarray(levels).T
+        _check(deadline)
+        # Publish the complete WAV only if another caller has not already claimed its name.
+        os.link(ready, output)
+    return result
 
 
 @dataclass
