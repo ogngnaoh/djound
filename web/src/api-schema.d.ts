@@ -56,6 +56,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/renditions/{id}/takes/{takeId}/answer": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** @description Answer a saved-passage question. The new take uses the question's original request, selected parent and time range. Reusing its requestId with the same question and choice returns the existing take. */
+        post: operations["answerRenditionClarification"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/renditions/{id}/favorite": {
         parameters: {
             query?: never;
@@ -779,6 +796,11 @@ export interface components {
             /** Format: uuid */
             takeId: string;
         };
+        RenditionAnswer: {
+            requestId: string;
+            /** @enum {string} */
+            choice: "keep" | "develop";
+        };
         RenditionTake: {
             /** Format: uuid */
             id: string;
@@ -789,6 +811,21 @@ export interface components {
             caption: string;
             /** @enum {string} */
             state: "queued" | "running" | "ready" | "failed" | "clarify";
+            /**
+             * @description The saved-passage decision requested by this take.
+             * @enum {string|null}
+             */
+            clarificationKind?: "retained_passage" | null;
+            /**
+             * Format: uuid
+             * @description The question answered by this take.
+             */
+            answerTo?: string | null;
+            /**
+             * @description The listener's decision about the previously edited passage.
+             * @enum {string|null}
+             */
+            passageChoice?: "keep" | "develop" | null;
             /** @description Current worker-reported stage for a running take when available. */
             progress?: string | null;
             /** @description Piecewise-linear landmarks from this take to the uploaded recording. Each pair contains a take frame and an upload frame at 44.1 kHz. A missing map means both clocks are identical. */
@@ -1393,6 +1430,27 @@ export interface operations {
         requestBody: {
             content: {
                 "application/json": components["schemas"]["RenditionCommand"];
+            };
+        };
+        responses: {
+            202: components["responses"]["RenditionProject"];
+            default: components["responses"]["Problem"];
+        };
+    };
+    answerRenditionClarification: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: components["parameters"]["ResourceId"];
+                /** @description The take that asked the saved-passage question. */
+                takeId: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["RenditionAnswer"];
             };
         };
         responses: {

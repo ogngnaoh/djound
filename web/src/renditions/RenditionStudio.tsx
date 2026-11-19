@@ -12,6 +12,7 @@ import {
   renditionRequest,
   type RecordingProject,
   type Rendition,
+  type RenditionAnswer,
   type RenditionCommand,
 } from "./api";
 import { useRecoverableRequest } from "./useRecoverableRequest";
@@ -25,12 +26,51 @@ const styles = [
   ["Cinematic Strings", "A string ensemble carries the tune"],
 ];
 type TakeRequest = Omit<RenditionCommand, "requestId"> & { key: string };
+type AnswerRequest = Omit<RenditionAnswer, "requestId"> & {
+  key: string;
+  questionId: string;
+};
+const answerLabels = {
+  keep: "Keep it as recorded",
+  develop: "Apply my change there too",
+} satisfies Record<RenditionAnswer["choice"], string>;
 type Passage = { start: string; end: string };
 type Revision = { text: string; range: Passage | null };
 const inProgress = (take: Rendition) =>
   take.state === "queued" || take.state === "running";
 const progressText = (take: Rendition) =>
   take.state === "queued" ? "Queued" : take.progress || "Making take…";
+
+function PassageChoices({
+  question,
+  disabled,
+  onAnswer,
+}: {
+  question: Rendition;
+  disabled: boolean;
+  onAnswer: (question: Rendition, choice: RenditionAnswer["choice"]) => void;
+}) {
+  return (
+    <div
+      className="rendition-answer-options"
+      role="group"
+      aria-label="Choose what happens to the edited passage"
+    >
+      {(["keep", "develop"] as const).map((choice) => (
+        <Button
+          key={choice}
+          type="button"
+          size="sm"
+          variant="outline"
+          disabled={disabled}
+          onClick={() => onAnswer(question, choice)}
+        >
+          {answerLabels[choice]}
+        </Button>
+      ))}
+    </div>
+  );
+}
 
 export default function RenditionStudio() {
   const { id = "" } = useParams();
@@ -108,7 +148,10 @@ function RecordingSession({
     .at(-1);
   const latest =
     project.takes.find((t) => t.requestId === lastRequest) ??
-    (newestChild && (newestChild.state === "clarify" || inProgress(newestChild))
+    (newestChild &&
+    (newestChild.state === "clarify" ||
+      inProgress(newestChild) ||
+      newestChild.answerTo)
       ? newestChild
       : undefined);
   const revisionKey = (id: string) =>
@@ -122,16 +165,27 @@ function RecordingSession({
   }, [project.id, revising, text, range]);
   const creation = useRecoverableRequest(
     "rendition-take:" + project.id,
-    async (cmd: TakeRequest) => {
+    async (cmd: TakeRequest | AnswerRequest) => {
       const { key: requestId, ...body } = cmd;
-      await renditionRequest("/" + project.id + "/takes", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ requestId, ...body }),
-      });
+      const route = "/" + project.id + "/takes";
+      const answering = "questionId" in body;
+      await renditionRequest(
+        answering ? route + "/" + body.questionId + "/answer" : route,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(
+            answering
+              ? { requestId, choice: body.choice }
+              : { requestId, ...body },
+          ),
+        },
+      );
       setLastRequest(requestId);
-      setRevising(null);
-      setText((previous) => (previous.trim() === cmd.prompt ? "" : previous));
+      if ("prompt" in cmd) {
+        setRevising(null);
+        setText((previous) => (previous.trim() === cmd.prompt ? "" : previous));
+      }
       await client.invalidateQueries(
         { queryKey: projectKey(project.id) },
         { throwOnError: true },
@@ -275,6 +329,14 @@ function RecordingSession({
       parentId,
       prompt: prompt.trim(),
       ...bounds,
+    });
+  }
+  function answer(question: Rendition, choice: RenditionAnswer["choice"]) {
+    setNotice("");
+    void creation.submit({
+      key: crypto.randomUUID(),
+      questionId: question.id,
+      choice,
     });
   }
   async function favorite() {
@@ -508,7 +570,10 @@ function RecordingSession({
                 variant="outline"
                 onClick={() => void creation.submit(creation.pending!)}
               >
-                Resume request · {creation.pending.prompt}
+                Resume{" "}
+                {"questionId" in creation.pending
+                  ? "answer · " + answerLabels[creation.pending.choice]
+                  : "request · " + creation.pending.prompt}
               </Button>
             )}
             {latest && latest.id !== revising?.id && (
@@ -531,7 +596,11 @@ function RecordingSession({
                     <Play /> Play new take · {latest.label}
                   </Button>
                 ) : inProgress(latest) ? (
-                  progressText(latest)
+                  latest.parentId === activeId ? (
+                    progressText(latest)
+                  ) : (
+                    progressText(latest) + " · From " + label(latest.parentId)
+                  )
                 ) : (
                   <>
                     <p>
@@ -539,12 +608,29 @@ function RecordingSession({
                         latest.caption ||
                         "Try another direction."}
                     </p>
+                    {latest.state === "clarify" &&
+                      latest.clarificationKind === "retained_passage" && (
+                        <>
+                          <p>
+                            <q>{latest.request}</q>
+                            {latest.parentId !== activeId &&
+                              " · From " + label(latest.parentId)}
+                          </p>
+                          <PassageChoices
+                            question={latest}
+                            disabled={locked}
+                            onAnswer={answer}
+                          />
+                        </>
+                      )}
                     {latest.state === "clarify" && (
                       <button
                         className="text-action"
                         onClick={() => resumeRevision(latest)}
                       >
-                        Continue this request
+                        {latest.clarificationKind === "retained_passage"
+                          ? "Reword request"
+                          : "Continue this request"}
                       </button>
                     )}
                   </>
@@ -603,6 +689,19 @@ function RecordingSession({
                         ? "Try a more specific direction."
                         : "Could not finish this take.")}
                   </small>
+                  {take.clarificationKind === "retained_passage" &&
+                    (latest?.id !== take.id || latest.id === revising?.id) && (
+                      <details>
+                        <summary className="text-action">
+                          Answer question
+                        </summary>
+                        <PassageChoices
+                          question={take}
+                          disabled={locked}
+                          onAnswer={answer}
+                        />
+                      </details>
+                    )}
                   <button
                     className="text-action"
                     onClick={() => resumeRevision(take)}

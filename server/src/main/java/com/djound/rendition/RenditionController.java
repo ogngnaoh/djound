@@ -46,6 +46,15 @@ final class RenditionController {
         return projects.submit(id, body);
     }
 
+    @PostMapping("/{id}/takes/{takeId}/answer")
+    @ResponseStatus(HttpStatus.ACCEPTED)
+    RenditionProjects.State answer(
+            @PathVariable String id,
+            @PathVariable String takeId,
+            @RequestBody RenditionProjects.Answer body) {
+        return projects.answer(id, takeId, body);
+    }
+
     record Favorite(String takeId) {}
 
     @PutMapping("/{id}/favorite")

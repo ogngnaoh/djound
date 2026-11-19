@@ -4,6 +4,7 @@ export type Recording = components["schemas"]["RenditionIndex"];
 export type Rendition = components["schemas"]["RenditionTake"];
 export type RecordingProject = components["schemas"]["RenditionProject"];
 export type RenditionCommand = components["schemas"]["RenditionCommand"];
+export type RenditionAnswer = components["schemas"]["RenditionAnswer"];
 export class RenditionError extends Error {
   constructor(
     public status: number,

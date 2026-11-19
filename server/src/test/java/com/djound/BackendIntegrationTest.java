@@ -355,6 +355,142 @@ class BackendIntegrationTest {
     }
 
     @Test
+    void savedPassageAnswersUseTheStoredQuestionAndAreReplayableAfterRestart() throws Exception {
+        app.close();
+        Path worker = root.resolve("passage-question.py");
+        Files.writeString(
+                worker,
+                """
+                import json,sys,wave
+                q=json.load(sys.stdin)
+                prompt=q['prompt']
+                if prompt.startswith('Question') and 'passagePolicy' not in q:
+                    kind='future_question' if prompt=='Question unknown' else 'retained_passage'
+                    print(json.dumps(dict(state='clarify', error='Keep the passage or change it?', clarificationKind=kind)))
+                    sys.exit()
+                result=dict(state='ready',label=prompt,caption=prompt)
+                if prompt=='Score':
+                    result['arrangementPlan']=dict(version=1,realization='score',fromUpload=True,roles=[])
+                if 'passagePolicy' in q:
+                    assert prompt=='Question about the lead'
+                    assert q['scoredAncestor']['editedFrames']==[[11025,22050]]
+                    assert 'startSeconds' not in q and 'endSeconds' not in q
+                    assert q['history'][-1]['request']=='Edited ending'
+                    result['caption']=q['passagePolicy']
+                with wave.open(q['source']) as f:
+                    fmt=f.getparams()
+                    pcm=bytearray(f.readframes(fmt.nframes))
+                pcm[round(q.get('startSeconds',0)*44100)*4]^=1
+                with wave.open(q['output'],'wb') as f:
+                    f.setparams(fmt)
+                    f.writeframes(pcm)
+                print(json.dumps(dict(result,durationSeconds=fmt.nframes/44100)))
+                """);
+        String[] settings = {
+            "--djound.mode=LOCAL",
+            "--djound.rendition-worker=" + worker,
+            "--djound.local-python=/usr/bin/python3"
+        };
+        app = launch(root, settings);
+        var studio = app.getBean(RenditionProjects.class);
+        String id = studio.create(wav("song.wav", 44100, 2, 16, 2), null).id();
+        studio.submit(id, new RenditionProjects.Command("s", "original", "Score", null, null));
+        var score = awaitRendition(studio, id, "s");
+        studio.submit(id, new RenditionProjects.Command("e", score.id(), "Edited ending", .25, .5));
+        var edited = awaitRendition(studio, id, "e");
+        String prompt = "Question about the lead";
+        for (String key : List.of("q1", "q2", "unknown", "without-provenance")) {
+            studio.submit(
+                    id,
+                    new RenditionProjects.Command(
+                            key,
+                            key.equals("without-provenance") ? score.id() : edited.id(),
+                            key.equals("unknown") ? "Question unknown" : prompt,
+                            null,
+                            null));
+            var take = awaitRendition(studio, id, key);
+            assertEquals("clarify", take.state(), take.error());
+            assertEquals(key.startsWith("q") ? "retained_passage" : null, take.clarificationKind());
+        }
+        app.close();
+        app = launch(root, settings);
+        var reopened = app.getBean(RenditionProjects.class);
+        var q1 = awaitRendition(reopened, id, "q1");
+        var q2 = awaitRendition(reopened, id, "q2");
+        String url =
+                "http://127.0.0.1:"
+                        + app.getEnvironment().getProperty("local.server.port")
+                        + "/api/renditions/"
+                        + id
+                        + "/takes/"
+                        + q1.id()
+                        + "/answer";
+        try (var client = java.net.http.HttpClient.newHttpClient()) {
+            var reply =
+                    client.send(
+                            java.net.http.HttpRequest.newBuilder(java.net.URI.create(url))
+                                    .header("Content-Type", "application/json")
+                                    .POST(
+                                            java.net.http.HttpRequest.BodyPublishers.ofString(
+                                                    "{\"requestId\":\"answer\",\"choice\":\"keep\"}"))
+                                    .build(),
+                            java.net.http.HttpResponse.BodyHandlers.ofString());
+            assertEquals(202, reply.statusCode(), reply.body());
+        }
+        var answer = awaitRendition(reopened, id, "answer");
+        assertEquals("ready", answer.state(), answer.error());
+        assertEquals(q1.id(), answer.answerTo());
+        assertEquals(edited.id(), answer.parentId());
+        assertEquals(prompt, answer.request());
+        assertEquals("keep", answer.passageChoice());
+        assertEquals("keep", answer.caption());
+        var same = new RenditionProjects.Answer("answer", "keep");
+        assertEquals(7, reopened.answer(id, q1.id(), same).takes().size());
+        assertEquals(
+                "RENDITION_REQUEST_CONFLICT",
+                assertThrows(ApiProblem.class, () -> reopened.answer(id, q2.id(), same)).code());
+        assertEquals(
+                "RENDITION_REQUEST_CONFLICT",
+                assertThrows(
+                                ApiProblem.class,
+                                () ->
+                                        reopened.answer(
+                                                id,
+                                                q1.id(),
+                                                new RenditionProjects.Answer("answer", "develop")))
+                        .code());
+        assertEquals(
+                "RENDITION_REQUEST_CONFLICT",
+                assertThrows(
+                                ApiProblem.class,
+                                () ->
+                                        reopened.submit(
+                                                id,
+                                                new RenditionProjects.Command(
+                                                        "answer", edited.id(), prompt, null, null)))
+                        .code());
+        assertEquals(
+                "RENDITION_ANSWER_UNAVAILABLE",
+                assertThrows(ApiProblem.class, () -> reopened.answer(id, score.id(), same)).code());
+        assertEquals(
+                "RENDITION_ANSWER_INVALID",
+                assertThrows(
+                                ApiProblem.class,
+                                () ->
+                                        reopened.answer(
+                                                id,
+                                                q1.id(),
+                                                new RenditionProjects.Answer("other", "fresh")))
+                        .code());
+        String other = reopened.create(wav("another.wav", 44100, 2, 16, 2), null).id();
+        assertEquals(
+                "RENDITION_TAKE_MISSING",
+                assertThrows(ApiProblem.class, () -> reopened.answer(other, q1.id(), same)).code());
+        reopened.answer(id, q1.id(), new RenditionProjects.Answer("alternative", "develop"));
+        assertEquals("develop", awaitRendition(reopened, id, "alternative").caption());
+    }
+
+    @Test
     void retainedNonUploadScoreKeepsItsTranscriptionSourceThroughAnotherPassage() throws Exception {
         app.close();
         Path worker = root.resolve("retained-worker.py");

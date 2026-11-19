@@ -24,6 +24,7 @@ import java.util.concurrent.*;
 @Service
 public final class RenditionProjects implements AutoCloseable {
     static final String ORIGINAL = "original";
+    private static final String RETAINED_PASSAGE = "retained_passage";
     private static final Logger log = LoggerFactory.getLogger(RenditionProjects.class);
     private final JdbcClient db;
     private final TransactionTemplate tx;
@@ -62,7 +63,10 @@ public final class RenditionProjects implements AutoCloseable {
             Double appliedStartSeconds,
             Double appliedEndSeconds,
             String sha256,
-            String error) {}
+            String error,
+            @JsonInclude(JsonInclude.Include.NON_NULL) String clarificationKind,
+            @JsonInclude(JsonInclude.Include.NON_NULL) String answerTo,
+            @JsonInclude(JsonInclude.Include.NON_NULL) String passageChoice) {}
 
     public record Command(
             String requestId,
@@ -70,6 +74,8 @@ public final class RenditionProjects implements AutoCloseable {
             String prompt,
             Double startSeconds,
             Double endSeconds) {}
+
+    public record Answer(String requestId, String choice) {}
 
     record Project(
             String id,
@@ -96,7 +102,10 @@ public final class RenditionProjects implements AutoCloseable {
             String sha256,
             String error,
             String songTimeMap,
-            String arrangementPlan) {}
+            String arrangementPlan,
+            String clarificationKind,
+            String answerTo,
+            String passageChoice) {}
 
     record Earlier(String id, String request, String label, String caption) {}
 
@@ -113,7 +122,8 @@ public final class RenditionProjects implements AutoCloseable {
             "id,title,upload_sha,source_sha,frames,favorite_id";
     private static final String JOB_FIELDS =
             "id,project_id,parent_id,request_id,label,prompt,caption,state,frames,start_seconds,end_seconds,applied_start_seconds,applied_end_seconds,sha256,error,song_time_map::text"
-                + " AS song_time_map,arrangement_plan::text AS arrangement_plan";
+                + " AS song_time_map,arrangement_plan::text AS"
+                + " arrangement_plan,clarification_kind,answer_to,passage_choice";
 
     RenditionProjects(
             JdbcClient db,
@@ -293,7 +303,10 @@ public final class RenditionProjects implements AutoCloseable {
                 job.appliedStartSeconds(),
                 job.appliedEndSeconds(),
                 job.sha256(),
-                job.error());
+                job.error(),
+                job.clarificationKind(),
+                job.answerTo(),
+                job.passageChoice());
     }
 
     private Project project(String id) {
@@ -333,6 +346,33 @@ public final class RenditionProjects implements AutoCloseable {
     }
 
     public State submit(String id, Command command) {
+        return enqueue(id, command, null, null);
+    }
+
+    public State answer(String id, String takeId, Answer answer) {
+        if (!"keep".equals(answer.choice()) && !"develop".equals(answer.choice()))
+            throw new ApiProblem(
+                    422,
+                    "RENDITION_ANSWER_INVALID",
+                    "Choose whether to keep or change the edited passage.");
+        Job question = job(id, takeId);
+        if (!"clarify".equals(question.state())
+                || !RETAINED_PASSAGE.equals(question.clarificationKind()))
+            throw new ApiProblem(
+                    409,
+                    "RENDITION_ANSWER_UNAVAILABLE",
+                    "This take has no saved-passage question to answer.");
+        Command original =
+                new Command(
+                        answer.requestId(),
+                        question.parentId() == null ? ORIGINAL : question.parentId(),
+                        question.prompt(),
+                        question.startSeconds(),
+                        question.endSeconds());
+        return enqueue(id, original, question.id(), answer.choice());
+    }
+
+    private State enqueue(String id, Command command, String answerTo, String passageChoice) {
         validKey(command.requestId());
         if (command.prompt() == null
                 || command.prompt().isBlank()
@@ -376,7 +416,9 @@ public final class RenditionProjects implements AutoCloseable {
                                 if (!Objects.equals(j.parentId(), parent)
                                         || !Objects.equals(j.prompt(), command.prompt())
                                         || !Objects.equals(j.startSeconds(), command.startSeconds())
-                                        || !Objects.equals(j.endSeconds(), command.endSeconds()))
+                                        || !Objects.equals(j.endSeconds(), command.endSeconds())
+                                        || !Objects.equals(j.answerTo(), answerTo)
+                                        || !Objects.equals(j.passageChoice(), passageChoice))
                                     throw conflictKey();
                                 return false;
                             }
@@ -393,8 +435,9 @@ public final class RenditionProjects implements AutoCloseable {
                                         "USE_EXISTING_AUDIO");
                             db.sql(
                                             "INSERT INTO"
-                                                + " rendition_take(id,project_id,parent_id,request_id,prompt,start_seconds,end_seconds,state,label)"
-                                                + " VALUES(?,?,?,?,?,?,?,'queued','New version')")
+                                                + " rendition_take(id,project_id,parent_id,request_id,prompt,start_seconds,end_seconds,answer_to,passage_choice,state,label)"
+                                                + " VALUES(?,?,?,?,?,?,?,?,?,'queued','New"
+                                                + " version')")
                                     .params(
                                             UUID.randomUUID().toString(),
                                             id,
@@ -402,7 +445,9 @@ public final class RenditionProjects implements AutoCloseable {
                                             command.requestId(),
                                             command.prompt(),
                                             command.startSeconds(),
-                                            command.endSeconds())
+                                            command.endSeconds(),
+                                            answerTo,
+                                            passageChoice)
                                     .update();
                             return true;
                         });
@@ -619,6 +664,13 @@ public final class RenditionProjects implements AutoCloseable {
                             ? scoredAncestor(project, parent, basis.frames())
                             : null;
             if (ancestor != null) request.put("scoredAncestor", ancestor);
+            if (job.passageChoice() != null) {
+                if (ancestor == null)
+                    throw new IOException(
+                            "The saved passage could not be verified. Choose the earlier take"
+                                + " before retrying.");
+                request.put("passagePolicy", job.passageChoice());
+            }
             request.put("prompt", job.prompt());
             request.put("parentCaption", parent == null ? "" : parent.caption());
             request.put("history", history(job));
@@ -630,11 +682,20 @@ public final class RenditionProjects implements AutoCloseable {
             JsonNode result = audio.generate(request, job.id());
             String state = result.path("state").asString("");
             if ("failed".equals(state) || "clarify".equals(state)) {
+                String kind =
+                        "clarify".equals(state)
+                                        && ancestor != null
+                                        && job.answerTo() == null
+                                        && RETAINED_PASSAGE.equals(
+                                                result.path("clarificationKind").asString(""))
+                                ? RETAINED_PASSAGE
+                                : null;
                 finishError(
                         job.id(),
                         state,
                         result.path("error")
-                                .asString("Please give another direction and try again."));
+                                .asString("Please give another direction and try again."),
+                        kind);
                 return;
             }
             if (!"ready".equals(state))
@@ -739,12 +800,18 @@ public final class RenditionProjects implements AutoCloseable {
     }
 
     private void finishError(String id, String state, String message) {
+        finishError(id, state, message, null);
+    }
+
+    private void finishError(String id, String state, String message, String clarificationKind) {
         String detail =
                 message == null || message.isBlank()
                         ? "The worker could not finish this version."
                         : message.substring(0, Math.min(2000, message.length()));
-        db.sql("UPDATE rendition_take SET state=?,error=? WHERE id=? AND state='running'")
-                .params(state, detail, id)
+        db.sql(
+                        "UPDATE rendition_take SET state=?,error=?,clarification_kind=? WHERE id=?"
+                            + " AND state='running'")
+                .params(state, detail, clarificationKind, id)
                 .update();
     }
 

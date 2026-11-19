@@ -27,3 +27,13 @@
 .rendition-studio .mix-save a {
   padding-inline: 10px;
 }
+.rendition-answer-options {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin: 8px 0;
+}
+.rendition-answer-options button {
+  height: auto;
+  white-space: normal;
+}

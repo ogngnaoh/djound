@@ -205,6 +205,11 @@ def plan_take(request, duration):
         raise ValueError("Describe the change in up to 1000 characters.")
     has_passages = bool(request.get("scoredAncestor"))
     prompt, passage_policy = passage_direction(prompt) if has_passages else (prompt, None)
+    answer = request.get("passagePolicy")
+    if answer is not None:
+        if answer not in ("keep", "develop") or not has_passages:
+            raise ValueError("This answer needs the saved passage and its original request.")
+        passage_policy = answer
     selection = selected_range(request, duration)
     edge = TIMED_EDGE.search(prompt)
     if edge:
@@ -239,6 +244,11 @@ def plan_take(request, duration):
     elif style in STYLE_SUGGESTIONS:
         plan = {"scope": "selection" if selection else "whole", "caption": STYLE_SUGGESTIONS[style], "label": style.title()}
         planner = "style"
+    elif answer is not None:
+        # This question was raised after resolving a whole-take edit. The
+        # listener answered its one open decision; the musical direction stands.
+        plan = {"scope": "whole", "caption": prompt.strip(), "label": prompt.strip().rstrip(".!?")[:120] or "New take"}
+        planner = "passage-answer"
     else:
         previous = request.get("history") or []
         context = {
@@ -295,7 +305,16 @@ def plan_take(request, duration):
     retained = {}
     if has_passages and start is None:
         if passage_policy not in ("keep", "develop", "fresh"):
-            return {"state": "clarify", "error": "You already changed a passage in this take. Should the new request change it too? Add “keep my edited passage exactly” or “change my edited passage too” to your direction."}
+            spans = request["scoredAncestor"].get("editedFrames", [])
+            part = "the passage you edited" if len(spans) <= 1 else "the passages you edited"
+            if len(spans) == 1:
+                first, last = spans[0]
+                if last == request["scoredAncestor"]["frames"]:
+                    part = "the ending you edited"
+                elif first == 0:
+                    part = "the opening you edited"
+            return {"state": "clarify", "clarificationKind": "retained_passage",
+                    "error": f"What should happen to {part} in the new take?"}
         ancestor = request["scoredAncestor"]
         if passage_policy == "keep" and ancestor.get("editedFrames") == [[0, ancestor.get("frames")]]:
             return {"state": "clarify", "error": "The saved passages cover the whole take. To change it, ask to change the edited passage too or choose an earlier take."}

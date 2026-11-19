@@ -49,6 +49,19 @@ paths:
       responses:
         '202': { $ref: '#/components/responses/RenditionProject' }
         default: { $ref: '#/components/responses/Problem' }
+  /api/renditions/{id}/takes/{takeId}/answer:
+    post:
+      operationId: answerRenditionClarification
+      description: Answer a saved-passage question. The new take uses the question's original request, selected parent and time range. Reusing its requestId with the same question and choice returns the existing take.
+      parameters:
+        - { $ref: '#/components/parameters/ResourceId' }
+        - { name: takeId, in: path, required: true, schema: { type: string, format: uuid }, description: The take that asked the saved-passage question. }
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: '#/components/schemas/RenditionAnswer' } } }
+      responses:
+        '202': { $ref: '#/components/responses/RenditionProject' }
+        default: { $ref: '#/components/responses/Problem' }
   /api/renditions/{id}/favorite:
     put:
       operationId: favoriteRenditionTake
@@ -769,6 +782,12 @@ components:
       required: [takeId]
       properties:
         takeId: { type: string, format: uuid }
+    RenditionAnswer:
+      type: object
+      required: [requestId, choice]
+      properties:
+        requestId: { type: string, minLength: 1, maxLength: 160 }
+        choice: { type: string, enum: [keep, develop] }
     RenditionTake:
       type: object
       required: [id, parentId, requestId, label, request, caption, state, audioUrl, exportUrl, durationSeconds, startSeconds, endSeconds, appliedStartSeconds, appliedEndSeconds, sha256, error]
@@ -780,6 +799,9 @@ components:
         request: { type: string }
         caption: { type: string }
         state: { type: string, enum: [queued, running, ready, failed, clarify] }
+        clarificationKind: { type: [string, 'null'], enum: [retained_passage, null], description: The saved-passage decision requested by this take. }
+        answerTo: { type: [string, 'null'], format: uuid, description: The question answered by this take. }
+        passageChoice: { type: [string, 'null'], enum: [keep, develop, null], description: The listener's decision about the previously edited passage. }
         progress: { type: [string, 'null'], description: Current worker-reported stage for a running take when available. }
         songTimeMap:
           type: array

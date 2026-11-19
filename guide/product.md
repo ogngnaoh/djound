@@ -20,7 +20,7 @@ Every project starts with a recording. Text directs a performance of that music.
 
 Suggested styles help someone start listening. A description like “swinging piano trio” names the group. A broader request like “make it jazz” gives Djound room to choose one. A mood, an unusual group of instruments or a direction about a single phrase can also be enough to act on.
 
-If a take already has a passage the listener changed, another whole-song request can have two meanings. “Keep the ending exactly” carries its recorded audio forward. “Change the ending too” lets the new direction reach that passage. When the listener has given no direction about the earlier edit, the studio can ask which they mean. They can always return to the earlier take.
+If a take already has a passage the listener changed, another whole-song request can have two meanings. “Keep the ending exactly” carries its recorded audio forward. “Change the ending too” lets the new direction reach that passage. If a question comes up about that passage, the listener can tap **Keep it as recorded** or **Apply my change there too**. The answer belongs to the recording and request that prompted it, even if the listener has since played another take.
 
 The listener always has a take to play while another is being made. A whole interpretation can find a new tempo or leave space for an ending. Playback follows the corresponding phrase when comparing scored takes. If a request names a chorus the studio cannot locate, the listener can select the passage themselves.
 
@@ -29,5 +29,7 @@ Suno is the reference for three actions in this journey. Covers use a song's mel
 ## What still needs a listener's ear
 
 Can someone recognize the piece with their eyes closed? Can they hear why the musicians belong in the style they asked for? After one more instruction, can they hear both the change and the part they wanted to keep? Those questions guide work on the musical engine and apply to every style.
+
+The immediate priority is the first performance and the first follow-up. With *To Zanarkand*, the listener recognized the melody in an early take and still missed the jazz feel. They preferred a short arranged trio sketch. That gives us a musical reference for this piece. A different request deserves its own interpretation. For example, someone might ask for “something I could dance to,” then say “I like that beat. Make the tune sound wistful again.” The beat they liked should survive, and the second take should give them an audible reason to choose it. A listener can express both wishes without naming a genre, instrument or production technique.
 
 Refining a completed take and exporting it are available today. Extending a short audition into a longer performance while keeping the exact audio someone fell in love with is an open product capability. [How renditions work](architecture.md#from-a-recording-to-a-rendition)

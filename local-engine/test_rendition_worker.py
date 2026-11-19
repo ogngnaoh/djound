@@ -13,12 +13,19 @@ class RenditionPlannerTest(unittest.TestCase):
         base = {"prompt": "Give the tune to cello.", "scoredAncestor": {"frames": 44100}}
         plan = {"scope": "whole", "caption": "Cello melody", "label": "Cello"}
         with patch.object(worker, "infer_plan", return_value=(plan, "local model")) as interpret:
-            self.assertEqual("clarify", worker.plan_take(base, 1)["state"])
+            question = worker.plan_take(base, 1)
+            self.assertEqual(("clarify", "retained_passage"), (question["state"], question["clarificationKind"]))
             self.assertNotIn("previously_edited_passages", interpret.call_args.args[0])
             for suffix, policy in worker.PASSAGE_CHOICES.items():
                 result = worker.plan_take({**base, "prompt": base["prompt"] + " " + suffix}, 1)
                 self.assertEqual(policy, result["passagePolicy"])
                 self.assertIsNone(result["appliedStartSeconds"])
+            for choice in ("keep", "develop"):
+                previous_calls = interpret.call_count
+                answered = worker.plan_take({**base, "passagePolicy": choice}, 1)
+                self.assertEqual(choice, answered["passagePolicy"])
+                self.assertEqual(base["prompt"], answered["caption"])
+                self.assertEqual(previous_calls, interpret.call_count)
             selected = worker.plan_take({**base, "startSeconds": .1, "endSeconds": .5}, 1)
             self.assertEqual("planned", selected["state"])
             self.assertNotIn("passagePolicy", selected)
