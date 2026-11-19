@@ -4,9 +4,11 @@ bring a recording you love and hear it played another way. the aim is a performa
 
 ## reimagine a recording
 
+[the listening experience and first-release scope](guide/product.md)
+
 1. choose **New project** or **Reimagine a recording** in the library and bring an MP3, WAV, or M4A. a song, a friend's performance, or a hummed voice memo can be the starting point. the importer accepts mono or stereo recordings from one second to five minutes, up to 64 MiB.
 2. describe the sound you want or tap a suggestion to hear an instrumental take. “make it jazz” leaves the choice of players open. **Jazz Trio** asks for piano, bass and drums. on a sung demo, try “give the tune to a cello.” listen for the phrase you used to sing. the model can lose some of the tune or leave traces of the voice.
-3. play the take you want to change and describe the next move. try “keep the piano, but make the ending quieter.” choose a passage if you want exact boundaries. you can switch back to the original at the same playback time or pick an earlier take and start another version from it.
+3. play the take you want to change and describe the next move. try “keep the piano, but make the ending quieter.” choose a passage if you want exact boundaries. you can switch back to the original at the corresponding point in the song or pick an earlier take and start another version from it.
 4. choose **Keep as favorite** to reopen the project on that take. every completed version stays in the project. **Download this take** saves the selected stereo WAV to send to a friend.
 
 the quality of the reimagining still varies. on a full-length *to zanarkand* take, the listener recognized the tune and wanted a much stronger jazz feel. on a 16 GB M2 Pro, turning a 24-second sung recording into **Solo Piano** took 45 seconds. an eight-second ending revision on a 2:49 piano performance took 23 seconds and preserved every sample before the edit. these are timings from individual local takes.
@@ -56,7 +58,7 @@ for the melody workflow, run `bash local-engine/setup_localengine.sh --audio-onl
 
 ## how it works
 
-in the rendition studio, the language planner interprets your words in the context of the take you’re playing. when the worker can follow a tune in the recording, it plays that line on an instrument and gives the music model both the melody and an instrumental performance in the requested sound. an ensemble can carry parts from that new performance into the finished take. recordings with too little pitch information for a dependable melody guide go straight to the cover model. each ready take keeps its own audio, your request and the version it grew from.
+in the rendition studio, the same local Qwen3 4B model interprets your request and directs the arrangement. older installations can use the smaller Qwen3.5 0.8B model. when the worker can follow a tune in the recording, the director chooses how fast to play it, who carries the melody and how the other players accompany it. a new take can have its own tempo and ending. its saved arrangement gives the next request something concrete to change. the player performs the score locally. ACE-Step handles generated sound treatments, passage changes and direct covers of recordings with little reliable pitch information. each ready take keeps its own audio and the request that led to it.
 
 in the melody editor, Basic Pitch detects the notes. you can correct them, keep the uploaded performance as the lead, or play them on a different instrument. the renderer builds the backing from the arrangement you approve. the melody setup includes built-in text edits and direct controls. running `bash local-engine/setup_localengine.sh` without flags installs the melody and finished mix engines plus the optional Qwen arrangement planner.
 

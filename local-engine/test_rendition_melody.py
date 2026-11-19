@@ -70,6 +70,18 @@ class MelodyGuideTest(unittest.TestCase):
         self.assertEqual(self.output.read_bytes(), b"prior")
         self.assertFalse(any(p.name.startswith(".melody-") for p in self.root.iterdir()))
 
+    def test_polyphonic_trace_keeps_a_rest_over_a_moving_bass(self):
+        notes = [(0, .48, 77, .7), (0, .32, 48, .73), (.5, 1.1, 79, .72),
+                 (.64, 1.35, 52, .81), (1.22, 1.52, 53, .80), (1.52, 1.98, 77, .7),
+                 (2, 2.48, 79, .73), (2.5, 3, 81, .70)]
+        for octave in (0, -12):
+            take = [(a, b, pitch + octave, c) for a, b, pitch, c in notes]
+            line = melody._select_polyphonic(take, 3)
+            self.assertEqual([77, 79, 77, 79, 81], [p - octave for _, _, p, _ in line])
+            self.assertEqual([0, .5, 1.52, 2, 2.5], [a for a, _, _, _ in line])
+            previous = melody._select_polyphonic(take, 3, trace_version=1)
+            self.assertEqual([77, 79, 52, 53, 77, 79, 81], [p - octave for _, _, p, _ in previous])
+
     @unittest.skipUnless(melody.guide_available(), "local melody assets are optional")
     def test_guide_placement_uses_the_selected_patch_and_preserves_absolute_requests(self):
         def render(program, pitches, keep, tag):

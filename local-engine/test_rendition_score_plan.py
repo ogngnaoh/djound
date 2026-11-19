@@ -7,6 +7,7 @@ import unittest
 from unittest.mock import patch
 
 import rendition_score_plan as score
+from rendition_score import arrange
 
 
 SOURCE = {"bpm": 94, "durationSeconds": 25, "phrases": [
@@ -39,6 +40,15 @@ class Musician:
 class ScorePlanTest(unittest.TestCase):
     def plan(self, direction, musician=None, prior=None):
         return score._arrange(SOURCE, direction, prior, musician or Musician())
+
+    def test_multiline_director_cue_round_trips_as_one_server_plan_field(self):
+        chart = Musician(brief="128 BPM, 4/4, straight eighths.  \nBright synth melody.\r\nPulsing bass.\tDrum machine.")
+        chart.identity = "test-director@1"
+        with patch.object(score, "_Director", return_value=chart):
+            plan = score._run({"analysis": SOURCE, "direction": SYNTH, "parentCaption": ""})
+        self.assertEqual("128 BPM, 4/4, straight eighths. Bright synth melody. Pulsing bass. Drum machine.",
+                         plan["conductorCue"])
+        self.assertEqual(1, plan["version"])
 
     def test_concrete_musical_decisions_from_cue_and_source(self):
         m = Musician({"How should the lead": "laid_back", "How should the accompanists": "open_fifths",
@@ -122,6 +132,106 @@ class ScorePlanTest(unittest.TestCase):
             with self.assertRaises(TimeoutError):
                 score.plan_arrangement(SOURCE, "Play it lightly", deadline=time.monotonic() - 1)
             self.assertEqual(1, child.call_count)
+
+
+class PhraseBackingTest(unittest.TestCase):
+    def test_one_reply_fits_a_short_breath_without_touching_the_lead(self):
+        from types import SimpleNamespace
+        from rendition_score import _phrase_backing
+
+        source = {"phrases": [{"anchorPitches": [65, 67, 69, 70]}]}
+        timeline = SimpleNamespace(beats=[0, 4])
+        attacks, releases = [0., 1.45, 2.7], [1., 2.55, 4.]
+        plan = {"phraseInteraction": "phrase_answers", "subdivision": "straight"}
+        self.assertFalse(_phrase_backing(source, timeline, plan, attacks, releases)[0].answers)
+        section = _phrase_backing(source, timeline, dict(plan, phraseInteractionVersion=2), attacks, releases)[0]
+        self.assertEqual(1, len(section.answers))
+        self.assertLess(releases[0], section.answers[0])
+        self.assertLess(section.answers[0], section.rest_end)
+        self.assertLess(section.rest_end, attacks[1])
+
+    def setUp(self):
+        phrases, melody = [], []
+        # A second phrase intervenes before the opening returns four semitones higher.
+        for i, pitches in enumerate(((60, 62, 65, 64), (66, 65, 62, 59), (64, 66, 69, 68))):
+            phrases.append({"start": 2 * i, "end": 2 * i + 2, "anchorPitches": pitches})
+            for j, pitch in enumerate(pitches):
+                at = 2 * i + .3 * j
+                melody.append([at, at + .25, pitch, .8])
+        source = {"bpm": 120, "phrases": phrases}
+        notes = {"melody": melody, "candidates": melody, "frames": 6 * 44100}
+        written = Musician({"Which listed player": 81, "Choose the repeating bass": "walk",
+                            "Choose the repeating percussion": "backbeat", "How should the backing": "build_returns"},
+                           brief="120 BPM, 4/4, straight eighths.")
+        direction = "Synth lead plays the melody with synth bass and a drum machine."
+        plan = score._arrange(source, direction, None, written)
+        self.source, self.notes, self.plan = source, notes, plan
+
+    def test_first_statement_leaves_room_and_transposed_return_brings_back_the_pulse(self):
+        self.assertEqual("build_returns", self.plan["phraseInteraction"])
+        self.assertEqual(["bass", "percussion"], [r["kind"] for r in self.plan["roles"]])
+        tracks, _, _ = arrange(self.notes, self.source, self.plan)
+        for track in tracks[1:]:
+            attacks = [a for a, *_ in track["notes"]]
+            self.assertNotIn(.5, attacks)  # Space beneath the first statement.
+            self.assertIn(2.5, attacks)    # The intervening phrase keeps its figure.
+            self.assertIn(4.5, attacks)    # Full pulse when the motif returns.
+
+    def test_changing_ensemble_interaction_places_the_answer_after_the_lead_release(self):
+        change = Musician({"What is the listener": "interaction", "How should the backing": "phrase_answers"})
+        replying = score._arrange(self.source, "Leave room for the theme and answer in its breaths.", self.plan, change)
+        self.assertEqual(dict(self.plan, phraseInteraction="phrase_answers"), replying)
+        answering, _, _ = arrange(self.notes, self.source, replying)
+        last_lead_end = answering[0]["notes"][3][1]
+        answer = next(note for note in answering[1]["notes"] if last_lead_end <= note[0] < 2)
+        self.assertEqual(1.25, answer[0])
+        self.assertLess(answer[1], 2.)
+        stretched = copy.deepcopy(self.notes)
+        stretched["melody"][3][1] += .25
+        later, _, _ = arrange(stretched, self.source, replying)
+        self.assertGreater(next(a for a, *_ in later[1]["notes"] if 1.15 < a < 2), answer[0])
+
+    def test_v1_legacy_figure_and_exact_backing_after_a_lead_swap(self):
+        legacy = dict(self.plan)
+        del legacy["phraseInteraction"]
+        plain, duration, mapping = arrange(self.notes, self.source, legacy)
+        self.assertEqual([i / 2 for i in range(12)], [at for at, *_ in plain[1]["notes"]])
+        steady = dict(legacy, phraseInteraction="steady")
+        self.assertEqual((plain, duration, mapping), arrange(self.notes, self.source, steady))
+        for parent in (legacy, self.plan, dict(self.plan, phraseInteraction="phrase_answers")):
+            child = score._arrange(self.source, "Give the melody to a cello.", parent,
+                                   Musician({"What is the listener": "revoice", "Which performer": 42}))
+            self.assertEqual(dict(parent, leadProgram=42), child)
+            parent_tracks = arrange(self.notes, self.source, parent)[0]
+            child_tracks, child_duration, child_map = arrange(self.notes, self.source, child)
+            self.assertNotEqual(parent_tracks[0]["program"], child_tracks[0]["program"])
+            self.assertEqual((parent_tracks[1:], duration, mapping), (child_tracks[1:], child_duration, child_map))
+
+    def test_piano_answers_keep_the_requested_walk_and_ride_intact(self):
+        direction = ("Let the piano rephrase the theme and answer it with chords, "
+                     "with walking upright bass and brushed drums on the ride cymbal.")
+        chart = Musician({"How should the backing": "phrase_answers", "How does the melody player": "chords",
+                          "Choose the repeating chords": "anticipate", "Choose the repeating percussion": "ride"},
+                         brief="120 BPM, 4/4, straight eighths.")
+        plan = score._arrange(self.source, direction, None, chart)
+        self.assertEqual([("chords", True), ("bass", False), ("percussion", False)],
+                         [(r["kind"], r["followPhrases"]) for r in plan["roles"]])
+        parts, duration, mapping = arrange(self.notes, self.source, plan)
+        looping, _, _ = arrange(self.notes, self.source, dict(plan, phraseInteraction="steady"))
+        self.assertNotEqual(looping[1]["notes"], parts[1]["notes"])
+        self.assertEqual(looping[2:], parts[2:])
+        child = score._arrange(self.source, "Give the melody to a cello.", plan,
+                               Musician({"What is the listener": "revoice", "Which performer": 42}))
+        revised, length, landmarks = arrange(self.notes, self.source, child)
+        self.assertEqual((parts[1:], duration, mapping), (revised[1:], length, landmarks))
+        # Earlier responsive scores applied the interaction to every player.
+        old = copy.deepcopy(plan)
+        del old["phraseInteractionVersion"]
+        for role in old["roles"]:
+            del role["followPhrases"]
+        old_tracks, _, _ = arrange(self.notes, self.source, old)
+        self.assertNotEqual(old_tracks[2]["notes"], looping[2]["notes"])
+        self.assertNotEqual(old_tracks[3]["notes"], looping[3]["notes"])
 
 
 if __name__ == "__main__":

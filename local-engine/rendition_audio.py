@@ -376,6 +376,45 @@ def _separate_output(destination, *recordings):
             raise ValueError("Save a new take separately from its input recordings.")
 
 
+def combine_performances(score, destination, frames, intervals, passage_file, *, deadline):
+    """Keep the chosen samples intact and blend on the new score's side of each cut."""
+    _separate_output(destination, score)
+    with tempfile.TemporaryDirectory(prefix=".passages-", dir=destination.parent) as directory:
+        ready = Path(directory) / "combined.wav"
+        with wave.open(str(score), "rb") as dry, wave.open(str(ready), "wb") as out:
+            if _pcm_frames(dry) != frames:
+                raise ValueError("The new score and selected performance have different lengths.")
+            out.setparams((2, 2, RATE, frames, "NONE", "not compressed"))
+            position = 0
+            for index, (start, end) in enumerate(intervals):
+                _remaining(deadline)
+                next_start = intervals[index + 1][0] if index + 1 < len(intervals) else frames
+                if not 0 <= position <= start < end <= next_start <= frames:
+                    raise ValueError("A retained passage is outside the selected performance.")
+                before = min(RATE // 100, (start - position) // 2)
+                after = min(RATE // 100, (next_start - end) // 2)
+                # A long take can have many saved edits. Release each temporary
+                # audio render before preparing the next passage.
+                with tempfile.TemporaryDirectory(dir=directory) as section:
+                    path = passage_file(start, end, Path(section))
+                    with wave.open(str(path), "rb") as wet:
+                        if _pcm_frames(wet) != frames:
+                            raise ValueError("A retained passage has a different timeline.")
+                        _copy_pcm(dry, position, start - before, out)
+                        if before:
+                            dry.setpos(start - before)
+                            wet.setpos(start - before)
+                            out.writeframesraw(_fade(dry.readframes(before), wet.readframes(before), "in"))
+                        _copy_pcm(wet, start, end, out)
+                        if after:
+                            dry.setpos(end)
+                            wet.setpos(end)
+                            out.writeframesraw(_fade(dry.readframes(after), wet.readframes(after), "out"))
+                position = end + after
+            _copy_pcm(dry, position, frames, out)
+        os.link(ready, destination)
+
+
 def generate_part(context: Path, output: Path, *, lane: str, caption: str, deadline: float) -> None:
     """Generate the requested instrumental part on exactly this canonical recording's timeline."""
     deadline = rendition_deadline(deadline)

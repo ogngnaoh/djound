@@ -1,5 +1,8 @@
 """Arrange an extracted tune on a new musical timeline and perform the director's parts."""
 import math
+from bisect import bisect_left, bisect_right
+from collections import Counter
+from dataclasses import dataclass
 from statistics import median
 
 import numpy as np
@@ -173,11 +176,132 @@ def _voicing(root, tones, last):
     return min(candidates)[1]
 
 
+@dataclass(frozen=True)
+class PhraseBacking:
+    sparse: bool
+    answers: tuple[float, ...]
+    rest_end: float
+
+
+def _phrase_backing(analysis, timeline, plan, attacks, releases):
+    interaction = plan.get("phraseInteraction", "steady")
+    if interaction == "steady":
+        return []
+    if interaction not in ("phrase_answers", "build_returns"):
+        raise ValueError("The selected score has an unknown phrase interaction.")
+    # Recognize a motif when its opening intervals return, even in another register.
+    shapes = []
+    for phrase in analysis["phrases"]:
+        opening = phrase.get("anchorPitches", phrase.get("openingPitches", []))[:4]
+        shape = tuple(b - a for a, b in zip(opening, opening[1:]))
+        shapes.append(shape if len(shape) == 3 and any(shape) else None)
+    counts = Counter(shapes)
+    heard = set()
+    sections = []
+    for i, shape in enumerate(shapes):
+        recurring = shape is not None and counts[shape] > 1
+        returning = recurring and shape in heard
+        heard.add(shape)
+        trade = interaction == "phrase_answers"
+        sparse = trade or (recurring and not returning)
+        answers, rest_end = (), 0.
+        if trade or returning:
+            start, end = timeline.beats[i:i + 2]
+            # Place a short reply after the last playable breath in this phrase.
+            # Leave the next entrance clear, even when the rest spans several bars.
+            left = bisect_right(releases, start)
+            right = bisect_left(attacks, end)
+            short_breath = None
+            for j in reversed(range(left, right)):
+                release = releases[j]
+                next_onset = min(end, attacks[j + 1]) if j + 1 < len(attacks) else end
+                space = next_onset - release
+                if space < .85:
+                    if (plan.get("phraseInteractionVersion", 1) >= 2 and space >= .36
+                            and (short_breath is None or space > short_breath[0])):
+                        short_breath = (space, release, next_onset)
+                    continue
+                rest_end = min(next_onset - .08, release + 1.75)
+                slots = (_subdivide(n / 2, plan["subdivision"])
+                         for n in range(math.floor(release * 2), math.ceil(rest_end * 2)))
+                answers = tuple(t for t in slots if release + .10 <= t <= rest_end - .18)[:2]
+                if answers:
+                    break
+            # A singer can take an audible breath shorter than an eighth-note reply.
+            # Fit one plucked or articulated note into it, leaving both edges clear.
+            if not answers and short_breath:
+                _, release, next_onset = short_breath
+                rest_end = next_onset - .05
+                lo = release + .06
+                on_grid = _subdivide(math.ceil(release * 2) / 2, plan["subdivision"])
+                attack = on_grid if lo <= on_grid <= rest_end - .16 else lo
+                answers = (attack,)
+        sections.append(PhraseBacking(sparse, answers, rest_end))
+    return sections
+
+
+def _backing_events(role, timeline, plan, sections, attacks, releases):
+    """Place the written figure, leaving the introduction and coda on their own clock."""
+    if not role.get("followPhrases", True):
+        sections = ()
+    events = []
+    kind, pattern = role["kind"], role["pattern"]
+    bars = math.ceil(timeline.last / timeline.meter)
+    for bar in range(bars):
+        for idx, hit in enumerate(pattern):
+            raw = bar * timeline.meter + hit["beat"]
+            pos = _subdivide(raw, plan["subdivision"])
+            end = min(timeline.last, pos + hit["duration"])
+            if end <= pos:
+                continue
+            if raw >= timeline.beats[-1] and bar == bars - 1:
+                if idx:
+                    continue
+                pos = bar * timeline.meter
+                end = min(timeline.last, pos + (1. if kind == "percussion" else .86 * timeline.meter))
+            elif sections and timeline.intro <= pos < timeline.beats[-1]:
+                section = sections[bisect_right(timeline.beats, pos) - 1]
+                if section.answers:
+                    if section.answers[0] <= pos < section.rest_end:
+                        continue
+                    if pos < section.answers[0]:
+                        end = min(end, section.answers[0])
+                next_note = bisect_right(releases, pos)
+                if section.sparse and next_note < len(attacks) and attacks[next_note] < end:
+                    # Keep bass and kit marking the half-bar. The other voices
+                    # get one shorter attack beneath the lead before its reply.
+                    half = kind in ("bass", "percussion") and hit["beat"] == timeline.meter / 2
+                    if idx and not half:
+                        continue
+                    end = min(end, pos + 1.)
+            events.append((pos, end, raw, hit))
+    for section in sections:
+        if not section.answers:
+            continue
+        slots = section.answers
+        if kind in ("bass", "pedal"):
+            slots = slots[:1]
+        elif kind == "chords":
+            slots = slots[-1:]
+        for i, pos in enumerate(slots):
+            # Answer with pitches and articulations from this player's own figure.
+            hit = pattern[(len(pattern) - len(slots) + i) % len(pattern)]
+            until = slots[i + 1] if i + 1 < len(slots) else section.rest_end
+            end = min(until, pos + hit["duration"])
+            events.append((pos, end, pos, hit))
+    if sections:
+        events.sort(key=lambda event: event[0])
+    return events
+
+
 def arrange(notes, analysis, plan):
     """Return timed voices, total duration, and the mapping from performed phrases to source frames."""
     timeline = Timeline(analysis, plan)
     palette = _chord_palette(notes, timeline, plan)
     lead = _lead_track(notes, timeline, plan)
+    attacks = [a / timeline.beat for a, _, _, _ in lead["notes"]]
+    releases = [b / timeline.beat for _, b, _, _ in lead["notes"]]
+    sections = _phrase_backing(analysis, timeline, plan, attacks, releases)
     tracks = [lead]
     previous = {}
     for idx, role in enumerate(plan["roles"]):
@@ -187,45 +311,29 @@ def arrange(notes, analysis, plan):
                  "pan": (0., -.14, .18, -.22)[idx % 4],
                  "level_db": {"bass": -21., "percussion": -22., "chords": -24., "arpeggio": -23.,
                               "counterline": -24., "pedal": -24.}[kind], "notes": []}
-        for bar in range(math.ceil(timeline.last / timeline.meter)):
-            for hit in role["pattern"]:
-                raw_pos = bar * timeline.meter + hit["beat"]
-                if raw_pos >= timeline.last:
-                    continue
-                pos = _subdivide(raw_pos, plan["subdivision"])
-                end = min(timeline.last, pos + hit["duration"])
-                if end <= pos:
-                    continue
-                cell = min(len(palette) - 1, int(raw_pos // (timeline.meter / 2)))
-                root, tones = palette[cell]
-                # Resolve the final written coda measure together, with a single release.
-                cadence = (raw_pos >= timeline.beats[-1] and
-                           bar == math.ceil(timeline.last / timeline.meter) - 1)
-                if cadence:
-                    if hit is not role["pattern"][0]:
+        for pos, end, raw_pos, hit in _backing_events(role, timeline, plan, sections, attacks, releases):
+            cell = min(len(palette) - 1, int(raw_pos // (timeline.meter / 2)))
+            root, tones = palette[cell]
+            if drum:
+                pitches = [hit["pitch"]]
+            elif kind == "chords":
+                pitches = _voicing(root, tones, previous.get(idx))
+                previous[idx] = pitches
+            else:
+                degree = hit["degree"]
+                interval = tones[degree % len(tones)] + 12 * (degree // len(tones))
+                base = 36 if kind in ("bass", "pedal") else 55
+                pitch = base + (root - base) % 12 + interval
+                if kind == "counterline":
+                    # Let the response occupy space between theme notes.
+                    if any(a < end * timeline.beat and b > pos * timeline.beat for a,b,_,_ in lead["notes"]):
                         continue
-                    pos = bar * timeline.meter
-                    end = min(timeline.last, pos + (1. if drum else .86 * timeline.meter))
-                if drum:
-                    pitches = [hit["pitch"]]
-                elif kind == "chords":
-                    pitches = _voicing(root, tones, previous.get(idx))
-                    previous[idx] = pitches
-                else:
-                    degree = hit["degree"]
-                    interval = tones[degree % len(tones)] + 12 * (degree // len(tones))
-                    base = 36 if kind in ("bass", "pedal") else 55
-                    pitch = base + (root - base) % 12 + interval
-                    if kind == "counterline":
-                        # Let the response occupy space between theme notes.
-                        if any(a < end * timeline.beat and b > pos * timeline.beat for a,b,_,_ in lead["notes"]):
-                            continue
-                    pitches = [pitch]
-                velocity = max(1, min(127, round(hit["velocity"] * _level(plan, pos, timeline.last))))
-                for voice, pitch in enumerate(pitches):
-                    attack = pos * timeline.beat + voice * .005
-                    if end * timeline.beat > attack:
-                        track["notes"].append((attack, end * timeline.beat, min(127, pitch), velocity))
+                pitches = [pitch]
+            velocity = max(1, min(127, round(hit["velocity"] * _level(plan, pos, timeline.last))))
+            for voice, pitch in enumerate(pitches):
+                attack = pos * timeline.beat + voice * .005
+                if end * timeline.beat > attack:
+                    track["notes"].append((attack, end * timeline.beat, min(127, pitch), velocity))
         if track["notes"]:
             tracks.append(track)
     return tracks, timeline.duration, timeline.frames()

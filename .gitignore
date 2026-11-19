@@ -7,6 +7,7 @@
 /guide/*
 !/guide/running.md
 !/guide/architecture.md
+!/guide/product.md
 /local-engine/evidence/
 /resume-evidence/.local/
 /local-engine/QUALIFICATION.md

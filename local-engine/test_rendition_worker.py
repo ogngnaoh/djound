@@ -9,6 +9,24 @@ import rendition_worker as worker
 
 
 class RenditionPlannerTest(unittest.TestCase):
+    def test_whole_revision_of_an_edited_performance_has_a_passage_choice(self):
+        base = {"prompt": "Give the tune to cello.", "scoredAncestor": {"frames": 44100}}
+        plan = {"scope": "whole", "caption": "Cello melody", "label": "Cello"}
+        with patch.object(worker, "infer_plan", return_value=(plan, "local model")) as interpret:
+            self.assertEqual("clarify", worker.plan_take(base, 1)["state"])
+            self.assertNotIn("previously_edited_passages", interpret.call_args.args[0])
+            for suffix, policy in worker.PASSAGE_CHOICES.items():
+                result = worker.plan_take({**base, "prompt": base["prompt"] + " " + suffix}, 1)
+                self.assertEqual(policy, result["passagePolicy"])
+                self.assertIsNone(result["appliedStartSeconds"])
+            selected = worker.plan_take({**base, "startSeconds": .1, "endSeconds": .5}, 1)
+            self.assertEqual("planned", selected["state"])
+            self.assertNotIn("passagePolicy", selected)
+        natural = "Give the tune to cello throughout, including the ending."
+        with patch.object(worker, "infer_plan", return_value=({**plan, "previousPassages": "develop"}, "model")) as interpret:
+            self.assertEqual("develop", worker.plan_take({**base, "prompt": natural}, 1)["passagePolicy"])
+            self.assertTrue(interpret.call_args.args[0]["previously_edited_passages"])
+
     def test_only_complete_musical_plans_skip_the_scope_fallback(self):
         valid = {"scope": "whole", "caption": "A cello carries the tune.", "label": "Cello"}
         self.assertTrue(worker.usable_plan(valid))

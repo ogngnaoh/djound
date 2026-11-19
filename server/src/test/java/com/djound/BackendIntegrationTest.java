@@ -248,6 +248,7 @@ class BackendIntegrationTest {
                 worker,
                 """
                 import json,sys,wave
+                from pathlib import Path
                 q=json.load(sys.stdin)
                 assert q['supportsArrangedScore'] and q['originalFrames']==88200
                 prompt=q['prompt']
@@ -256,13 +257,27 @@ class BackendIntegrationTest {
                     audio=bytearray(f.readframes(fmt.nframes))
                 landmarks=[[0,0],[44100,22050],[132300,88200]]
                 result=dict(state='ready',label='Test arrangement',caption='Test performance')
+                plan=dict(version=1,fromUpload=True,realization='score',roles=[],ensemble='trio')
                 if prompt=='longer':
                     assert q['parentSongTimeMap'] is None and q['parentPlan'] is None
                     audio.extend(audio[:44100*4])
-                    result.update(parentTimeMap=landmarks,arrangementPlan=dict(version=1,fromUpload=True,ensemble='trio'))
+                    result.update(parentTimeMap=landmarks,arrangementPlan=plan)
                 else:
                     assert q['parentSongTimeMap']==landmarks and q['parentPlan']['ensemble']=='trio'
-                    assert q['parentPlan']['fromUpload']==(prompt!='next arrangement')
+                    if prompt in ('next arrangement','again','bad ranges'):
+                        base=q['scoredAncestor']
+                        assert base['frames']==132300 and base['scoreSource']==q['original']
+                        assert Path(base['source']).stem==base['id']
+                        with wave.open(base['source']) as f: assert f.getnframes()==132300
+                        assert base['editedFrames']==[[11025,22050],[99225,132300]]
+                        if prompt=='next arrangement':
+                            assert base['source']!=q['source'] and base['plan']==plan
+                        else:
+                            assert base['source']==q['source'] and base['plan']['scoreSourceTakeId']=='original'
+                        result['arrangementPlan']=dict(plan,retainedPassageFrames=base['editedFrames'])
+                        if prompt=='bad ranges': result['arrangementPlan']['retainedPassageFrames']=[[0,10]]
+                    else:
+                        assert 'scoredAncestor' not in q
                     position=round(q.get('startSeconds',0)*44100)*4
                     audio[position]^=1
                     if prompt=='outside': audio[0]^=1
@@ -302,16 +317,111 @@ class BackendIntegrationTest {
         assertArrayEquals(expected, passage.songTimeMap());
         assertEquals(2.25, passage.appliedStartSeconds());
         assertEquals(2.75, passage.appliedEndSeconds());
+        projects.submit(
+                id, new RenditionProjects.Command("overlap", passage.id(), "overlap", 2.5, 3.));
+        var overlap = awaitRendition(projects, id, "overlap");
+        assertEquals("ready", overlap.state(), overlap.error());
+        projects.submit(
+                id, new RenditionProjects.Command("earlier", overlap.id(), "earlier", .25, .5));
+        var earlier = awaitRendition(projects, id, "earlier");
+        assertEquals("ready", earlier.state(), earlier.error());
         app.close();
         app = launch(root, settings);
         var reopened = app.getBean(RenditionProjects.class);
         reopened.submit(
                 id,
                 new RenditionProjects.Command(
-                        "followup", passage.id(), "next arrangement", null, null));
+                        "followup", earlier.id(), "next arrangement", null, null));
         var followup = awaitRendition(reopened, id, "followup");
         assertEquals("ready", followup.state(), followup.error());
         assertArrayEquals(expected, followup.songTimeMap());
+        reopened.submit(
+                id, new RenditionProjects.Command("again", followup.id(), "again", null, null));
+        var again = awaitRendition(reopened, id, "again");
+        assertEquals("ready", again.state(), again.error());
+        reopened.submit(
+                id,
+                new RenditionProjects.Command("bad ranges", again.id(), "bad ranges", null, null));
+        assertEquals("failed", awaitRendition(reopened, id, "bad ranges").state());
+        // Old full takes can have no stored score. Their descendants still work without provenance.
+        app.getBean(JdbcClient.class)
+                .sql("UPDATE rendition_take SET arrangement_plan=NULL WHERE id=?")
+                .param(first.id())
+                .update();
+        reopened.submit(
+                id, new RenditionProjects.Command("legacy", earlier.id(), "legacy", null, null));
+        var legacy = awaitRendition(reopened, id, "legacy");
+        assertEquals("ready", legacy.state(), legacy.error());
+    }
+
+    @Test
+    void retainedNonUploadScoreKeepsItsTranscriptionSourceThroughAnotherPassage() throws Exception {
+        app.close();
+        Path worker = root.resolve("retained-worker.py");
+        Files.writeString(
+                worker,
+                """
+                import json,sys,wave
+                from pathlib import Path
+                q=json.load(sys.stdin)
+                action=q['prompt']
+                result=dict(state='ready',label=action,caption=action)
+                with wave.open(q['source']) as wav:
+                    fmt=wav.getparams()
+                    data=bytearray(wav.readframes(fmt.nframes))
+                inputs=Path(__file__).with_suffix('.source')
+                plan=dict(version=1,fromUpload=False,realization='score',roles=[])
+                if action=='score':
+                    inputs.write_text(q['source'])
+                    result['arrangementPlan']=plan
+                if action in ('revoice','revoice again'):
+                    base=q['scoredAncestor']
+                    assert base['scoreSource']==inputs.read_text()!=q['original']
+                    assert base['source']!=q['source'] and base['source']!=base['scoreSource']
+                    assert base['editedFrames']==([[11025,22050]] if action=='revoice' else [[11025,44100]])
+                    if action=='revoice again':
+                        assert base['plan']['scoreSourceTakeId']==Path(base['scoreSource']).stem
+                    result['arrangementPlan']=dict(plan,retainedPassageFrames=base['editedFrames'],scoreSourceTakeId='untrusted')
+                else:
+                    assert 'scoredAncestor' not in q
+                data[round(q.get('startSeconds',0)*44100)*4]^=1
+                with wave.open(q['output'],'wb') as wav:
+                    wav.setparams(fmt)
+                    wav.writeframes(data)
+                print(json.dumps(dict(result,durationSeconds=fmt.nframes/44100)))
+                """);
+        app =
+                launch(
+                        root,
+                        "--djound.mode=LOCAL",
+                        "--djound.rendition-worker=" + worker,
+                        "--djound.local-python=/usr/bin/python3");
+        var projects = app.getBean(RenditionProjects.class);
+        String id = projects.create(wav("song.wav", 44100, 2, 16, 2), null).id();
+        String parent = "original";
+        for (String request :
+                List.of(
+                        "free take",
+                        "score",
+                        "ending",
+                        "revoice",
+                        "extend edit",
+                        "revoice again")) {
+            Double start = null, end = null;
+            if (request.equals("ending")) {
+                start = .25;
+                end = .5;
+            }
+            if (request.equals("extend edit")) {
+                start = .5;
+                end = 1.;
+            }
+            projects.submit(
+                    id, new RenditionProjects.Command(request, parent, request, start, end));
+            var done = awaitRendition(projects, id, request);
+            assertEquals("ready", done.state(), done.error());
+            parent = done.id();
+        }
     }
 
     @Test

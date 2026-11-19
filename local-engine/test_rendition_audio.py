@@ -32,6 +32,25 @@ def timed_samples(frames, base):
                     for sec in range((frames + rate - 1) // rate))
 
 
+class RecordedPassageTest(unittest.TestCase):
+    def test_interior_and_end_keep_every_selected_sample(self):
+        with tempfile.TemporaryDirectory() as folder:
+            root = Path(folder)
+            dry, wet, result = (root / name for name in ("score.wav", "auditioned.wav", "final.wav"))
+            frames = 6000
+            a, b = timed_samples(frames, 800), timed_samples(frames, 120)
+            dry.write_bytes(wav_bytes(render.RATE, 2, a))
+            wet.write_bytes(wav_bytes(render.RATE, 2, b))
+            windows = [(800, 1700), (3900, frames)]
+            render.combine_performances(dry, result, frames, windows, lambda *args: wet, deadline=time.monotonic() + 5)
+            with wave.open(str(result)) as output:
+                out = output.readframes(frames)
+            self.assertEqual(len(a), len(out))
+            for start, end in windows:
+                self.assertEqual(b[start*4:end*4], out[start*4:end*4])
+            self.assertEqual(a[2300*4:3000*4], out[2300*4:3000*4])
+
+
 class TestService(BaseHTTPRequestHandler):
     def log_message(self, *args):
         pass

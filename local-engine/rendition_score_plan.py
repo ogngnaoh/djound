@@ -16,7 +16,7 @@ import sys
 import time
 
 from common import HERE, HOME
-from rendition_voicing import _catalog, _direction, _excluded, _explicit, _role_names, _size_hint, INSTRUMENT
+from rendition_voicing import _catalog, _excluded, _explicit, _role_names, _size_hint
 
 
 METERS = {2: "two beats", 3: "three beats", 4: "four beats", 5: "five beats", 6: "six beats"}
@@ -27,6 +27,9 @@ HARMONIES = {"triads": "direct major/minor triads", "sevenths": "voiced seventh 
              "extensions": "colorful sevenths and upper extensions", "open_fifths": "open root and fifth"}
 DYNAMICS = {"steady": "even intensity throughout", "arch": "build and resolve through phrases",
             "contrast": "alternate intimate and fuller phrases"}
+INTERACTIONS = {"steady": "keep the written backing figure cycling beneath the tune",
+                "phrase_answers": "leave room while the lead is speaking, then answer in its rests",
+                "build_returns": "introduce recurring motifs with spare backing and bring in the full figure on their return"}
 KINDS = {"chords": "sound several chord tones together", "arpeggio": "break chords into individual notes",
          "bass": "outline harmonic movement in a low register", "pedal": "sustain or pulse one foundation pitch",
          "counterline": "answer the theme with a separate melodic line"}
@@ -53,7 +56,7 @@ INSTRUMENT_TERMS = {
     "synth pad": 89, "synthesizer": 80, "drum machine": -1, "electronic drum kit": -1, "tr-808": -1,
 }
 KIT = -1  # Internal identity only. Pitched metallic and mallet GM instruments remain pitched.
-GROUPS = ("players", "pulse", "groove", "phrasing", "harmony", "dynamics", "form", "production")
+GROUPS = ("players", "pulse", "groove", "phrasing", "harmony", "dynamics", "interaction", "form", "production")
 
 
 def _bounded_number(value, low, high):
@@ -65,7 +68,14 @@ def _compact(analysis):
     if not isinstance(phrases, list):
         raise ValueError("The recording analysis needs a list of source phrases.")
     indices = sorted({round(i * (len(phrases) - 1) / 5) for i in range(6)}) if phrases else []
-    summary = {k: analysis[k] for k in ("bpm", "meter", "key", "durationSeconds") if k in analysis}
+    summary = {k: analysis[k] for k in ("bpm", "meter", "key", "tonic", "mode", "durationSeconds")
+               if k in analysis and isinstance(analysis[k], (str, int, float)) and len(str(analysis[k])) <= 80}
+    for k in ("chords", "chordSummary", "harmony"):
+        value = analysis.get(k)
+        if isinstance(value, str):
+            summary[k] = value[:240]
+        elif isinstance(value, list):
+            summary[k] = [v for v in value[:12] if isinstance(v, str) and len(v) <= 40]
     summary["phraseCount"] = len(phrases)
     summary["phrases"] = []
     for i in indices:
@@ -89,7 +99,7 @@ def _anchors(analysis):
     # remain ordinary phrases, available to the performer in the full source.
     groups = {}
     for index, phrase in enumerate(analysis.get("phrases") or []):
-        pitches = phrase.get("openingPitches", []) if isinstance(phrase, dict) else []
+        pitches = phrase.get("anchorPitches", phrase.get("openingPitches", [])) if isinstance(phrase, dict) else []
         if isinstance(pitches, list) and len(pitches) >= 4 and all(type(n) is int for n in pitches[:4]):
             intervals = tuple(b - a for a, b in zip(pitches[:3], pitches[1:4]))
             if any(intervals):
@@ -136,6 +146,33 @@ def _part_words(marked, program):
         if set(re.findall(r"@(-?\d+)@", clause)) == {str(program)}:
             result.append(clause)
     return " ".join(result)
+
+
+def _phrase_part(director, role, direction):
+    program = KIT if role["kind"] == "percussion" else role["program"]
+    # Keep coordinated verbs attached to their player ("piano plays the theme
+    # and answers with chords"). Start a new subject with each named instrument.
+    fragments = []
+    for sentence in re.split(r"[,;.!?]", direction.casefold()):
+        players = set()
+        for clause in re.split(r"\b(?:and|with|over|above|behind|plus|while)\b", sentence):
+            players = set(_members(clause)) or players
+            if players == {program}:
+                fragments.append(clause)
+    words = " ".join(fragments)
+    if re.search(r"\b(?:answer\w*|respond\w*|repl(?:y|ies)|trad(?:e|ing)|fill(?:s|ing)?|"
+                 r"build(?:s|ing)?|leave space|hold back)\b", words):
+        return True
+    if re.search(r"\b(?:stead\w*|continuous\w*|throughout|unbroken|ostinat[oi]|walking|"
+                 r"puls(?:e|ing)|backbeat|ride cymbal|dron(?:e|ing)|repeating)\b", words):
+        return False
+    player = "drum kit" if program == KIT else _catalog()[0][program]
+    choice = director.choose(
+        f"Should the {player} {role['kind']} part follow the theme's phrases or maintain its written "
+        f"{role['gesture']} figure? Use the listener's assignment to this player. Another player can "
+        "answer while this one keeps playing.",
+        {"follow": "leave room, answer the lead or build on its return", "maintain": "keep its figure through the phrase"})
+    return choice == "follow"
 
 
 def _part_kind(program, words):
@@ -316,6 +353,7 @@ def _changes(director):
     axes = {"revoice": "change only the instrument that plays the existing lead melody",
             "players": "instruments / lineup only", "pulse": "speed only", "groove": "meter / rhythm or groove only",
             "phrasing": "lead articulation or timing only", "harmony": "chords or harmonic color only",
+            "interaction": "when the accompanists hold back, answer the lead, or build at a returning theme",
             "dynamics": "intensity / room ambience only", "form": "opening, ending or form only",
             "production": "sound treatment or studio effects only",
             "feel": "performance feel or mood with same players", "all": "entire new musical arrangement or style",
@@ -383,9 +421,12 @@ def _arrange(analysis, direction, old, director):
     plan.setdefault("realization", "score")
     plan["themeAnchors"] = _anchors(analysis)
     if "production" in changes:
-        plan["realization"] = director.choose("How must this arrangement be realized to achieve the listener's sound?",
-                          {"score": "perform the articulated instrumental parts directly, including electronic instruments and room ambience",
-                           "produced": "treat the performed score with studio production for explicitly requested effects, altered or novel timbres"})
+        plan["realization"] = director.choose(
+            f"How must the listener's own request be played? «{direction}» "
+            "Use score for playable parts, including synthesizers, keyboards, acoustic players and drum machines. "
+            "Only use produced if the listener asked for an audio treatment or sound the instruments cannot play. "
+            "Ignore production details added by the arranger.",
+            {"score": "direct instrumental performance", "produced": "requested audio treatment or novel sound design"})
     if "pulse" in changes:
         plan["bpm"] = _tempo(director, analysis, old, direction)
     if "groove" in changes:
@@ -424,6 +465,19 @@ def _arrange(analysis, direction, old, director):
         if old and "groove" not in changes:
             prior_roles = {(r["kind"], r["program"]): r for r in old["roles"]}
             plan["roles"] = [copy.deepcopy(prior_roles.get((r["kind"], r["program"]), r)) for r in plan["roles"]]
+    if "interaction" in changes and plan["roles"]:
+        plan["phraseInteraction"] = director.choose(
+            "How should the backing respond to the recorded phrases? Keep a repeating figure for a continuous pulse. "
+            "Let the players trade space when the direction calls for an answer or a fuller theme return.", INTERACTIONS)
+        plan["phraseInteractionVersion"] = 2
+    if plan.get("phraseInteraction", "steady") != "steady" and changes.intersection({"players", "groove", "interaction"}):
+        prior_roles = {(r["kind"], r["program"]): r for r in old["roles"]} if old else {}
+        for role in plan["roles"]:
+            prior = prior_roles.get((role["kind"], role["program"]))
+            if prior is None or "interaction" in changes:
+                role["followPhrases"] = _phrase_part(director, role, direction)
+            elif "followPhrases" in prior:
+                role["followPhrases"] = prior["followPhrases"]
     return plan
 
 
@@ -438,26 +492,43 @@ def _prior(analysis):
     return plan
 
 
+def director_weights():
+    installer = json.loads((HERE / "score-director-assets.json").read_text())
+    directory = HOME / "score-director"
+    try:
+        receipt = json.loads((directory / ".djound-verified.json").read_text())
+    except (OSError, ValueError):
+        receipt = {}
+    if (isinstance(receipt, dict) and all(receipt.get(k) == installer[k] for k in ("model", "revision"))
+            and (directory / "model.safetensors").is_file()):
+        return directory, installer, 4 * 1024**3
+    compact = json.loads((HERE / "assets.json").read_text())
+    directory = HOME / compact["modelDirectory"]
+    if not (directory / "model.safetensors").is_file():
+        raise RuntimeError("Install the local arrangement planner.")
+    return directory, compact, 2 * 1024**3
+
+
 class _Director:
     def __init__(self, context):
         import mlx.core as mx
         from mlx_lm import generate, load
         from mlx_lm.sample_utils import make_sampler
 
-        metadata = json.loads((HERE / "assets.json").read_text())
-        weights = HOME / metadata["modelDirectory"]
-        if not (weights / "model.safetensors").is_file():
-            raise RuntimeError("Install the local arrangement planner.")
-        mx.set_memory_limit(2 * 1024**3)
+        weights, metadata, memory = director_weights()
+        self.identity = metadata["model"] + "@" + metadata["revision"]
+        mx.set_memory_limit(memory)
         mx.set_cache_limit(128 * 1024**2)
         self.model, self.tokenizer = load(str(weights), tokenizer_config={"trust_remote_code": False})
         self.generate, self.mx, self.greedy = generate, mx, make_sampler(temp=0)
         self.context = json.dumps(context, ensure_ascii=False, separators=(",", ":"))
         self.brief = self.write(
-            "Write a concrete, concise rehearsal cue for these particular players. Commit to one interpretation. "
-            "Start with the actual target BPM, time signature and straight eighths, swung eighths, or triplets. "
-            "Then list the instruments, who plays the melody, specific accompaniment rhythms, chords and phrasing. "
-            "Respect any specified instruments and all unchanged choices in a revision. Answer in 70 words or fewer.", 145)
+            "Write a practical chart for the requested music. Choose the tempo, meter, feel, instruments and each "
+            "part's rhythm that make this direction idiomatic. Pick the destination pulse, even when different from the source. "
+            "Start with one numeric target BPM, time signature and straight eighths, swung eighths or triplets. "
+            "Then specify who plays the hook, what each accompanist plays, chord color, phrasing, and any requested effects. "
+            "Keep melody pitches from the recording. Name a source key only when the source analysis supplies it. "
+            "Respect explicitly named players and preserve unchanged choices in a revision. Write under 85 words.", 170)
         self.context += "\nArranger's rehearsal cue: " + self.brief
 
     def _answer(self, question, suffix, limit, sampler):
@@ -520,12 +591,14 @@ def _run(request):
     if old:
         context["currentScore"] = {k: old[k] for k in ("bpm", "meter", "subdivision", "phrasing", "harmony",
                                                         "phraseDynamics", "introBars", "endingBars")}
+        context["currentScore"]["phraseInteraction"] = old.get("phraseInteraction", "steady")
         names = _catalog()[0]
         context["currentScore"]["players"] = [names[old["leadProgram"]]] + [
             f"{r['kind']}: {names[r['program']] if r['program'] is not None else 'drum kit'}" for r in old["roles"]]
     director = _Director(context)
     plan = _arrange(analysis, direction, old, director)
-    plan["conductorCue"] = director.brief[:1400]
+    plan["conductorCue"] = " ".join(director.brief.split())[:1400]
+    plan["director"] = director.identity
     return plan
 
 

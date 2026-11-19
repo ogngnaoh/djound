@@ -15,21 +15,30 @@ def _frames(path):
 
 
 def perform_score(parent, original, destination, work, *, direction, caption, parent_caption,
-                  parent_plan, parent_map, recover_original):
+                  parent_plan, parent_map, recover_original, scored_ancestor=None, passage_policy=None):
     """Let a local arranger revise the playing decisions and render them against the source phrases."""
-    from rendition_melody import transcribe_recording
-    from rendition_score import analyze, arrange
+    from rendition_melody import MELODY_TRACE_VERSION, transcribe_recording
+    from rendition_score import Timeline, analyze, arrange
     from rendition_score_plan import plan_arrangement
     from rendition_score_render import render_score, score_available
 
     if not (guide_available() and score_available()):
+        if scored_ancestor:
+            return {"state": "clarify", "error": "Restore the local score player to revise this take with its saved passage."}
         return None
     deadline = audio.rendition_deadline()
     from_upload = (original == parent or recover_original or bool(parent_plan and parent_plan.get("fromUpload")))
     basis = original if from_upload else parent
+    if scored_ancestor:
+        parent_plan = scored_ancestor["plan"]
+        basis = Path(scored_ancestor["scoreSource"]).resolve(strict=True)
+        from_upload = basis.samefile(original)
     transcription = work / "source-notes.json"
     report_stage("melody")
-    if not transcribe_recording(basis, transcription, deadline=deadline):
+    trace_version = parent_plan.get("melodyTraceVersion", 1) if parent_plan else MELODY_TRACE_VERSION
+    if not transcribe_recording(basis, transcription, deadline=deadline, trace_version=trace_version):
+        if scored_ancestor:
+            return {"state": "clarify", "error": "I couldn't recover this take's score. You can ask for a fresh interpretation of the whole take."}
         return None
     notes = json.loads(transcription.read_text())
     analysis = analyze(notes)
@@ -37,15 +46,46 @@ def perform_score(parent, original, destination, work, *, direction, caption, pa
         analysis["parentPlan"] = parent_plan
     report_stage("arranging")
     plan = plan_arrangement(analysis, direction, parent_caption, deadline=deadline)
+    plan.pop("retainedPassageFrames", None)
+    plan.pop("scoreSourceTakeId", None)
     plan["fromUpload"] = from_upload
+    plan["melodyTraceVersion"] = trace_version
     tracks, seconds, mapping = arrange(notes, analysis, plan)
-    if from_upload and parent_map:
+    if scored_ancestor:
+        frames = scored_ancestor["frames"]
+        if (mapping != Timeline(analysis, parent_plan).frames() or round(seconds * audio.RATE) != frames
+                or plan.get("realization") != "score"):
+            return {"state": "clarify", "error": "This change needs a different form or a new production. Ask for a fresh interpretation of the whole take, or keep the current timing and describe the part to change."}
+        mapping = [[0, 0], [frames, frames]]
+    elif from_upload and parent_map:
         from rendition_timeline import relative_map
         mapping = relative_map(mapping, parent_map)
     report_stage("rendering")
     score = work / "arrangement.wav"
     render_score(tracks, seconds, score, deadline=deadline, room=plan.get("room", .44))
-    if plan.get("realization") == "produced":
+    if scored_ancestor:
+        intervals = scored_ancestor["editedFrames"]
+        def passage_file(start, end, folder):
+            if passage_policy == "keep":
+                return parent
+            if passage_policy != "develop":
+                raise ValueError("Choose how to treat the passage you edited.")
+            # Develop the recorded edit in place. The new score supplies the rest of the take.
+            part = folder / "updated.wav"
+            voiced = False
+            if plan["leadProgram"] != parent_plan["leadProgram"]:
+                solo = all(role.get("program") == plan["leadProgram"] for role in plan["roles"])
+                voiced = _perform_with_guide(parent, parent, part, folder, caption, caption, direction,
+                                             direction, True, start / audio.RATE, end / audio.RATE, deadline,
+                                             voicing=(plan["leadProgram"], solo))
+            if not voiced:
+                audio.render_take(parent, part, caption, duration=frames / audio.RATE,
+                                  start=start / audio.RATE, end=end / audio.RATE, deadline=deadline)
+            return part
+
+        audio.combine_performances(score, destination, frames, intervals, passage_file, deadline=deadline)
+        plan["retainedPassageFrames"] = scored_ancestor["editedFrames"]
+    elif plan.get("realization") == "produced":
         # Preserve the newly arranged pulse and phrasing as the source of a sound-designed take.
         audio.render_take(score, destination, caption, duration=seconds,
                           cover_strength=.82, cover_noise_strength=.30, deadline=deadline)
@@ -102,14 +142,14 @@ def perform_take(parent, destination, caption, *, description, prompt, duration,
 
 
 def _perform_with_guide(parent, reference, destination, work, caption, description, prompt, named_direction,
-                        keep_ensemble, start, end, deadline):
+                        keep_ensemble, start, end, deadline, *, voicing=None):
     from rendition_voicing import accompaniment_lane, choose_voicing, guide_named, preserve_register
 
     melody = reference or parent
     total = _frames(parent)
     if reference is not None and _frames(reference) != total:
         raise ValueError("The original melody reference and the selected take must have matching timelines.")
-    program, solo = choose_voicing(description, prompt, deadline=deadline)
+    program, solo = voicing if voicing is not None else choose_voicing(description, prompt, deadline=deadline)
     lane = None if solo or keep_ensemble else accompaniment_lane(program, named_direction)
     if lane and not audio.part_available():
         lane = None

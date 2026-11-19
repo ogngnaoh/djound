@@ -100,6 +100,15 @@ public final class RenditionProjects implements AutoCloseable {
 
     record Earlier(String id, String request, String label, String caption) {}
 
+    record ScoredAncestor(
+            String id,
+            String source,
+            int frames,
+            JsonNode plan,
+            List<int[]> editedFrames,
+            String scoreSource,
+            String scoreSourceTakeId) {}
+
     private static final String PROJECT_FIELDS =
             "id,title,upload_sha,source_sha,frames,favorite_id";
     private static final String JOB_FIELDS =
@@ -487,6 +496,97 @@ public final class RenditionProjects implements AutoCloseable {
         return rows.reversed();
     }
 
+    private static List<int[]> retainedFrames(JsonNode ranges, int frames) throws IOException {
+        if (!ranges.isArray()
+                || ranges.isEmpty()
+                || ranges.size() > RenditionTimeline.MAX_WORKER_POINTS)
+            throw new IOException("The retained passage list is invalid.");
+        var result = new ArrayList<int[]>();
+        int previous = -1;
+        for (var range : ranges) {
+            if (!range.isArray()
+                    || range.size() != 2
+                    || !range.get(0).isIntegralNumber()
+                    || !range.get(0).canConvertToInt()
+                    || !range.get(1).isIntegralNumber()
+                    || !range.get(1).canConvertToInt())
+                throw new IOException("The retained passage needs two frame positions.");
+            int start = range.get(0).asInt(), end = range.get(1).asInt();
+            if (start <= previous || start < 0 || end <= start || end > frames)
+                throw new IOException("The retained passages must be merged and within the take.");
+            result.add(new int[] {start, end});
+            previous = end;
+        }
+        return result;
+    }
+
+    private ScoredAncestor scoredAncestor(Project project, Job take, int frames)
+            throws IOException {
+        if (take == null) return null;
+        var edited = new ArrayList<int[]>();
+        var seen = new HashSet<String>();
+        while (take.appliedStartSeconds() != null || take.appliedEndSeconds() != null) {
+            if (take.parentId() == null || !seen.add(take.id()) || take.frames() != frames)
+                return null;
+            Double first = take.appliedStartSeconds(), last = take.appliedEndSeconds();
+            if (first == null
+                    || last == null
+                    || !Double.isFinite(first)
+                    || !Double.isFinite(last)
+                    || first < 0
+                    || last > seconds(frames) + 1e-8) return null;
+            int start = (int) Math.round(first * RenditionAudio.RATE);
+            int end = (int) Math.round(last * RenditionAudio.RATE);
+            if (end <= start || end > frames) return null;
+            edited.add(new int[] {start, end});
+            var earlier = readyJob(project.id(), take.parentId());
+            if (!Objects.equals(take.songTimeMap(), earlier.songTimeMap())) return null;
+            take = earlier;
+        }
+        var plan = RenditionTimeline.storedPlan(take.arrangementPlan());
+        if (take.frames() != frames
+                || plan == null
+                || plan.path("version").asInt(0) != 1
+                || !"score".equals(plan.path("realization").asString(""))
+                || !plan.path("roles").isArray()
+                || !plan.path("fromUpload").isBoolean()) return null;
+        boolean hybrid = plan.has("retainedPassageFrames");
+        if (hybrid) edited.addAll(retainedFrames(plan.get("retainedPassageFrames"), frames));
+        if (edited.isEmpty()) return null;
+        edited.sort(Comparator.comparingInt(pair -> pair[0]));
+        var merged = new ArrayList<int[]>();
+        for (int[] interval : edited) {
+            if (merged.isEmpty() || merged.getLast()[1] < interval[0]) merged.add(interval);
+            else merged.getLast()[1] = Math.max(merged.getLast()[1], interval[1]);
+        }
+        // Whole scores can be transcribed from the upload or another take. A hybrid's
+        // immediate parent is already arranged, so use its saved, server-owned source ID.
+        String inputId =
+                plan.path("fromUpload").asBoolean()
+                        ? ORIGINAL
+                        : hybrid ? plan.path("scoreSourceTakeId").asString(null) : take.parentId();
+        if (inputId == null) return null;
+        Path input = audio.file(project.id());
+        if (!ORIGINAL.equals(inputId)) {
+            var scoreInput = readyJob(project.id(), inputId);
+            input = audio.file(scoreInput.id());
+            if (!verifiedScoreAudio(input, scoreInput)) return null;
+        }
+        Path ancestor = audio.file(take.id());
+        if (!verifiedScoreAudio(ancestor, take)) return null;
+        return new ScoredAncestor(
+                take.id(), ancestor.toString(), frames, plan, merged, input.toString(), inputId);
+    }
+
+    private boolean verifiedScoreAudio(Path file, Job take) {
+        try {
+            var verified = audio.verifyTake(file);
+            return verified.frames() == take.frames() && verified.hash().equals(take.sha256());
+        } catch (IOException absent) {
+            return false;
+        }
+    }
+
     private void run(Job job) {
         Path temp = null;
         try {
@@ -514,6 +614,11 @@ public final class RenditionProjects implements AutoCloseable {
             request.put("originalFrames", project.frames());
             request.put("supportsArrangedScore", true);
             request.put("parentPlan", parentPlan);
+            var ancestor =
+                    job.startSeconds() == null
+                            ? scoredAncestor(project, parent, basis.frames())
+                            : null;
+            if (ancestor != null) request.put("scoredAncestor", ancestor);
             request.put("prompt", job.prompt());
             request.put("parentCaption", parent == null ? "" : parent.caption());
             request.put("history", history(job));
@@ -562,6 +667,25 @@ public final class RenditionProjects implements AutoCloseable {
             String songTimeMap =
                     RenditionTimeline.encoded(RenditionTimeline.toOriginal(mapping, parentMap));
             var nextPlan = result.path("arrangementPlan");
+            if (!scoped && nextPlan instanceof tools.jackson.databind.node.ObjectNode object) {
+                object.remove("scoreSourceTakeId");
+                if (object.has("retainedPassageFrames")) {
+                    var ranges =
+                            retainedFrames(object.get("retainedPassageFrames"), output.frames());
+                    if (ancestor == null
+                            || mapping != null
+                            || output.frames() != ancestor.frames()
+                            || !Arrays.deepEquals(
+                                    ranges.toArray(), ancestor.editedFrames().toArray())
+                            || !object.path("fromUpload").isBoolean()
+                            || object.path("fromUpload").asBoolean()
+                                    != ORIGINAL.equals(ancestor.scoreSourceTakeId())
+                            || !"score".equals(object.path("realization").asString("")))
+                        throw new IOException(
+                                "The retained passages could not be matched to this take.");
+                    object.put("scoreSourceTakeId", ancestor.scoreSourceTakeId());
+                }
+            }
             if (scoped && (nextPlan.isMissingNode() || nextPlan.isNull()) && parentPlan != null)
                 nextPlan = parentPlan;
             if (scoped

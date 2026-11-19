@@ -20,6 +20,7 @@ MAX_FRAMES = 300 * RATE
 MODEL = Path("basic-pitch/basic_pitch/saved_models/icassp_2022/nmp.onnx")
 BANK = "FluidR3_GM.sf2"
 NO_LINE = 3
+MELODY_TRACE_VERSION = 2
 
 
 def guide_available() -> bool:
@@ -55,12 +56,15 @@ def build_melody_guide(
     return _extract_to_file(source, output, program, deadline, preserve_register, notes_only=False)
 
 
-def transcribe_recording(source: Path, output: Path, *, deadline: float) -> bool:
+def transcribe_recording(source: Path, output: Path, *, deadline: float, trace_version=MELODY_TRACE_VERSION) -> bool:
     """Extract the tune and other pitched events into a private score input."""
-    return _extract_to_file(source, output, 0, deadline, False, notes_only=True)
+    return _extract_to_file(source, output, 0, deadline, False, notes_only=True, trace_version=trace_version)
 
 
-def _extract_to_file(source, output, program, deadline, preserve_register, *, notes_only):
+def _extract_to_file(source, output, program, deadline, preserve_register, *, notes_only,
+                     trace_version=MELODY_TRACE_VERSION):
+    if type(trace_version) is not int or trace_version not in (1, MELODY_TRACE_VERSION):
+        raise ValueError("This saved take uses an unsupported melody transcription.")
     if type(preserve_register) is not bool:
         raise ValueError("Specify whether to keep the recorded octave.")
     if type(program) is not int or not 0 <= program <= 127:
@@ -102,6 +106,7 @@ def _extract_to_file(source, output, program, deadline, preserve_register, *, no
                     str(program),
                     str(int(preserve_register)),
                     "notes" if notes_only else "audio",
+                    str(trace_version),
                 ],
                 cwd=work,
                 env=env,
@@ -211,11 +216,29 @@ def _candidates(source):
     return sorted(events)
 
 
-def _select_polyphonic(events, duration):
+def _melodic_register(events, frames):
+    """Follow the local upper voice through brief spaces between its attacks."""
+    import numpy as np
+    from scipy.ndimage import percentile_filter
+
+    upper_voice = np.full(frames, np.nan)
+    for start, end, pitch, confidence in events:
+        if end - start >= .15 and confidence >= .29:
+            segment = upper_voice[max(0, round(start * 50)):min(frames, round(end * 50))]
+            np.fmax(segment, pitch, out=segment)
+    present = np.flatnonzero(np.isfinite(upper_voice))
+    if not len(present):
+        return None
+    filled = np.interp(np.arange(frames), present, upper_voice[present])
+    return percentile_filter(filled, percentile=65, size=121, mode="nearest")
+
+
+def _select_polyphonic(events, duration, *, trace_version=MELODY_TRACE_VERSION):
     """Trace the prominent upper voice; favor sustained notes, strong attacks and small intervals."""
     import numpy as np
 
     n = math.ceil(duration * 50)
+    register = _melodic_register(events, n) if trace_version >= 2 else None
     active = np.zeros((n, 88), np.float32)
     onset = np.zeros_like(active)
     age = np.zeros_like(active)
@@ -233,14 +256,16 @@ def _select_polyphonic(events, duration):
     # 88 piano keys plus rest. A five-minute performance needs 15000 x 89 back-pointers.
     keys = np.arange(88)
     costs = np.full((89, 89), 0.35)
-    costs[:88, :88] = 0.68 + np.minimum(np.abs(keys[:, None] - keys) * 0.025, 0.32)
+    distances = np.abs(keys[:, None] - keys)
+    leap_cost = np.minimum(distances * .035, .62) if register is not None else np.minimum(distances * .025, .32)
+    costs[:88, :88] = .68 + leap_cost
     np.fill_diagonal(costs, 0.0)
     score = np.zeros(89)
     previous = np.zeros((n, 89), np.int8)
     for i in range(n):
         valid = np.flatnonzero(active[i] > 0.2)
         evidence = np.full(89, -4.0)
-        evidence[-1] = 0.12
+        evidence[-1] = .18 if register is not None else .12
         if len(valid):
             below = np.minimum((valid[-1] - valid) / 12, 2)
             evidence[valid] = (
@@ -250,6 +275,11 @@ def _select_polyphonic(events, duration):
                 + 0.14 * onset[i, valid]
                 - 0.12 * np.minimum(age[i, valid], 1.5)
             )
+            if register is not None:
+                # When a theme pauses, an isolated low accompaniment or high overtone
+                # can be the strongest pitch in a frame. The lead can rest there.
+                offset = valid + 21 - register[i]
+                evidence[valid] -= .095 * np.maximum(-offset - 4, 0) + .13 * np.maximum(offset - 7, 0)
         choices = score[:, None] - costs
         previous[i] = choices.argmax(axis=0)
         score = choices.max(axis=0) + evidence
@@ -265,6 +295,9 @@ def _select_polyphonic(events, duration):
     for lo, hi in zip(boundaries, boundaries[1:]):
         if path[lo] >= 0 and hi - lo >= 4:
             a, b, p, c = events[path[lo]]
+            if trace_version >= 2 and lo / 50 - a > .13:
+                # Switching to a note's sustained tail would invent another attack.
+                continue
             selected.append((max(a, lo / 50 - 0.01), min(b, hi / 50 + 0.01, duration), p, c))
     return selected
 
@@ -398,7 +431,7 @@ def _synthesize(notes, path, program, frames, preserve_register=False):
             out.writeframesraw(block)
 
 
-def _extract(source, work, program, preserve_register, *, notes_only=False):
+def _extract(source, work, program, preserve_register, *, notes_only=False, trace_version=MELODY_TRACE_VERSION):
     import numpy as np
     import soundfile as sf
 
@@ -413,7 +446,7 @@ def _extract(source, work, program, preserve_register, *, notes_only=False):
     notes = (
         _voiced_notes(source, times, pitch, confidence)
         if _single_voice(times, pitch, confidence, events)
-        else _select_polyphonic(events, frames / RATE)
+        else _select_polyphonic(events, frames / RATE, trace_version=trace_version)
     )
     if not _reliable(notes, frames / RATE):
         return False
@@ -427,5 +460,6 @@ def _extract(source, work, program, preserve_register, *, notes_only=False):
 
 if __name__ == "__main__":
     ok = _extract(Path(sys.argv[1]), Path(sys.argv[2]), int(sys.argv[3]), bool(int(sys.argv[4])),
-                  notes_only=sys.argv[5:] == ["notes"])
+                  notes_only=len(sys.argv) > 5 and sys.argv[5] == "notes",
+                  trace_version=int(sys.argv[6]) if len(sys.argv) > 6 else MELODY_TRACE_VERSION)
     sys.exit(0 if ok else NO_LINE)
