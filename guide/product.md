@@ -30,6 +30,8 @@ Suno is the reference for three actions in this journey. Covers use a song's mel
 
 Can someone recognize the piece with their eyes closed? Can they hear why the musicians belong in the style they asked for? After one more instruction, can they hear both the change and the part they wanted to keep? Those questions guide work on the musical engine and apply to every style.
 
-The immediate priority is the first performance and the first follow-up. With *To Zanarkand*, the listener recognized the melody in an early take and still missed the jazz feel. They preferred a short arranged trio sketch. That gives us a musical reference for this piece. A different request deserves its own interpretation. For example, someone might ask for “something I could dance to,” then say “I like that beat. Make the tune sound wistful again.” The beat they liked should survive, and the second take should give them an audible reason to choose it. A listener can express both wishes without naming a genre, instrument or production technique.
+The listener recognized *To Zanarkand* in an early rendition but missed the jazz feel. They preferred a short arranged trio sketch. After hearing a later full-length trio perform the tune, they said they would keep that version. That full performance is the reference for what this listener wanted from the trio.
+
+For a synth-pop take, the same listener asked, “I like that beat. Bring back the wistful feeling.” They heard the change they wanted in the revision. The rhythm section played the same notes while the lead changed its timing, accents and note lengths. These two sessions capture different reasons to keep a take, both expressible in everyday words.
 
 Refining a completed take and exporting it are available today. Extending a short audition into a longer performance while keeping the exact audio someone fell in love with is an open product capability. [How renditions work](architecture.md#from-a-recording-to-a-rendition)

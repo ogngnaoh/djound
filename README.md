@@ -11,7 +11,7 @@ bring a recording you love and hear it played another way. the aim is a performa
 3. play the take you want to change and describe the next move. try “keep the piano, but make the ending quieter.” choose a passage if you want exact boundaries. you can switch back to the original at the corresponding point in the song or pick an earlier take and start another version from it.
 4. choose **Keep as favorite** to reopen the project on that take. every completed version stays in the project. **Download this take** saves the selected stereo WAV to send to a friend.
 
-the quality of the reimagining still varies. on a full-length *to zanarkand* take, the listener recognized the tune and wanted a much stronger jazz feel. on a 16 GB M2 Pro, turning a 24-second sung recording into **Solo Piano** took 45 seconds. an eight-second ending revision on a 2:49 piano performance took 23 seconds and preserved every sample before the edit. these are timings from individual local takes.
+on an early *to zanarkand* take, the listener recognized the tune and wanted a stronger jazz feel. they would keep the later full-length trio performance. in a separate synth-pop take, they heard the wistful feeling return while the beat stayed the same. on a 16 GB M2 Pro, one 24-second sung recording took 45 seconds to turn into **Solo Piano**. an eight-second ending revision on a 2:49 piano performance took 23 seconds and preserved every sample before the edit.
 
 ## edit a finished mix
 
