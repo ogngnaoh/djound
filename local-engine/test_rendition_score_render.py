@@ -48,6 +48,29 @@ class ScoreRendererTest(unittest.TestCase):
             with self.subTest(note=note), self.assertRaises(ValueError):
                 player._schedule({"program": 0, "notes": [note]}, player.RATE, self.work/"events", 4)
 
+    def test_historical_gain_needs_matching_audible_score_outside_edited_passages(self):
+        from rendition_performance import _same_recorded_score
+
+        frames = player.RATE
+        edit = [frames // 4, frames // 2]
+        seam = frames // 100
+        clean = np.zeros((frames, 2), dtype="<i2")
+        clean[2000:2100] = 100
+        original, edited = self.work / "score.wav", self.work / "hybrid.wav"
+        def write(path, samples):
+            with wave.open(str(path), "wb") as wav:
+                wav.setparams((2, 2, player.RATE, frames, "NONE", "not compressed"))
+                wav.writeframes(samples.tobytes())
+        write(original, clean)
+        changed = clean.copy()
+        changed[edit[0]-seam:edit[1]+seam] = 35
+        write(edited, changed)
+        self.assertTrue(_same_recorded_score(original, edited, [edit]))
+        changed[2100] = -70
+        write(edited, changed)
+        self.assertFalse(_same_recorded_score(original, edited, [edit]))
+        self.assertFalse(_same_recorded_score(original, original, [(0, frames)]))
+
     @unittest.skipUnless(player.score_available(), "Run the local guide setup for soundfont tests")
     def test_stereo_mix_pans_and_preserves_velocity_and_room_across_blocks(self):
         lead = dict(program=0, pan=-1, level_db=-35, notes=[(.64,.75,69,45), (1.18,1.44,69,105)])
@@ -84,6 +107,46 @@ class ScoreRendererTest(unittest.TestCase):
             player.render_score([dict(kit,program=127)], 1., dest, deadline=self.deadline)
         self.assertFalse(dest.exists())
         self.assertFalse(any(self.work.glob(".score-*")))
+
+    @unittest.skipUnless(player.score_available(), "Run the local guide setup for soundfont tests")
+    def test_unchanged_backing_keeps_its_pcm_when_new_lead_is_quieter_or_hotter(self):
+        from rendition_performance import _backing_master
+
+        lead = dict(program=0, pan=-1., level_db=-9, notes=[(.45,.85,60,105), (1.1,1.45,65,90)])
+        backing = dict(program=32, pan=1., level_db=-30, notes=[(.12,.54,41,82), (.88,1.65,43,86)])
+        parent = self.work / "selected.wav"
+        def samples(path):
+            with wave.open(str(path), "rb") as wav:
+                return np.frombuffer(wav.readframes(wav.getnframes()), "<i2").reshape(-1, 2)
+        def perform(tracks, output, gain=None):
+            return player.render_score(tracks, 1.84, output, deadline=self.deadline, room=0., master_gain=gain)
+        old_mix = perform([lead, backing], parent)
+        self.assertLess(old_mix, 1.)
+        baseline = samples(parent)
+        previous = ([lead, backing], 1.84, [])
+        plan = {"realization": "score", "room": 0.}
+        for amount in (.2, 4.):
+            parts = [dict(lead, gain=amount), backing]
+            new = self.work / f"new-{amount}.wav"
+            recovered = _backing_master(previous, parts, 1.84, plan, plan, parent, self.work, self.deadline)
+            self.assertEqual(recovered, old_mix)
+            chosen = perform(parts, new, recovered)
+            self.assertEqual(chosen, old_mix)
+            expected = samples(new)
+            np.testing.assert_array_equal(expected[:,1], baseline[:,1])
+            self.assertGreater(np.max(np.abs(expected[:,0])), 1000)
+            self.assertLessEqual(np.max(np.abs(expected)) / 32768, player.PEAK + 1/32768)
+            # A following take can replay this exact mix from the one saved number.
+            replay = self.work / f"replay-{amount}.wav"
+            self.assertEqual(chosen, perform(parts, replay, chosen))
+            np.testing.assert_array_equal(samples(replay), expected)
+        wrong_parent = self.work / "other.wav"
+        perform([dict(lead, gain=.2), backing], wrong_parent)
+        self.assertIsNone(_backing_master(previous, [lead, backing], 1.84, plan, plan, wrong_parent,
+                                          self.work, self.deadline))
+        self.assertEqual(old_mix, _backing_master(previous, [lead, backing], 1.84, plan,
+                                                 dict(plan, scoreMasterGain=old_mix), parent,
+                                                 self.work, self.deadline))
 
 
 if __name__ == "__main__":

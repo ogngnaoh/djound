@@ -4,6 +4,7 @@ import math
 import numbers
 import os
 from pathlib import Path
+import shutil
 import subprocess
 import tempfile
 import time
@@ -117,7 +118,7 @@ def _add_part(mix, raw, schedule, frames, level, gain, pan, deadline):
     raw.unlink()
 
 
-def _finish(mix, frames, room, ready, deadline):
+def _apply_room(mix, frames, room, deadline):
     import numpy as np
 
     # One dry tail fits all the room's taps. Write the wet blocks back in place.
@@ -146,28 +147,84 @@ def _finish(mix, frames, room, ready, deadline):
         peak = max(peak, float(np.max(np.abs(wet))))
         mix.seek(frame * 8)
         mix.write(wet.astype("<f4", copy=False).tobytes())
+    mix.seek(0)
+    return peak
+
+
+def _lead_headroom(mix, lead, limit, deadline):
+    """Find the loudest constant lead gain that leaves the backing at its saved level."""
+    import numpy as np
+
+    lower, upper = 0., 1.
+    while block := mix.read(BLOCK * 8):
+        _remaining(deadline)
+        full = np.frombuffer(block, "<f4").astype(float)
+        voice = np.frombuffer(lead.read(len(block)), "<f4").astype(float)
+        backing = full - voice
+        # If both endpoints fit, every gain from silence to the written lead fits too.
+        at_risk = (abs(full) > limit) | (abs(backing) > limit)
+        if not at_risk.any():
+            continue
+        v, b = voice[at_risk], backing[at_risk]
+        if (v == 0).any():
+            return None
+        left, right = (-limit - b) / v, (limit - b) / v
+        lower = max(lower, float(np.minimum(left, right).max()))
+        upper = min(upper, float(np.maximum(left, right).min()))
+        if upper < lower or upper <= 0:
+            return None
+    return upper
+
+
+def _finish(mix, frames, room, ready, deadline, master_gain=None, lead=None):
+    import numpy as np
+
+    peak = _apply_room(mix, frames, room, deadline)
     if peak == 0:
         raise ValueError("The score contains no audible performance.")
-    mix.seek(0)
-    master = min(1., PEAK / peak)
+    master = min(1., PEAK / peak) if master_gain is None else master_gain
+    lead_gain = 1.
+    if peak * master > PEAK + 1e-8:
+        # A new player can have hotter attacks. Give that player the available headroom.
+        # A backing that only fits by cancellation may require trimming the whole mix.
+        fit = None
+        if lead is not None:
+            _apply_room(lead, frames, room, deadline)
+            fit = _lead_headroom(mix, lead, PEAK / master, deadline)
+        if fit is None:
+            master = PEAK / peak
+        else:
+            lead_gain = fit
+            lead.seek(0)
+        mix.seek(0)
     with wave.open(str(ready), "wb") as wav:
         wav.setparams((2, 2, RATE, frames, "NONE", "not compressed"))
         while chunk := mix.read(BLOCK * 8):
             _remaining(deadline)
-            pcm = np.rint(np.frombuffer(chunk, dtype="<f4") * (master * 32768)).astype("<i2")
+            wet = np.frombuffer(chunk, dtype="<f4")
+            if lead_gain < 1:
+                wet = wet - (1 - lead_gain) * np.frombuffer(lead.read(len(chunk)), "<f4")
+            pcm = np.rint(wet * (master * 32768)).astype("<i2")
             wav.writeframesraw(pcm.tobytes())
+    return master
 
 
-def render_score(tracks, duration: float, output: Path, *, deadline: float, room: float = 1.0) -> None:
+def render_score(tracks, duration: float, output: Path, *, deadline: float, room: float = 1.0,
+                 master_gain: float | None = None) -> float:
     """Render notes (start seconds, end seconds, MIDI pitch, velocity) with a fixed mix.
 
     Each part supplies a zero-based GM program, notes, optional percussion bank,
     linear gain (default 1), stereo balance (−1 to +1), and optional whole-part
-    RMS level_db. room=1 applies short stereo reflections; room=0 stays dry.
+    RMS level_db. A saved master gain fixes the level of the backing while track
+    zero plays a revised lead. Return the actual master gain used for this performance.
     """
     _remaining(deadline)
     duration = _number(duration, 0, MAX_SECONDS, "score duration")
     room = _number(room, 0, 1, "room amount")
+    if master_gain is not None:
+        master_gain = _number(master_gain, 0, 1, "master gain")
+        if master_gain == 0:
+            raise ValueError("A saved master gain must be positive.")
     frames = round(duration * RATE)
     if not frames or not isinstance(tracks, (list, tuple)) or not 1 <= len(tracks) <= 32:
         raise ValueError("Supply a positive duration and one to 32 scored parts.")
@@ -178,10 +235,10 @@ def render_score(tracks, duration: float, output: Path, *, deadline: float, room
         raise RuntimeError("Install the score performer with bash local-engine/renditions.sh setup.")
     with tempfile.TemporaryDirectory(prefix=".score-", dir=output.parent) as directory:
         work = Path(directory)
-        with tempfile.TemporaryFile(dir=work) as mix:
+        with tempfile.TemporaryFile(dir=work) as mix, tempfile.TemporaryFile(dir=work) as lead:
             mix.truncate(frames * 8)
             remaining_notes = MAX_NOTES
-            for track in tracks:
+            for index, track in enumerate(tracks):
                 _remaining(deadline)
                 schedule = work / "notes.txt"
                 count = _schedule(track, frames, schedule, remaining_notes)
@@ -193,7 +250,11 @@ def render_score(tracks, duration: float, output: Path, *, deadline: float, room
                     level = _number(level, -96, 0, "part RMS level")
                 if count and gain:
                     _add_part(mix, work / "part.f32", schedule, frames, level, gain, pan, deadline)
+                if index == 0 and master_gain is not None and len(tracks) > 1:
+                    mix.seek(0)
+                    shutil.copyfileobj(mix, lead)
             ready = work / "score.wav"
-            _finish(mix, frames, room, ready, deadline)
+            master = _finish(mix, frames, room, ready, deadline, master_gain, lead if len(tracks) > 1 else None)
         _remaining(deadline)
         os.link(ready, output)
+        return master

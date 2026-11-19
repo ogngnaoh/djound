@@ -14,6 +14,54 @@ def _frames(path):
         return recording.getnframes()
 
 
+def _same_recorded_score(rebuilt, recorded, edited):
+    """Compare the original score audio outside saved passage edits and their 10 ms seams."""
+    with wave.open(str(rebuilt), "rb") as a, wave.open(str(recorded), "rb") as b:
+        frames = a.getnframes()
+        if a.getparams()[:4] != b.getparams()[:4]:
+            return False
+        position = 0
+        heard = False
+        for start, end in [*edited, (frames + audio.RATE, frames + audio.RATE)]:
+            stop = min(frames, max(0, start - audio.RATE // 100))
+            if position < stop:
+                a.setpos(position)
+                b.setpos(position)
+            while position < stop:
+                count = min(32768, stop - position)
+                chunk = a.readframes(count)
+                if chunk != b.readframes(count):
+                    return False
+                heard |= any(chunk)
+                position += count
+            position = max(position, end + audio.RATE // 100)
+        return heard
+
+
+def _backing_master(previous, tracks, seconds, plan, parent_plan, recorded, work, deadline):
+    """Inherit the rendered backing level when the arrangement kept those actual parts."""
+    if previous is None or plan.get("realization") != "score" or len(tracks) < 2:
+        return None
+    old_tracks, old_seconds, _ = previous
+    room = plan.get("room", .44)
+    if old_seconds != seconds or old_tracks[1:] != tracks[1:] or room != parent_plan.get("room", .44):
+        return None
+    if "scoreMasterGain" in parent_plan:
+        return parent_plan["scoreMasterGain"]
+
+    # Older scores saved their parts but no master gain. Verify the old render against
+    # the take the listener heard before using that gain in a new performance.
+    from rendition_score_render import render_score
+    old_wav = work / "earlier-score.wav"
+    try:
+        gain = render_score(old_tracks, old_seconds, old_wav, deadline=deadline, room=room)
+        if _same_recorded_score(old_wav, recorded, parent_plan.get("retainedPassageFrames", [])):
+            return gain
+    finally:
+        old_wav.unlink(missing_ok=True)
+    return None
+
+
 def _score_caption(plan, tracks):
     """Describe the parts that made it to the player, including the lead's written touch."""
     from pretty_midi import INSTRUMENT_MAP
@@ -93,6 +141,9 @@ def perform_score(parent, original, destination, work, *, direction, caption, pa
         analysis["parentPlan"] = parent_plan
     report_stage("arranging")
     plan = plan_arrangement(analysis, direction, parent_caption, deadline=deadline)
+    previous_score = None
+    if same_input and parent_plan.get("realization", "score") == "score":
+        previous_score = arrange(notes, analysis, parent_plan)
     plan.pop("retainedPassageFrames", None)
     plan.pop("scoreSourceTakeId", None)
     plan["fromUpload"] = from_upload
@@ -111,7 +162,13 @@ def perform_score(parent, original, destination, work, *, direction, caption, pa
         mapping = relative_map(mapping, parent_map)
     report_stage("rendering")
     score = work / "arrangement.wav"
-    render_score(tracks, seconds, score, deadline=deadline, room=plan.get("room", .44))
+    master = _backing_master(previous_score, tracks, seconds, plan, parent_plan,
+                             scored_ancestor["source"] if scored_ancestor else parent, work, deadline)
+    plan.pop("scoreMasterGain", None)
+    output_gain = render_score(tracks, seconds, score, deadline=deadline, room=plan.get("room", .44),
+                               master_gain=master)
+    if plan.get("realization") == "score":
+        plan["scoreMasterGain"] = output_gain
     if scored_ancestor:
         intervals = scored_ancestor["editedFrames"]
         same_performance = all(plan.get(field) == parent_plan.get(field) for field in
