@@ -1,5 +1,6 @@
 """Check the provenance of the music heard on first takes and revisions."""
 from contextlib import nullcontext
+import json
 from pathlib import Path
 import shutil
 import tempfile
@@ -29,6 +30,54 @@ class PerformanceTest(unittest.TestCase):
         fields = dict(description="A cello duet", prompt="Have the cello play the tune",
                       duration=2)
         music.perform_take(self.parent, self.destination, "cello duet", **{**fields, **changes})
+
+    def test_finished_score_caption_names_only_sounding_players_and_their_performed_direction(self):
+        import rendition_worker
+
+        request = {"source": str(self.parent), "original": str(self.parent), "output": str(self.destination),
+                   "prompt": "I like that beat. Bring back the wistful feeling.", "supportsArrangedScore": True}
+        proposal = {"scope": "whole", "caption": "Add pads and an echoing piano.", "label": "Wistful pulse"}
+        plan = {"realization": "score", "bpm": 128, "leadProgram": 81, "phrasing": "flowing",
+                "leadTouch": {"velocity": [80, 88, 72], "lengthPercent": 105, "endOffsetMs": 15}}
+        sounding = [(0., .3, 60, 80)]
+        tracks = [{"program": 81, "notes": sounding}, {"program": 38, "notes": sounding},
+                  {"program": 24, "percussion": True, "notes": sounding}, {"program": 0, "notes": []}]
+        def transcribe(source, path, **kwargs):
+            path.write_text(json.dumps({"frames": 88200, "melody": sounding}))
+            return True
+        def render(parts, duration, output, **kwargs):
+            self.assertEqual(tracks, parts)
+            self.write(output, 42, duration)
+        with (patch.object(rendition_worker, "infer_plan", return_value=(proposal, "local model")),
+              patch.object(music, "guide_available", return_value=True),
+              patch("rendition_score_render.score_available", return_value=True),
+              patch("rendition_melody.transcribe_recording", side_effect=transcribe),
+              patch("rendition_score_plan.plan_arrangement", return_value=plan),
+              patch("rendition_score.arrange", return_value=(tracks, 2, [[0, 0], [88200, 88200]])),
+              patch("rendition_score_render.render_score", side_effect=render)):
+            result = rendition_worker.run(request)
+        self.assertEqual("ready", result["state"])
+        self.assertEqual("Sawtooth synth carries the tune with synth bass and electronic drums at 128 BPM. "
+                         "The lead part calls for connected notes and a softer touch at phrase endings.", result["caption"])
+        produced = music._score_caption(dict(plan, realization="produced"), tracks)
+        self.assertIn("arrangement used for the generated audio", produced)
+        self.assertNotIn("piano", produced)
+
+    def test_saved_passage_details_append_to_the_confirmed_score_description(self):
+        import rendition_worker
+
+        for choice, description in (("keep", "Kept the edited ending exactly."),
+                                    ("develop", "Applied the new direction to the edited ending as well.")):
+            output = self.root / (choice + ".wav")
+            request = {"source": str(self.parent), "original": str(self.parent), "output": str(output),
+                       "prompt": "Give the tune to a cello.", "supportsArrangedScore": True, "passagePolicy": choice,
+                       "scoredAncestor": {"frames": 88200, "editedFrames": [[44100, 88200]]}}
+            def complete(source, original, destination, work, **kwargs):
+                self.write(destination, 21, 2)
+                return {"caption": "Cello carries the tune at 128 BPM."}
+            with patch.object(music, "perform_score", side_effect=complete):
+                result = rendition_worker.run(request)
+            self.assertEqual("Cello carries the tune at 128 BPM. " + description, result["caption"])
 
     def test_ensemble_refines_the_guide_with_accompaniment_from_the_draft(self):
         def guide(source, output, *, program, deadline, preserve_register):

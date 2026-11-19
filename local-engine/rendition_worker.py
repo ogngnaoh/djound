@@ -386,7 +386,7 @@ def run(request, plan_only=False):
                         part = "edited ending" if b == ancestor["frames"] else "edited opening" if a == 0 else "edited passage"
                     detail = (f"Kept the {part} exactly." if policy == "keep"
                               else f"Applied the new direction to the {part} as well.")
-                    decision["caption"] = f"{direction.rstrip(' .!?')}. {detail}"
+                    metadata["caption"] = f"{metadata['caption']} {detail}"
                 return {**decision, **metadata, "state": "ready", "durationSeconds": audio_duration(output)}
         if reference is not None and parent_map and any(a != b for a, b in parent_map):
             from rendition_audio import rendition_deadline

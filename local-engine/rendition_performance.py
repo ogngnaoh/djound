@@ -14,6 +14,44 @@ def _frames(path):
         return recording.getnframes()
 
 
+def _score_caption(plan, tracks):
+    """Describe the parts that made it to the player, including the lead's written touch."""
+    from pretty_midi import INSTRUMENT_MAP
+
+    def instrument(track):
+        program = track["program"]
+        if track.get("percussion"):
+            return {24: "electronic drums", 25: "808 drums", 40: "brushed drums"}.get(program, "drums")
+        name = INSTRUMENT_MAP[program].lower()
+        if 80 <= program <= 95:
+            color = name.split(" ", 2)[-1].strip("()")
+            return color + (" synth" if program < 88 else " synth pad")
+        return name.rstrip(" 12")
+
+    lead = instrument(tracks[0])
+    backing = list(dict.fromkeys(instrument(t) for t in tracks[1:] if t["notes"]))
+    accompaniment = [name for name in backing if name != lead]
+    players = ", ".join(accompaniment[:-1]) + " and " + accompaniment[-1] if len(accompaniment) > 1 else "".join(accompaniment)
+    if tracks[0]["notes"]:
+        description = f"{lead} carries the tune" + (f" with {players}" if players else "")
+    else:
+        description = f"the accompaniment plays on {', '.join(backing)}"
+    subject = "In the arrangement used for the generated audio, " if plan.get("realization") == "produced" else ""
+    caption = f"{subject}{description} at {plan['bpm']:g} BPM."
+    if tracks[0]["notes"]:
+        feel = {"flowing": "connected notes", "articulated": "short, separated notes",
+                "laid_back": "relaxed timing", "syncopated": "offbeat accents"}[plan["phrasing"]]
+        closing = ""
+        if touch := plan.get("leadTouch"):
+            _, middle, end = touch["velocity"]
+            if end <= middle - 6:
+                closing = " and a softer touch at phrase endings"
+            elif end >= middle + 6:
+                closing = " and a stronger touch at phrase endings"
+        caption += f" The lead part calls for {feel}{closing}."
+    return caption[0].upper() + caption[1:]
+
+
 def perform_score(parent, original, destination, work, *, direction, caption, parent_caption,
                   parent_plan, parent_map, recover_original, scored_ancestor=None, passage_policy=None):
     """Let a local arranger revise the playing decisions and render them against the source phrases."""
@@ -99,7 +137,7 @@ def perform_score(parent, original, destination, work, *, direction, caption, pa
     else:
         score.replace(destination)
     report_stage("finishing")
-    return {"parentTimeMap": mapping, "arrangementPlan": plan}
+    return {"parentTimeMap": mapping, "arrangementPlan": plan, "caption": _score_caption(plan, tracks)}
 
 
 def _play_duet(guide, work, program, lane, direction, seconds, deadline):
