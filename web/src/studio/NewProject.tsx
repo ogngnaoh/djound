@@ -1,5 +1,5 @@
 import { useRef, useState } from "react";
-import { useNavigate } from "react-router-dom";
+import { Link, useNavigate } from "react-router-dom";
 import { useQueryClient } from "@tanstack/react-query";
 import { ArrowRight, LoaderCircle, Upload } from "lucide-react";
 import { Button } from "../components/ui/button";
@@ -37,6 +37,11 @@ export function NewProject() {
         <header className="project-header">
           <span className="eyebrow">NEW PROJECT</span>
           <h1>Start with a melody.</h1>
+          {mode === "backend" && (
+            <Link className="text-action" to="/mixes">
+              Edit a finished mix <ArrowRight size={15} />
+            </Link>
+          )}
           <p>A familiar tune. A different possibility.</p>
         </header>
         <div

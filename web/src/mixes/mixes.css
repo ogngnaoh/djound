@@ -1,0 +1,495 @@
+.mix-library,
+.mix-editor {
+  max-width: 1280px;
+  margin: 0 auto;
+  padding: clamp(24px, 5vw, 72px) clamp(18px, 4.5vw, 72px);
+  color: #202b26;
+}
+.mix-library header,
+.mix-heading {
+  margin-bottom: 32px;
+}
+.mix-library h1,
+.mix-heading h1 {
+  margin: 0.18em 0;
+  font-size: clamp(32px, 4.5vw, 60px);
+  font-weight: 590;
+  line-height: 1.08;
+  letter-spacing: -0.055em;
+  overflow-wrap: anywhere;
+}
+.mix-library h2,
+.mix-editor h2 {
+  font-size: 21px;
+  font-weight: 580;
+  letter-spacing: -0.035em;
+}
+.mix-library p,
+.mix-takes > p {
+  color: #52605b;
+}
+.mix-drop {
+  display: grid;
+  justify-items: center;
+  gap: 12px;
+  text-align: center;
+  border: 1px dashed #859b91;
+  background: #f1f5ef;
+  border-radius: 14px;
+  padding: clamp(28px, 6vw, 76px) 18px;
+}
+.mix-drop.over {
+  background: #dbeedf;
+}
+.mix-drop h2,
+.mix-drop p {
+  margin: 0;
+}
+.mix-library-row {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  border-block-end: 1px solid #d3dbd4;
+  padding: 18px 0;
+  text-decoration: none;
+  color: inherit;
+}
+.mix-library-row > span {
+  flex: 1;
+}
+.mix-library-row small,
+.mix-takes small {
+  display: block;
+  color: #52605b;
+}
+.mix-list-title {
+  margin-top: 30px;
+}
+.mix-heading a,
+.mix-save a {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  color: #355748;
+}
+.mix-heading a {
+  font-size: 14px;
+  margin-bottom: 12px;
+}
+.mix-edit-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 2.25fr) minmax(240px, 1fr);
+  gap: clamp(24px, 4vw, 60px);
+}
+.mix-main,
+.mix-takes {
+  min-width: 0;
+}
+.mix-time,
+.mix-conversation form > div {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 10px;
+}
+.mix-time,
+.mix-range-fields,
+.mix-transport,
+.mix-reply,
+.mix-status {
+  font-size: 14px;
+}
+.mix-wave {
+  position: relative;
+  overflow: hidden;
+  touch-action: none;
+  cursor: crosshair;
+  background: #1f3930;
+  border-radius: 8px;
+  height: 120px;
+  margin: 12px 0;
+  color: #b1d7bd;
+}
+.mix-wave svg {
+  position: absolute;
+  inset: 7% 0;
+  width: 100%;
+  height: 86%;
+  pointer-events: none;
+}
+.mix-range {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  background: #c1ee6650;
+  border-inline: 2px solid #d7f49a;
+  pointer-events: none;
+}
+.mix-playhead {
+  position: absolute;
+  inset-block: 0;
+  border-left: 2px solid white;
+  pointer-events: none;
+}
+.mix-range-fields,
+.mix-transport {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  align-items: center;
+}
+.mix-range-fields label,
+.mix-transport label {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+}
+.mix-range-fields input {
+  width: 86px;
+  padding: 5px 8px;
+  border-radius: 5px;
+  border: 1px solid #a2afa7;
+}
+.mix-transport {
+  margin-top: 18px;
+}
+.mix-transport [aria-pressed="true"] {
+  background: #304d40;
+  color: #fff;
+}
+.mix-status {
+  color: #4a5f50;
+  margin: 14px 0;
+}
+.mix-conversation {
+  margin-top: 32px;
+  border-top: 1px solid #cbd5cc;
+  padding-top: 16px;
+}
+.mix-conversation form {
+  border: 1px solid #acb9ae;
+  border-radius: 10px;
+  padding: 12px;
+}
+.mix-conversation textarea {
+  display: block;
+  width: 100%;
+  padding: 8px;
+  background: transparent;
+  resize: vertical;
+  color: inherit;
+}
+.mix-conversation form > div > span {
+  font-size: 13px;
+  color: #52605b;
+}
+.mix-reply {
+  margin: 16px 0 8px;
+}
+.mix-choice {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  padding: 8px 0;
+}
+.mix-takes {
+  border-left: 1px solid #cbd5cc;
+  padding-left: 24px;
+}
+.mix-takes h2 {
+  margin: 0 0 12px;
+}
+.mix-takes article {
+  border-top: 1px solid #d3dbd4;
+  padding: 12px 8px;
+}
+.mix-takes article.current {
+  background: #edf3ec;
+  border-left: 3px solid #527e60;
+}
+.mix-takes article button {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: inherit;
+}
+.mix-takes article > span {
+  display: block;
+  font-size: 14px;
+  margin: 6px 0;
+}
+.mix-save {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin: 4px 0 14px;
+}
+.mix-save a {
+  font-size: 14px;
+  padding: 8px 0;
+}
+@media (max-width: 780px) {
+  .mix-edit-grid {
+    grid-template-columns: 1fr;
+  }
+  .mix-takes {
+    border-left: 0;
+    padding-left: 0;
+  }
+  .mix-transport {
+    gap: 6px;
+  }
+  .mix-library,
+  .mix-editor {
+    padding-top: 26px;
+  }
+  .mix-heading {
+    margin-bottom: 22px;
+  }
+}
+.studio-app:has(.mix-library, .mix-editor) {
+  --background: #f8f8f4;
+  --primary: #244f41;
+  --primary-foreground: #fff;
+  --secondary: #e4eee4;
+  --secondary-foreground: #244f41;
+  --accent: #e5eee4;
+  --accent-foreground: #244f41;
+  --navigation: #efefe9;
+  --foreground: #1d2a23;
+  --muted-foreground: #526457;
+  --border: #d4d9cf;
+}
+.studio-app .mix-library,
+.studio-app .mix-editor {
+  padding-top: clamp(26px, 3.6vw, 48px);
+}
+.studio-app .mix-heading h1,
+.studio-app .mix-library header h1 {
+  font-size: clamp(34px, 4.5vw, 62px);
+  letter-spacing: -0.06em;
+  line-height: 1.04;
+}
+.mix-heading {
+  border-bottom: 1px solid var(--border);
+  padding-bottom: 21px;
+}
+.mix-metadata,
+.mix-ruler {
+  font-variant-numeric: tabular-nums;
+  color: var(--muted-foreground);
+  font-size: 12px;
+}
+.mix-metadata {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  margin-top: 10px;
+}
+.studio-app .mix-conversation h2,
+.studio-app .mix-takes h2,
+.mix-time strong {
+  font-size: 17px;
+  font-weight: 620;
+  letter-spacing: -0.023em;
+}
+.mix-time > span {
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+}
+.mix-wave {
+  height: 82px;
+  margin: 9px 0 0;
+  border-radius: 4px 4px 0 0;
+  background: #223b31;
+  color: #b3d4ba;
+}
+.mix-ruler {
+  display: flex;
+  justify-content: space-between;
+  font-size: 11px;
+  background: #223b31;
+  color: #d7e3d8;
+  padding: 2px 8px 5px;
+  border-radius: 0 0 4px 4px;
+}
+.mix-range-fields {
+  margin: 12px 0 18px;
+}
+.studio-app .mix-range-fields input {
+  font-variant-numeric: tabular-nums;
+  min-height: 32px;
+  padding: 4px 8px;
+}
+.mix-focus {
+  margin-top: 18px;
+}
+.mix-focus-wave {
+  position: relative;
+  height: 74px;
+  background: #e2eadd;
+  color: #568267;
+  margin-top: 8px;
+  overflow: hidden;
+  border-radius: 4px;
+}
+.mix-focus-wave svg {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+}
+.mix-focus-wave .mix-range {
+  border-color: #527d61;
+  background: #b6db9330;
+}
+.mix-focus-wave .mix-playhead {
+  border-color: #1f3028;
+}
+.studio-app .mix-focus-wave input {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  opacity: 0;
+}
+.mix-focus-wave:focus-within {
+  outline: 2px solid var(--primary);
+}
+.studio-app .mix-transport input[type="checkbox"] {
+  min-height: auto;
+  width: 15px;
+  height: 15px;
+  accent-color: var(--primary);
+}
+.mix-transport {
+  border-bottom: 1px solid var(--border);
+  padding-bottom: 12px;
+}
+.studio-app .mix-status {
+  margin-top: 9px;
+}
+.mix-conversation {
+  border: 0;
+  margin-top: 24px;
+  padding-top: 0;
+}
+.studio-app .mix-conversation h2 {
+  margin: 0 0 10px;
+}
+.mix-conversation form {
+  background: #fffefb;
+  border: 1px solid #b3c3b5;
+}
+.studio-app .mix-conversation textarea {
+  border: none;
+  min-height: 66px;
+  background: transparent;
+  padding: 5px;
+  line-height: 1.45;
+}
+.studio-app .mix-conversation textarea:focus {
+  outline: none;
+}
+.mix-conversation form:focus-within {
+  outline: 2px solid var(--primary);
+  outline-offset: 1px;
+}
+.mix-conversation form > div {
+  padding: 4px;
+}
+.studio-app .mix-reply {
+  margin: 0.8em 0;
+}
+.mix-takes {
+  align-self: start;
+}
+.mix-takes article {
+  padding: 11px 10px;
+}
+.mix-takes article > small {
+  font-variant-numeric: tabular-nums;
+}
+.mix-takes article > span {
+  overflow-wrap: anywhere;
+}
+.mix-takes article button {
+  line-height: 1.8;
+}
+.mix-save {
+  padding-top: 8px;
+}
+.mix-drop {
+  border-radius: 7px;
+}
+.studio-app .mix-library header > p {
+  margin-top: 13px;
+}
+.studio-app .mix-list-title {
+  margin: 28px 0 8px;
+}
+.mix-take-heading,
+.mix-knobs {
+  display: flex;
+  align-items: baseline;
+  gap: 9px;
+}
+.mix-take-heading > span {
+  font-variant-numeric: tabular-nums;
+  font-size: 13px;
+  color: var(--muted-foreground);
+}
+.mix-takes .mix-knobs {
+  gap: 14px;
+}
+.mix-knobs small {
+  font-size: 12px;
+  color: #284f3d;
+}
+.mix-takes article > small {
+  font-size: 12px;
+}
+.mix-takes:has(article) {
+  max-height: calc(100dvh - 90px);
+  overflow-y: auto;
+}
+@media (max-width: 780px) {
+  .mix-takes:has(article) {
+    max-height: none;
+  }
+}
+
+.mix-level-choice summary {
+  width: fit-content;
+  color: var(--primary);
+  font-size: 14px;
+  cursor: pointer;
+}
+.studio-app .mix-conversation .mix-level-choice form {
+  display: flex;
+  align-items: end;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin-top: 8px;
+  padding: 12px;
+}
+.mix-level-choice label {
+  display: grid;
+  gap: 4px;
+  font-size: 13px;
+}
+.mix-level-choice input,
+.mix-level-choice select {
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: 6px;
+  min-height: 36px;
+}
+.mix-level-choice input {
+  width: 90px;
+}
+.mix-level-choice form > span {
+  align-self: center;
+  color: var(--muted-foreground);
+  font-size: 13px;
+}

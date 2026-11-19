@@ -4,6 +4,194 @@
  */
 
 export interface paths {
+    "/api/mixes": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** @description List imported projects with their current playback and version state. */
+        get: operations["listFinishedMixes"];
+        put?: never;
+        /** @description Store an immutable stereo MP3 and start decoding its canonical PCM timeline. */
+        post: operations["importFinishedMix"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/mixes/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** @description Reopen the mix with its saved selection, heard take and kept take. */
+        get: operations["getFinishedMix"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/mixes/{id}/retry": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** @description Retry an interrupted decode or passage preparation. */
+        post: operations["retryMixPreparation"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/mixes/{id}/selection": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /** @description Select one passage using inclusive start and exclusive end PCM frame indices. */
+        put: operations["selectMixPassage"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/mixes/{id}/edits": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** @description Interpret a typed request against its audible basis and return a durable take or clarification. Replay a successful request with the same project, idempotency key and body to retrieve its original take. */
+        post: operations["previewMixEdit"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/mixes/{id}/heard": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /** @description Record the take that started playback. */
+        put: operations["acknowledgeMixPlayback"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/mixes/{id}/keep": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** @description Promote the named auditioned WAV by its verified hash. A replay cannot create another version. */
+        post: operations["keepMixTake"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/mixes/{id}/undo": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** @description Move from this kept take to its exact parent. */
+        post: operations["undoMixTake"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/mixes/{id}/import": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** @description Stream the unmodified imported MP3 while the canonical WAV is being prepared. */
+        get: operations["streamImportedMp3"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/mixes/{id}/takes/{takeId}/audio": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** @description Stream an immutable mix, including the original canonical WAV. */
+        get: operations["streamMixTake"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/mixes/{id}/takes/{takeId}/export": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** @description Download a kept WAV after checking it against the auditioned hash. */
+        get: operations["exportMixTake"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/explorations/{id}/local/tone-auditions": {
         parameters: {
             query?: never;
@@ -460,6 +648,63 @@ export interface paths {
 export type webhooks = Record<string, never>;
 export interface components {
     schemas: {
+        MixSelection: {
+            startFrame: number;
+            endFrame: number;
+        };
+        MixTake: {
+            id: string;
+            number: number;
+            parentId: string;
+            sourceTakeId: string | null;
+            selectionBaseId: string;
+            startFrame: number;
+            endFrame: number;
+            vocalsDb: number;
+            drumsDb: number;
+            passageTrimDb: number;
+            /** @enum {string} */
+            lastControl: "vocals" | "drums";
+            lastChangeDb: number;
+            /** @enum {string} */
+            direction: "up" | "down" | "unchanged";
+            label: string;
+            text: string;
+            audioUrl: string;
+            sha256: string;
+            kept: boolean;
+            heard: boolean;
+        };
+        MixState: {
+            id: string;
+            title: string;
+            /** @constant */
+            sampleRate: 44100;
+            frames: number;
+            durationMs: number;
+            importUrl: string;
+            sourceUrl: string | null;
+            revision: number;
+            selection: components["schemas"]["MixSelection"] | null;
+            selectionBaseId: string;
+            /** @enum {string} */
+            preparation: "DECODING" | "IDLE" | "PREPARING" | "READY" | "FAILED";
+            error: string | null;
+            heardTakeId: string;
+            keptTakeId: string;
+            takes: components["schemas"]["MixTake"][];
+        };
+        MixEditReply: {
+            /** @enum {string} */
+            status: "PREVIEW" | "CLARIFY" | "CLIPPING";
+            message: string;
+            take: components["schemas"]["MixTake"] | null;
+            choices: components["schemas"]["MixTake"][];
+            /** @enum {unknown} */
+            control: "vocals" | "drums" | null;
+            suggestedTrimDb: number | null;
+            suggestedGainDb: number | null;
+        };
         Problem: {
             type: string;
             title: string;
@@ -863,6 +1108,24 @@ export interface components {
         };
     };
     responses: {
+        /** @description Current imported project state */
+        MixState: {
+            headers: {
+                [name: string]: unknown;
+            };
+            content: {
+                "application/json": components["schemas"]["MixState"];
+            };
+        };
+        /** @description Stereo PCM16 WAV on the project's canonical timeline */
+        MixAudio: {
+            headers: {
+                [name: string]: unknown;
+            };
+            content: {
+                "audio/wav": string;
+            };
+        };
         /** @description Typed recoverable application error */
         Problem: {
             headers: {
@@ -883,6 +1146,261 @@ export interface components {
 }
 export type $defs = Record<string, never>;
 export interface operations {
+    listFinishedMixes: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Imported mixes */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        items: components["schemas"]["MixState"][];
+                    };
+                };
+            };
+            default: components["responses"]["Problem"];
+        };
+    };
+    importFinishedMix: {
+        parameters: {
+            query?: never;
+            header?: {
+                "Idempotency-Key"?: string;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "multipart/form-data": {
+                    /** Format: binary */
+                    file: string;
+                };
+            };
+        };
+        responses: {
+            201: components["responses"]["MixState"];
+            default: components["responses"]["Problem"];
+        };
+    };
+    getFinishedMix: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: components["parameters"]["ResourceId"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: components["responses"]["MixState"];
+            default: components["responses"]["Problem"];
+        };
+    };
+    retryMixPreparation: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: components["parameters"]["ResourceId"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: components["responses"]["MixState"];
+            default: components["responses"]["Problem"];
+        };
+    };
+    selectMixPassage: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: components["parameters"]["ResourceId"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    startFrame: number;
+                    endFrame: number;
+                    basisTakeId?: string;
+                };
+            };
+        };
+        responses: {
+            200: components["responses"]["MixState"];
+            default: components["responses"]["Problem"];
+        };
+    };
+    previewMixEdit: {
+        parameters: {
+            query?: never;
+            header?: {
+                "Idempotency-Key"?: string;
+            };
+            path: {
+                id: components["parameters"]["ResourceId"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    text: string;
+                    basisTakeId: string;
+                    startFrame: number;
+                    endFrame: number;
+                    referenceTakeId?: string;
+                    passageTrimDb?: number;
+                };
+            };
+        };
+        responses: {
+            /** @description Preview, playable reference choices or explicit clipping alternatives */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MixEditReply"];
+                };
+            };
+            default: components["responses"]["Problem"];
+        };
+    };
+    acknowledgeMixPlayback: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: components["parameters"]["ResourceId"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    takeId: string;
+                };
+            };
+        };
+        responses: {
+            200: components["responses"]["MixState"];
+            default: components["responses"]["Problem"];
+        };
+    };
+    keepMixTake: {
+        parameters: {
+            query?: never;
+            header: {
+                "Idempotency-Key": string;
+            };
+            path: {
+                id: components["parameters"]["ResourceId"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    takeId: string;
+                    sha256: string;
+                };
+            };
+        };
+        responses: {
+            200: components["responses"]["MixState"];
+            default: components["responses"]["Problem"];
+        };
+    };
+    undoMixTake: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: components["parameters"]["ResourceId"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    takeId: string;
+                };
+            };
+        };
+        responses: {
+            200: components["responses"]["MixState"];
+            default: components["responses"]["Problem"];
+        };
+    };
+    streamImportedMp3: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: components["parameters"]["ResourceId"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Original compressed recording */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "audio/mpeg": string;
+                };
+            };
+            default: components["responses"]["Problem"];
+        };
+    };
+    streamMixTake: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: components["parameters"]["ResourceId"];
+                takeId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: components["responses"]["MixAudio"];
+            default: components["responses"]["Problem"];
+        };
+    };
+    exportMixTake: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: components["parameters"]["ResourceId"];
+                takeId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: components["responses"]["MixAudio"];
+            default: components["responses"]["Problem"];
+        };
+    };
     auditionLocalTone: {
         parameters: {
             query?: never;

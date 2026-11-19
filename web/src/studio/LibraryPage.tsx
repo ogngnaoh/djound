@@ -1,3 +1,4 @@
+import { mixListQuery } from "../mixes/MixLibrary";
 import { useState } from "react";
 import { Link } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
@@ -20,6 +21,11 @@ export function LibraryPage() {
   const { mode } = useStudio(),
     q = useProjects(),
     audio = useAudio();
+  const mixes = useQuery({
+    ...mixListQuery,
+    enabled: mode === "backend",
+    retry: false,
+  });
   const [search, setSearch] = useState(""),
     [selectedId, setSelectedId] = useState("");
   if (q.isPending) return <Loading />;
@@ -40,7 +46,35 @@ export function LibraryPage() {
           <span className="eyebrow">LIBRARY</span>
           <h1>Library</h1>
           <p>Recent projects and kept versions</p>
+          {mode === "backend" && (
+            <Button asChild>
+              <Link to="/mixes">
+                <Music2 />
+                Edit a finished mix
+              </Link>
+            </Button>
+          )}
         </header>
+        {!!mixes.data?.items.length && (
+          <section className="recent-projects">
+            <h2>Finished mixes</h2>
+            {mixes.data.items.slice(0, 5).map((m) => (
+              <article className="project-row" key={m.id}>
+                <div>
+                  <h3>
+                    <Link to={"/mixes/" + m.id}>{m.title}</Link>
+                  </h3>
+                  <p>
+                    {clock(m.durationMs / 1000)} · {m.takes.length} takes
+                  </p>
+                </div>
+                <Link className="text-action" to={"/mixes/" + m.id}>
+                  Open mix
+                </Link>
+              </article>
+            ))}
+          </section>
+        )}
         {projects.length ? (
           <>
             <div className="library-search">
@@ -148,7 +182,7 @@ export function LibraryPage() {
               </p>
             </section>
           </>
-        ) : (
+        ) : mixes.data?.items.length ? null : (
           <div className="library-empty">
             <div className="empty-symbol">
               <Music2 size={30} />

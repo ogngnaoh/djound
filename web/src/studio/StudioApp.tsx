@@ -52,6 +52,8 @@ import {
 import { Context, useStudio, storage, remember } from "./context";
 import { Loading, Failure } from "./Views";
 import { LibraryPage } from "./LibraryPage";
+import MixLibrary from "../mixes/MixLibrary";
+import MixEditor from "../mixes/MixEditor";
 import { NewProject } from "./NewProject";
 import "./studio.css";
 const scenarios: { value: Scenario; label: string }[] = [
@@ -150,6 +152,12 @@ function Shell() {
           <span className="mobile-prototype-label">Prototype</span>
         )}
         <nav aria-label="Main navigation">
+          {mode === "backend" && (
+            <NavLink to="/mixes">
+              <SlidersHorizontal />
+              Mix editor
+            </NavLink>
+          )}
           <NavLink to="/" end>
             <Folder />
             Library
@@ -196,6 +204,12 @@ function Shell() {
       <main id="workspace">
         <Routes>
           <Route path="/" element={<LibraryPage />} />
+          {mode === "backend" && (
+            <Route path="/mixes" element={<MixLibrary />} />
+          )}
+          {mode === "backend" && (
+            <Route path="/mixes/:id" element={<MixEditor />} />
+          )}
           <Route path="/remix/new" element={<NewProject />} />
           <Route path="/remix/:id" element={<ProjectPage />} />
           <Route path="/remix/:id/melody" element={<ProjectPage melody />} />
@@ -1133,7 +1147,7 @@ function CreationRecovery({
     [error, setError] = useState("");
   useEffect(() => {
     let current = true;
-    void pendingBackendCreation()
+    void pendingBackendCreation(project.id)
       .then((command) => {
         if (current) setPending(command);
       })

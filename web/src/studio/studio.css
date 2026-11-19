@@ -1164,7 +1164,7 @@
   }
   .navigation nav {
     flex-direction: row;
-    gap: 30px;
+    gap: clamp(8px, 3vw, 24px);
     overflow-x: auto;
     padding-bottom: 0;
   }
@@ -1575,7 +1575,10 @@
 }
 @media (max-width: 359px) {
   .navigation nav {
-    gap: 23px;
+    gap: 8px;
+  }
+  .navigation nav a {
+    font-size: 13px;
   }
   .main-column {
     padding-left: 16px;

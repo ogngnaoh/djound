@@ -542,13 +542,32 @@ type LocalState = components["schemas"]["LocalState"];
 type LocalPlan = components["schemas"]["LocalPlan"];
 type CreateBody = components["schemas"]["CreateRequestCommand"];
 type PendingCreation = { key: string; explorationId: string; body: CreateBody };
+const creationSlot = (projectId: string) => "studio-creation:" + projectId;
+// Older clients used a single slot. Its request can only be replayed for its owning project.
+async function creationFor(projectId?: string) {
+  if (projectId) {
+    const scoped = await pendingCommand<PendingCreation>(
+      creationSlot(projectId),
+    );
+    if (scoped) return scoped;
+  }
+  const legacy = await pendingCommand<PendingCreation>("studio-creation");
+  return !projectId || legacy?.explorationId === projectId ? legacy : undefined;
+}
+async function clearCreation(command: PendingCreation) {
+  await Promise.all(
+    [creationSlot(command.explorationId), "studio-creation"].map((slot) =>
+      pendingCommand(slot, null, command.key),
+    ),
+  );
+}
 /** Inspect the durable command without submitting or invoking a model. */
-export async function pendingBackendCreation(): Promise<{
+export async function pendingBackendCreation(projectId?: string): Promise<{
   projectId: string;
   text: string;
   basisId: string | null;
 } | null> {
-  const command = await pendingCommand<PendingCreation>("studio-creation");
+  const command = await creationFor(projectId);
   return command
     ? {
         projectId: command.explorationId,
@@ -563,7 +582,7 @@ export async function recoverBackendCreation(
   signal?: AbortSignal,
 ): Promise<Project> {
   check(signal);
-  const command = await pendingCommand<PendingCreation>("studio-creation");
+  const command = await creationFor(projectId);
   if (!command || command.explorationId !== projectId)
     throw new Error(
       "No pending creation belongs to this project. Reload its latest state.",
@@ -587,7 +606,7 @@ async function transmitCreation(
   );
   if (!data) {
     if (isDefiniteRejection(response.status, error?.code))
-      await pendingCommand("studio-creation", null, command.key);
+      await clearCreation(command);
     throw failure(
       error,
       "Creation response was interrupted. Retry to recover this exact request.",
@@ -605,7 +624,7 @@ async function transmitCreation(
           "Could not refresh creation status. Retry to recover the same request.",
         );
       if (result.data.state === "SUCCEEDED" || result.data.state === "FAILED") {
-        await pendingCommand("studio-creation", null, command.key);
+        await clearCreation(command);
         if (result.data.state === "FAILED")
           throw new Error(
             result.data.outcome?.detail ||
@@ -628,7 +647,7 @@ async function transmitCreation(
           cancel.error,
           "Cancellation could not be confirmed. Reload creation status.",
         );
-      await pendingCommand("studio-creation", null, command.key);
+      await clearCreation(command);
       if (cancel.data.state === "SUCCEEDED")
         return backendService().get(command.explorationId);
     }
@@ -975,7 +994,7 @@ function backendService(): StudioService {
     },
     async create(project, proposal, signal) {
       check(signal);
-      const previous = await pendingCommand<PendingCreation>("studio-creation");
+      const previous = await creationFor(project.id);
       if (
         previous &&
         (previous.explorationId !== project.id ||
@@ -1008,7 +1027,7 @@ function backendService(): StudioService {
           expectedDraftRevision: plan!.draftRevision,
         },
       };
-      await pendingCommand("studio-creation", command);
+      if (!previous) await pendingCommand(creationSlot(project.id), command);
       return transmitCreation(command, signal);
     },
   };

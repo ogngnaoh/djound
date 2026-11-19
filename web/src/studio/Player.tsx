@@ -397,10 +397,11 @@ export function Transport() {
   );
 }
 const peaksCache = new Map<string, Promise<number[]>>();
-function peaks(url: string) {
-  if (!peaksCache.has(url)) {
+export function peaks(url: string, count = 180) {
+  const key = url + "#" + count;
+  if (!peaksCache.has(key)) {
     peaksCache.set(
-      url,
+      key,
       (async () => {
         const response = await fetch(url);
         if (!response.ok) throw new Error("Waveform unavailable");
@@ -409,17 +410,19 @@ function peaks(url: string) {
         try {
           const buffer = await context.decodeAudioData(data);
           const values = buffer.getChannelData(0),
-            count = 180,
+            right = buffer.getChannelData(buffer.numberOfChannels - 1),
             block = Math.max(1, Math.floor(values.length / count));
           const result = Array.from({ length: count }, (_, i) => {
             let max = 0;
+            let energy = 0;
             for (
               let j = i * block;
               j < Math.min((i + 1) * block, values.length);
               j++
             )
-              max = Math.max(max, Math.abs(values[j]));
-            return max;
+              if (count === 180) max = Math.max(max, Math.abs(values[j]));
+              else energy += (values[j] * values[j] + right[j] * right[j]) / 2;
+            return count === 180 ? max : Math.sqrt(energy / block);
           });
           const max = Math.max(...result, 0.01);
           return result.map((v) => v / max);
@@ -429,7 +432,7 @@ function peaks(url: string) {
       })().catch(() => []),
     );
   }
-  return peaksCache.get(url)!;
+  return peaksCache.get(key)!;
 }
 export function Waveform({
   track,

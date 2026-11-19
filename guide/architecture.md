@@ -1,12 +1,16 @@
 # Architecture
 
-Djound serves the Studio and API from one local Spring Boot process. PostgreSQL stores the project, draft, confirmed notes, approved arrangements and version history. Audio lives on disk. The [OpenAPI contract](../contracts/openapi.yaml) supplies the TypeScript client types.
+Djound serves the Studio and API from one local Spring Boot process. PostgreSQL stores the project, draft, confirmed notes, approved arrangements and version history. Audio lives on disk. The arrangement client uses the OpenAPI contract. The finished mix client has its own typed revision and playback requests. [Arrangement API](../contracts/openapi.yaml) · [Finished mix API client](../web/src/mixes/api.ts)
 
 ```mermaid
 flowchart LR
     Studio[React Studio] --> API[Spring Boot]
     API --> DB[(PostgreSQL)]
     API --> Worker[Local Python worker]
+    Worker --> SCNet[SCNet passage separation]
+    SCNet --> Estimates[Cached vocals and drums]
+    Estimates --> Delta[Gain delta over decoded stereo]
+    Delta --> Media
     Worker --> Notes[Basic Pitch transcription]
     Worker --> Plan[Arrangement planner]
     Worker --> Render[Soundfont renderer and stereo mixer]
@@ -14,7 +18,17 @@ flowchart LR
     Media --> API
 ```
 
-## From recording to version
+## From a stereo mix to a kept take
+
+The worker decodes the MP3 to a fixed 44.1 kHz stereo PCM16 WAV. A selection freezes the source take and start and end sample indices. SCNet estimates the vocal and drum signals with up to two seconds of surrounding audio on each side. The preparation cache includes the source WAV digest, sample range, decoder configuration, model, preprocessing revision and inference backend.
+
+The interpreter reads the requested instrument, action and quantity against the preview that played. “Set that to +1 dB” changes the final level. “Halve that change” scales the previous move from its starting level. Copying a setting requires a named take or a listener's choice when earlier takes have different settings. A clarification leaves the audio untouched until the musician submits a new request or confirms an exact level.
+
+The worker adds the gain difference for each estimated source to the original selected samples. It blends the wet mix back to the dry baseline over 10 ms at both ends. A boost that would clip returns suggested alternatives. Applying a passage trim requires an explicit choice. PCM samples outside the passage keep their exact values.
+
+Each preview has a durable ID and full WAV hash. Keep associates the auditioned artifact with its parent and request receipt. A/B, reopen, undo and export select immutable artifacts. A newly selected passage uses the kept version as its base. [Model and weight provenance](../THIRD_PARTY_NOTICES.md#finished-mix-separation)
+
+## From a melody recording to an arrangement
 
 1. Spring validates and saves the upload. Basic Pitch proposes notes. The listener compares them with the original and confirms or corrects them.
 2. The planner starts from the chosen version. Built in text edits, named arrangements and the optional Qwen planner produce a recipe for review. Direct controls edit that same recipe. A swing combo can use the confirmed notes to suggest chords and a pulse.

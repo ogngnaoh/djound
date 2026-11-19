@@ -8,6 +8,7 @@
 !/guide/running.md
 !/guide/architecture.md
 /local-engine/evidence/
+/resume-evidence/.local/
 /local-engine/QUALIFICATION.md
 /local-engine/qualification_cases.json
 /local-engine/qualify_planner.py
@@ -72,7 +73,7 @@
 /.tools
 /.runtime
 /.cache
-/.pnpm-store
+.pnpm-store/
 node_modules/
 dist/
 target/
