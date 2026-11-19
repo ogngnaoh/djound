@@ -84,6 +84,50 @@ class ScoreRevisionTest(unittest.TestCase):
                 self.assertTrue(self.output.is_file())
                 self.output.unlink()
 
+    def test_revision_uses_chart_tempo_only_when_the_listener_allows_a_new_pace(self):
+        parent = dict(self.parent, bpm=72)
+        analysis = analyze(self.notes)
+        analysis["parentPlan"] = parent
+        original_tracks, original_length, _ = arrange(self.notes, analysis, parent)
+        cases = (
+            ("Music for my evening run.", "**BPM:** `120`. A steady 120 BPM.", "interpret", 120),
+            ("Keep the beat and play the melody more gently.", "Aim for 120 BPM.", "targeted", 72),
+            ("Music for my evening run.", "Start at 90 BPM, accelerate to 120 BPM.", None, 72),
+            ("Music for my evening run.", "A brisk 280 BPM.", None, 72),
+            ("Play this at 108 BPM for my evening run.", "Aim for 120 BPM.", None, 108),
+            ("Play this at 108 BPM.", "Keep the existing pace.", None, 108),
+        )
+        for words, chart, tempo_decision, expected in cases:
+            with self.subTest(words=words, chart=chart), patch.object(planner, "_Director") as model:
+                director = model.return_value
+                director.identity = "scripted"
+                director.brief = chart
+                director.write.return_value = "[60,64,48,88,0]"
+                pace_questions = []
+
+                def choose(question, options, *, context=None):
+                    if "interpret" in options:
+                        pace_questions.append(json.loads(context))
+                        return tempo_decision
+                    if "revoice" in options:
+                        return "phrasing"
+                    if "articulated" in options:
+                        return "articulated"
+                    self.fail(f"Unexpected choice: {question}")
+
+                director.choose.side_effect = choose
+                revision = planner._run({"analysis": analysis, "parentCaption": "Unhurried piano.",
+                                         "direction": words})
+                self.assertEqual(72, parent["bpm"])
+                self.assertEqual(expected, revision["bpm"])
+                self.assertEqual([{"listener": words}] if tempo_decision else [], pace_questions)
+                tracks, seconds, _ = arrange(self.notes, analysis, revision)
+                self.assertNotEqual(original_tracks[0]["notes"], tracks[0]["notes"])
+                if expected == 72:
+                    self.assertEqual(original_length, seconds)
+                else:
+                    self.assertLess(seconds, original_length)
+
     def test_director_reconsiders_with_the_freedom_given_in_the_request(self):
         analysis = analyze(self.notes)
         analysis["parentPlan"] = self.parent
@@ -112,6 +156,48 @@ class ScoreRevisionTest(unittest.TestCase):
                     self.assertIs(source, analysis)
                     self.assertEqual(words, requested)
                     self.assertEqual(self.parent if decision == "targeted" else None, prior)
+
+    def test_numbers_from_rejected_and_earlier_tempos_do_not_override_the_listener(self):
+        parent = dict(self.parent, bpm=72)
+        analysis = dict(analyze(self.notes), parentPlan=parent)
+        examples = (
+            ("Keep this beat and soften the melody. I don't want 120 BPM.", "current", 72),
+            ("The 120 BPM version was too fast. I like the pace here.", "current", 72),
+            ("Keep this below 120 BPM and find a slower pulse.", "different", 62),
+            ("Instead of 120 BPM please play this at 92 BPM.", 92, 92),
+        )
+        for direction, decision, expected in examples:
+            for axis in ("pulse", "phrasing"):
+                with self.subTest(direction=direction, axis=axis), patch.object(planner, "_Director") as factory:
+                    director = factory.return_value
+                    director.brief = "120 BPM. Connected phrases."
+                    director.write.return_value = "[60,64,48,88,0]"
+
+                    def choose(question, options, *, context=None):
+                        if "different" in options:
+                            self.assertEqual({"listener": direction}, json.loads(context))
+                            self.assertIn(decision, options)
+                            return decision
+                        if "revoice" in options:
+                            return axis
+                        if "articulated" in options:
+                            return "articulated"
+                        if all(isinstance(option, int) for option in options):
+                            self.assertNotIn(120, options)
+                            return min(options, key=lambda bpm: abs(bpm - expected))
+                        self.fail(f"Unexpected choice: {question}")
+
+                    director.choose.side_effect = choose
+                    child = planner._run({"analysis": analysis, "parentCaption": "Piano at 72 BPM.",
+                                          "direction": direction})
+                    if decision == "different" and axis == "phrasing":
+                        # A chart that simply repeats the upper bound supplies no trustworthy destination.
+                        self.assertEqual(72, child["bpm"])
+                    elif decision == "different":
+                        self.assertLess(child["bpm"], parent["bpm"])
+                    else:
+                        self.assertEqual(expected, child["bpm"])
+                    self.assertEqual(72, parent["bpm"])
 
 
 if __name__ == "__main__":

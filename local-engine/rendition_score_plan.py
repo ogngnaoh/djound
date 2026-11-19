@@ -375,23 +375,58 @@ def _changes(director, direction):
     return {axis}
 
 
-def _named_tempo(direction):
-    named = re.search(r"\b(\d{2,3}(?:\.\d+)?)\s*(?:bpm|beats per minute)\b|\bbpm\s*[:=]?\s*(\d{2,3}(?:\.\d+)?)\b", direction, re.I)
-    if named:
-        value = float(named.group(1) or named.group(2))
-        if not _bounded_number(value, 40, 240):
-            raise ValueError("Choose a tempo between 40 and 240 BPM.")
-        return value
+TEMPO_MARK = re.compile(r"\b(\d{2,3}(?:\.\d+)?)\s*(?:bpm|beats per minute)\b|\bbpm\s*[:=]?\s*(\d{2,3}(?:\.\d+)?)\b", re.I)
+
+
+def _tempo_marks(text):
+    marked = text.replace("**", "").replace("`", "")
+    return {float(a or b) for a, b in TEMPO_MARK.findall(marked)}
+
+
+def _single_tempo(text):
+    # A rehearsal cue may mention both the previous tempo and a new destination.
+    values = _tempo_marks(text)
+    if len(values) == 1:
+        value = values.pop()
+        if _bounded_number(value, 40, 240):
+            return value
     return None
 
 
-def _tempo(director, analysis, old, direction):
-    named = _named_tempo(direction)
-    if named is not None:
-        return named
+def _listener_tempo(director, direction):
+    """Return the destination (or 'current') and the values merely mentioned."""
+    marks = _tempo_marks(direction)
+    if not marks:
+        return None, marks
+    marked = TEMPO_MARK.sub("@", direction.replace("**", "").replace("`", "")).strip()
+    direct = re.fullmatch(
+        r"(?:please\s+)?(?:at\s+|play (?:this |it )?at\s+|(?:keep everything and )?make (?:it|this)\s+|"
+        r"set (?:the )?tempo to\s+)?@(?:\s+for [\w -]+|,\s*[2-6]/4[^.!?]*)?[.!]?", marked, re.I)
+    if len(marks) == 1 and direct:
+        target = next(iter(marks))
+    else:
+        options = {"current": "keep the current pace; the number describes a reference or a rejected speed",
+                   "different": "choose a new pace; the numbers are references, bounds or amounts, not target BPMs"}
+        options.update({n: f"{n:g} BPM, the actual requested playing tempo" for n in sorted(marks)})
+        target = director.choose("Which tempo does the listener actually ask the musicians to play? "
+                                 "Distinguish a destination from a rejected tempo or a mention of an earlier take.",
+                                 options, context=json.dumps({"listener": direction}, ensure_ascii=False))
+        if target in ("current", "different"):
+            return ("current" if target == "current" else None), marks
+    if not _bounded_number(target, 40, 240):
+        raise ValueError("Choose a tempo between 40 and 240 BPM.")
+    return target, marks - {target}
+
+
+def _tempo(director, analysis, old, instruction):
+    requested, references = instruction
     reference = old.get("bpm") if old else analysis.get("bpm")
-    named = _named_tempo(director.brief)
-    if named is not None:
+    if requested == "current" and _bounded_number(reference, 40, 240):
+        return reference
+    if isinstance(requested, (int, float)):
+        return requested
+    named = _single_tempo(director.brief)
+    if named is not None and named not in references:
         return named
     tempos = {56: "very slow and spacious", 72: "gentle, unhurried", 88: "relaxed walking pace",
               104: "moderate", 116: "lilting medium pulse", 132: "brisk", 154: "fast", 180: "driving and fast"}
@@ -399,8 +434,10 @@ def _tempo(director, analysis, old, direction):
         tempos[round(max(40, reference * .83))] = "a little slower than the current pulse"
         tempos[round(min(240, reference * 1.18))] = "a little quicker than the current pulse"
         tempos[round(reference)] = "retain the current pulse"
-    return director.choose("Choose a quarter-note tempo (BPM) for the desired performance.",
-                           {n: f"{n} BPM, {m}" for n, m in sorted(tempos.items())})
+    options = {n: f"{n} BPM, {m}" for n, m in sorted(tempos.items()) if n not in references}
+    if not options:
+        raise ValueError("Which tempo would you like the musicians to play?")
+    return director.choose("Choose a quarter-note tempo (BPM) for the desired performance.", options)
 
 
 def _meter(text):
@@ -446,7 +483,7 @@ def _lead_touch(director, direction, phrasing, old):
     return {"velocity": marks[:3], "lengthPercent": marks[3], "endOffsetMs": marks[4]}
 
 
-def _arrange(analysis, direction, old, director):
+def _arrange(analysis, direction, old, director, *, tempo_instruction=None):
     changes = _changes(director, direction) if old else set(GROUPS)
     plan = copy.deepcopy(old) if old else {"version": 1}
     plan.setdefault("realization", "score")
@@ -459,7 +496,7 @@ def _arrange(analysis, direction, old, director):
             "Ignore production details added by the arranger.",
             {"score": "direct instrumental performance", "produced": "requested audio treatment or novel sound design"})
     if "pulse" in changes:
-        plan["bpm"] = _tempo(director, analysis, old, direction)
+        plan["bpm"] = _tempo(director, analysis, old, tempo_instruction or _listener_tempo(director, direction))
     if "groove" in changes:
         plan["meter"] = _meter(direction) or _meter(director.brief) or director.choose("How many beats belong in one measure?", METERS)
         plan["subdivision"] = _subdivision(direction) or _subdivision(director.brief) or director.choose(
@@ -571,11 +608,11 @@ class _Director:
             "Respect explicitly named players and preserve unchanged choices in a revision. Write under 85 words.", 170)
         self.context += "\nArranger's rehearsal cue: " + self.brief
 
-    def _answer(self, question, suffix, limit, sampler):
+    def _answer(self, question, suffix, limit, sampler, context=None):
         system = ("You arrange a recognizable theme for real instrumental players. Follow the listener's latest direction. "
                   "The source facts and parent arrangement are context. Preserve choices not targeted by a revision. " + suffix)
         messages = [{"role": "system", "content": system},
-                    {"role": "user", "content": self.context + "\n" + question}]
+                    {"role": "user", "content": (self.context if context is None else context) + "\n" + question}]
         prompt = self.tokenizer.apply_chat_template(messages, tokenize=False, add_generation_prompt=True, enable_thinking=False)
         return self.generate(self.model, self.tokenizer, prompt=prompt, max_tokens=limit, sampler=sampler,
                              prefill_step_size=128, verbose=False).strip()
@@ -583,7 +620,7 @@ class _Director:
     def write(self, question, limit):
         return self._answer(question, "Answer briefly.", limit, self.greedy)
 
-    def choose(self, question, options):
+    def choose(self, question, options, *, context=None):
         keys = list(options)
         if len(keys) == 1:
             return keys[0]
@@ -616,10 +653,20 @@ class _Director:
             depth += 1
             return selected
         menu = "\n".join(f"{word}: {options[key]}" for word, key in labels.items())
-        answer = self._answer(question + "\n" + menu, "Reply with the exact matching option name.", max_tokens, constrained).casefold()
+        answer = self._answer(question + "\n" + menu, "Reply with the exact matching option name.",
+                              max_tokens, constrained, context).casefold()
         if answer not in labels:
             raise RuntimeError("The language planner could not resolve a musical choice.")
         return labels[answer]
+
+
+def _interpret_freely(director, direction):
+    return director.choose(
+        f"Read only this request: «{direction}». Is it a brief for a whole interpretation or change of pace, "
+        "or does the listener specify what to keep or which individual part or setting to change?",
+        {"interpret": "a listening situation, overall sound, genre or change of pace with other choices left to the performers",
+         "targeted": "a specific instrument, part or passage edit or an instruction to preserve the beat or backing"},
+        context=json.dumps({"listener": direction}, ensure_ascii=False)) == "interpret"
 
 
 def _run(request):
@@ -645,12 +692,7 @@ def _run(request):
             "Imagine the performance the listener wants, using the recording's melody. "
             "Translate their intended listening experience into concrete tempo, texture, "
             "energy and instrumental parts. Write a chart that can deliver that experience.")})
-        scope = director.choose(
-            f"Read only this request: «{direction}». Is it a brief for a whole interpretation, "
-            "or does the listener specify what to keep or which individual part or setting to change?",
-            {"interpret": "a listening situation, overall sound or genre with the musical choices left to the performers",
-             "targeted": "a specific instrument, part, tempo, or edit relative to something the listener wants to keep"})
-        if scope == "interpret":
+        if _interpret_freely(director, direction):
             old = None
         else:
             director.context += "\nSelected take for the targeted edit: " + json.dumps(
@@ -661,7 +703,18 @@ def _run(request):
                 return None
     else:
         director = _Director(context)
-    plan = _arrange(analysis, direction, old, director)
+    tempo_instruction = _listener_tempo(director, direction)
+    plan = _arrange(analysis, direction, old, director, tempo_instruction=tempo_instruction)
+    if old and plan.get("bpm") == old["bpm"]:
+        requested, references = tempo_instruction
+        proposed = _single_tempo(director.brief)
+        if isinstance(requested, (int, float)):
+            plan["bpm"] = requested
+        elif requested != "current" and proposed is not None and proposed != old["bpm"] and proposed not in references:
+            # A useful change of articulation can hide a discarded tempo change. The
+            # listener's words decide whether the chart may move the whole band.
+            if _interpret_freely(director, direction):
+                plan["bpm"] = proposed
     plan["conductorCue"] = " ".join(director.brief.split())[:1400]
     plan["director"] = director.identity
     return plan
