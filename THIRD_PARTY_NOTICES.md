@@ -27,6 +27,13 @@ These model weights and rendering resources are not committed to the source repo
 | TinySoundFont | Commit `853a0a171759f1ddba0de1442133a75912bbeffa`, [MIT](https://github.com/schellingb/TinySoundFont/blob/853a0a171759f1ddba0de1442133a75912bbeffa/LICENSE). Copyright 2017–2023 Bernhard Schelling, based on SFZero by Steve Folta (2012). Setup retains `TinySoundFont-LICENSE`. |
 | FluidR3 GM 3.1 | [Sound-bank release](https://github.com/pianobooster/fluid-soundfont/releases/tag/v3.1), [MIT copyright and license](https://github.com/pianobooster/fluid-soundfont/blob/main/COPYING). Copyright 2000–2002, 2008 Frank Wen. Setup retains the hash-verified `FluidR3-COPYING`. |
 
+## Song rendition engines
+
+ACE-Step 1.5 is developed by the ACE-Step authors. The optional Python HTTP service uses the MIT-licensed reference implementation, copyright (c) 2026 ACEStep. The authors identify their published checkpoint bundle as MIT. The bundle includes Qwen3-Embedding-0.6B, whose upstream model card identifies Apache-2.0. [ACE-Step source license](https://github.com/ace-step/ACE-Step-1.5/blob/ca1e85fe9430179831e6bc6be790c332190a3866/LICENSE) · [ACE-Step checkpoint card](https://huggingface.co/ACE-Step/Ace-Step1.5/blob/19671f406d603126926c1b7e2adc169acbcade22/README.md) · [Qwen embedding model](https://huggingface.co/Qwen/Qwen3-Embedding-0.6B)
+
+The native Metal backend builds the ACE-Step C++ implementation, copyright (c) 2023–2026 The acestep.cpp authors, and its GGML submodule, copyright (c) 2023–2026 The ggml authors. Both retain their MIT license files in the installed source trees. The three GGUF weight files come from Serveurperso’s MIT-labeled conversion. Djound downloads the Q4_K_M Turbo diffusion model, Q8_0 text encoder and BF16 audio codec and verifies each SHA-256 digest. [Native source license](https://github.com/ServeurpersoCom/acestep.cpp/blob/973517be024ff8b6bbd50e0adc9e308ab2ed71b3/LICENSE) · [GGML license](https://github.com/ServeurpersoCom/ggml/blob/ef4555b7aede4467a5de803b103615e0a5f30dd8/LICENSE) · [Conversion snapshot](https://huggingface.co/Serveurperso/ACE-Step-1.5-GGUF/tree/666ac70204440867d8c01ba4b119cc79c95b370a)
+
+
 ## Other software dependencies
 
 JavaScript, Java and Python dependencies retain their upstream licenses. Versions are recorded in the [web manifest](web/package.json), [Java manifest](server/pom.xml) and [engine requirements](local-engine/requirements.lock). The featured film was rendered with Remotion 4.0.541. [Remotion license](https://github.com/remotion-dev/remotion/blob/v4.0.541/LICENSE.md)

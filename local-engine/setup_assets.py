@@ -29,10 +29,14 @@ def main():
     parser.add_argument('--reuse-cache', type=Path, help='Optional existing verified asset directory; never required at runtime')
     parser.add_argument('--audio-only', action='store_true', help='Skip the optional freeform planner weights')
     parser.add_argument('--finished-mix', action='store_true', help='Install just the finished mix separator')
+    parser.add_argument('--planner-only', action='store_true', help='Install only the language planner weights')
     args = parser.parse_args()
     manifest = json.loads((HERE / 'assets.json').read_text())
     mix_assets = json.loads((HERE / 'finished-mix-assets.json').read_text())['assets']
-    assets = mix_assets if args.finished_mix else manifest['assets'] + ([] if args.audio_only else mix_assets)
+    if args.planner_only:
+        assets = [item for item in manifest['assets'] if is_planner_asset(manifest, item)]
+    else:
+        assets = mix_assets if args.finished_mix else manifest['assets'] + ([] if args.audio_only else mix_assets)
     HOME.mkdir(parents=True, exist_ok=True)
     records = []
     for item in assets:
@@ -59,7 +63,7 @@ def main():
                 partial.rename(target)
         records.append({'path': item['path'], 'sha256': digest(target), 'bytes': target.stat().st_size})
         print(f'Verified {item["path"]}', flush=True)
-    if args.finished_mix:
+    if args.finished_mix or args.planner_only:
         return
     wheel = HOME / 'downloads/basic_pitch-0.4.0-py2.py3-none-any.whl'
     destination = HOME / 'basic-pitch'
