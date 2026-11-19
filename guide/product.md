@@ -20,7 +20,7 @@ Every project starts with a recording. Text directs a performance of that music.
 
 Suggested styles help someone start listening. A description like “swinging piano trio” names the group. A broader request like “make it jazz” gives Djound room to choose one. A mood, an unusual group of instruments or a direction about a single phrase can also be enough to act on.
 
-If a take already has a passage the listener changed, another whole-song request can have two meanings. “Keep the ending exactly” carries its recorded audio forward. “Change the ending too” lets the new direction reach that passage. If a question comes up about that passage, the listener can tap **Keep it as recorded** or **Apply my change there too**. The answer belongs to the recording and request that prompted it, even if the listener has since played another take.
+After a listener edits an ending, “give the melody to a cello” applies to the whole performance, including that ending. The new player follows the phrasing, groove and fade the listener liked. A rest can still be a rest. “Leave the ending exactly as it is” carries its recorded audio forward. If two instructions conflict about a saved passage, the studio can ask which one to follow. The answer belongs to the recording and request that prompted it, even if the listener has since played another take.
 
 The listener always has a take to play while another is being made. A whole interpretation can find a new tempo or leave space for an ending. Playback follows the corresponding phrase when comparing scored takes. If a request names a chorus the studio cannot locate, the listener can select the passage themselves.
 

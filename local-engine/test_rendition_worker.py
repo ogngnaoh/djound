@@ -9,30 +9,57 @@ import rendition_worker as worker
 
 
 class RenditionPlannerTest(unittest.TestCase):
-    def test_whole_revision_of_an_edited_performance_has_a_passage_choice(self):
-        base = {"prompt": "Give the tune to cello.", "scoredAncestor": {"frames": 44100}}
-        plan = {"scope": "whole", "caption": "Cello melody", "label": "Cello"}
+    def test_whole_musical_direction_develops_the_selected_take_and_its_edited_passage(self):
+        base = {"scoredAncestor": {"frames": 44100, "editedFrames": [[33075, 44100]]}}
+        plan = {"scope": "whole", "caption": "A lyrical instrumental", "label": "Another take"}
         with patch.object(worker, "infer_plan", return_value=(plan, "local model")) as interpret:
-            question = worker.plan_take(base, 1)
-            self.assertEqual(("clarify", "retained_passage"), (question["state"], question["clarificationKind"]))
-            self.assertNotIn("previously_edited_passages", interpret.call_args.args[0])
+            for prompt in ("Keep that pulse and give the melody to a cello.",
+                           "Bring back the wistful feeling.", "Let the oboe carry the tune."):
+                result = worker.plan_take({**base, "prompt": prompt}, 1)
+                self.assertEqual(("planned", "develop", "parent", None),
+                                 (result["state"], result["passagePolicy"], result["melodyReference"],
+                                  result["appliedStartSeconds"]))
+                self.assertNotIn("previously_edited_passages", interpret.call_args.args[0])
+            self.assertEqual("develop", worker.plan_take({**base, "prompt": "Solo piano"}, 1)["passagePolicy"])
+            prompt = "Play the tune on flute."
             for suffix, policy in worker.PASSAGE_CHOICES.items():
-                result = worker.plan_take({**base, "prompt": base["prompt"] + " " + suffix}, 1)
+                result = worker.plan_take({**base, "prompt": prompt + " " + suffix}, 1)
                 self.assertEqual(policy, result["passagePolicy"])
                 self.assertIsNone(result["appliedStartSeconds"])
             for choice in ("keep", "develop"):
                 previous_calls = interpret.call_count
-                answered = worker.plan_take({**base, "passagePolicy": choice}, 1)
+                answered = worker.plan_take({**base, "prompt": prompt, "passagePolicy": choice}, 1)
                 self.assertEqual(choice, answered["passagePolicy"])
-                self.assertEqual(base["prompt"], answered["caption"])
+                self.assertEqual(prompt, answered["caption"])
                 self.assertEqual(previous_calls, interpret.call_count)
-            selected = worker.plan_take({**base, "startSeconds": .1, "endSeconds": .5}, 1)
+            selected = worker.plan_take({**base, "prompt": prompt, "startSeconds": .1, "endSeconds": .5}, 1)
             self.assertEqual("planned", selected["state"])
             self.assertNotIn("passagePolicy", selected)
-        natural = "Give the tune to cello throughout, including the ending."
-        with patch.object(worker, "infer_plan", return_value=({**plan, "previousPassages": "develop"}, "model")) as interpret:
-            self.assertEqual("develop", worker.plan_take({**base, "prompt": natural}, 1)["passagePolicy"])
-            self.assertTrue(interpret.call_args.args[0]["previously_edited_passages"])
+
+    def test_spoken_passage_exceptions_and_conflicting_directions(self):
+        base = {"parentCaption": "A rhythmic trio.", "scoredAncestor": {"frames": 44100, "editedFrames": [[33075, 44100]]}}
+        plan = {"scope": "whole", "caption": "A new lead.", "label": "New lead", "reference": "parent"}
+        for prompt, policy in (("Change the lead but leave the ending alone.", "keep"),
+                               ("Use the new lead throughout. Keep the ending's soft feel.", "develop"),
+                               ("Start over from scratch with a different rhythmic interpretation.", "fresh")):
+            with self.subTest(prompt=prompt), patch.object(worker, "infer_plan", return_value=(
+                    {**plan, "previousPassages": policy}, "model")) as interpret:
+                self.assertEqual(policy, worker.plan_take({**base, "prompt": prompt}, 1)["passagePolicy"])
+                self.assertTrue(interpret.call_args.args[0]["previously_edited_passages"])
+        conflict = "Change the lead in the edited ending too, but keep the ending exactly as recorded."
+        for scope in ("whole", "clarify"):
+            with self.subTest(scope=scope), patch.object(worker, "infer_plan", return_value=(
+                    {**plan, "scope": scope, "previousPassages": "clarify", "reference": "clarify"}, "model")):
+                decision = worker.plan_take({**base, "prompt": conflict}, 1)
+                self.assertEqual(("clarify", "retained_passage"), (decision["state"], decision["clarificationKind"]))
+                self.assertIn("ending you edited", decision["error"])
+        with patch.object(worker, "infer_plan", side_effect=AssertionError):
+            for answer in ("keep", "develop"):
+                decision = worker.plan_take({**base, "prompt": conflict, "passagePolicy": answer}, 1)
+                self.assertEqual(("planned", answer), (decision["state"], decision["passagePolicy"]))
+        with patch.object(worker, "infer_plan", return_value=({**plan, "previousPassages": "keep"}, "model")):
+            decision = worker.plan_take({**base, "prompt": "Change the piano but leave the opening alone."}, 1)
+            self.assertEqual("clarify", decision["state"])
 
     def test_only_complete_musical_plans_skip_the_scope_fallback(self):
         valid = {"scope": "whole", "caption": "A cello carries the tune.", "label": "Cello"}

@@ -29,7 +29,7 @@ ARRANGEMENT_DIRECTION = (
 SYSTEM = """You direct edits to a real recording for a casual music listener. Every result is instrumental. Return one JSON object and no other text:
 {"scope":"whole","caption":"...","label":"..."}
 
-scope is whole, opening, ending, selection, or clarify. For broad changes to the style, mood or instrumentation use whole. For requests to change only the beginning or end use opening or ending. If a time range is selected, use selection. A selection limits the edit to that range.
+scope is whole, opening, ending, selection, or clarify. For broad changes to the style, mood or instrumentation use whole. Whole includes a new direction for the entire performance with an exception such as "leave the ending alone". For requests to change only the beginning or end use opening or ending. If a time range is selected, use selection. A selection limits the edit to that range.
 caption describes the new music the listener wants to hear, in English. Use the listener's exact instruments, genres, combinations and sound descriptions, including unusual ones. A new direction overrides conflicting choices in the current take. The musical theme comes from the source recording. The arrangement comes from the listener's direction. The label is a short name for the result.
 Treat a musical request phrased as a question as a direction to play it. Use clarify for a question with no musical edit, a request for vocals, or a specific passage whose location is unknown. The uploaded recording can supply its melody at the same song time while the selected take supplies the arrangement. Use clarify when the user refers to a different saved take or requests a literal recording splice. For clarify, caption is the question or instruction the listener needs; label is empty.
 Describe the requested change to the selected take. Keep its existing pulse or players when the listener asks to keep them. Mention each explicitly requested new instrument in the caption.
@@ -63,12 +63,13 @@ B: Perform a new accompaniment. Choose this when the request also changes its st
 "Follow the original tune and turn the trio into a synth-pop track" = B.
 Answer with one letter."""
 
-PASSAGE_QUESTION = """The listener has already edited a passage in this take and now requests another change.
-What does the listener explicitly want to do with the earlier passage?
-A: Leave the exact recorded passage alone and change the surrounding performance.
-B: Apply this new direction inside the previously edited passage as well, keeping its musical character.
-C: No clear preference about the previously edited passage. A request that names only an instrument or style is C.
-D: Start a fresh interpretation of the entire selected recording, free to change timing, arrangement and passages.
+PASSAGE_QUESTION = """A listener is revising a performance that includes an earlier passage edit. How should the new direction apply to that passage?
+A: The listener makes an exception for the passage: keep its recorded audio exactly, leave it alone or change only the rest.
+B: Develop the selected performance throughout, including the edited passage, keeping its musical character. This is the default for instrument, mood and style directions. Keeping the passage's feel, beat or softness is compatible with changing its sound.
+C: The listener asks for help choosing between keeping and changing the same passage, or explicitly requires both incompatible outcomes for that passage.
+D: The listener explicitly asks for a fresh interpretation from scratch, free to replace the selected performance and its edits.
+"Keep that pulse and change the lead" = B. "Use a different lead but leave the ending alone" = A.
+"Change the last phrase too, keeping its gentle feel" = B. "I can't decide whether to change my edited passage too" = C.
 Answer with one letter."""
 
 
@@ -132,8 +133,8 @@ def infer_plan(context):
             plan["reference"] = {"A": "original", "B": "parent", "C": "clarify"}[choice]
             if choice == "A":
                 plan["keep_ensemble"] = choose(ENSEMBLE_QUESTION, context["listener_request"], "AB") == "A"
-        if context.get("previously_edited_passages") and plan.get("scope") == "whole":
-            plan["previousPassages"] = {"A": "keep", "B": "develop", "C": None, "D": "fresh"}[
+        if context.get("previously_edited_passages") and plan.get("scope") in ("whole", "clarify"):
+            plan["previousPassages"] = {"A": "keep", "B": "develop", "C": "clarify", "D": "fresh"}[
                 choose(PASSAGE_QUESTION, context["listener_request"], "ABCD")]
         return plan, metadata["model"] + "@" + metadata["revision"]
     except (TypeError, ValueError) as error:
@@ -176,7 +177,8 @@ ORIGINAL_REFERENCE = re.compile(
     r"(?:(?:closer to|follow|restore|bring back|go back to) (?:the )?original (?:melody|tune|phrasing|recording)|"
     r"bring (?:the )?original (?:melody|tune|phrasing) back)(?: here| in this passage)?", re.I)
 RECORDING_MENTION = re.compile(r"\b(?:original|upload(?:ed)?|my (?:recording|voice memo)|recording I (?:brought|sent))\b", re.I)
-KEEP_PASSAGE = re.compile(r"\b(?:keep|preserve|retain|leave)\s+(?:the\s+)?(?:opening|intro|beginning|ending|outro)\b", re.I)
+KEEP_PASSAGE = re.compile(r"\b(?:keep|preserve|retain|leave)\s+(?:(?:the|that|this|my)\s+)?(?:edited\s+)?"
+                          r"(opening|intro|beginning|start|ending|outro|end)\b", re.I)
 TIMED_EDGE = re.compile(r"\b(first|last|final)\s+(\d+(?:\.\d+)?)\s*(?:seconds?|secs?|s)\b", re.I)
 
 PASSAGE_CHOICES = {
@@ -185,9 +187,10 @@ PASSAGE_CHOICES = {
     "make a fresh interpretation of the whole take": "fresh",
 }
 PASSAGE_MENTION = re.compile(
-    r"\b(?:ending|ending's|outro|opening|intro|beginning|passages?|sections?|earlier|previous(?:ly)?|"
+    r"\b(?:ending|end|outro|opening|intro|beginning|start|passages?|sections?|earlier|previous(?:ly)?|"
     r"last edit|edited|that (?:part|bit)|it too|throughout|everywhere|from (?:start|beginning) to (?:finish|end)|"
-    r"(?:whole|entire) (?:take|song|track|recording)|fresh interpretation|start (?:over|afresh)|from scratch)\b", re.I)
+    r"(?:whole|entire) (?:take|song|track|recording)|fresh (?:interpretation|arrangement|rendition|take|version)|"
+    r"start (?:over|afresh)|from scratch)\b", re.I)
 
 
 def passage_direction(prompt):
@@ -197,6 +200,19 @@ def passage_direction(prompt):
         if phrase:
             return (prompt[:phrase.start()].rstrip(" .!?,;") or prompt), policy
     return prompt, None
+
+
+def passage_question(ancestor):
+    spans = ancestor.get("editedFrames", [])
+    part = "the passages you edited" if len(spans) > 1 else "the passage you edited"
+    if len(spans) == 1:
+        first, last = spans[0]
+        if last == ancestor["frames"]:
+            part = "the ending you edited"
+        elif first == 0:
+            part = "the opening you edited"
+    return {"state": "clarify", "clarificationKind": "retained_passage",
+            "error": f"What should happen to {part} in the new take?"}
 
 
 def plan_take(request, duration):
@@ -268,7 +284,8 @@ def plan_take(request, duration):
             passage_policy = passage_policy or inferred_policy
             choice = plan.pop("reference", None)
             keep_ensemble = choice == "original" and plan.pop("keep_ensemble", False) is True
-            if mentions_recording and plan.get("scope") != "clarify":
+            unresolved_passage = has_passages and plan.get("scope") == "whole" and passage_policy == "clarify"
+            if mentions_recording and plan.get("scope") != "clarify" and not unresolved_passage:
                 if choice in ("parent", "original"):
                     reference = choice
                 else:
@@ -278,6 +295,8 @@ def plan_take(request, duration):
     scope, caption, label = plan["scope"], plan["caption"], plan["label"]
     if not isinstance(caption, str) or not 1 <= len(caption.strip()) <= 2200:
         raise RuntimeError("The language planner did not describe a usable edit.")
+    if has_passages and not selection and scope in ("whole", "clarify") and passage_policy == "clarify":
+        return passage_question(request["scoredAncestor"])
     if scope == "clarify":
         return {"state": "clarify", "error": caption.strip()[:400]}
     if scope not in ("whole", "opening", "ending", "selection") or not isinstance(label, str) or not label.strip():
@@ -291,9 +310,14 @@ def plan_take(request, duration):
     if scope == "selection" and not selection:
         return {"state": "clarify", "error": "Select the passage you mean and send the request again."}
     protected = KEEP_PASSAGE.search(prompt)
-    if protected and not selection and not (has_passages and passage_policy == "keep"):
-        protected_scope = "ending" if protected.group().lower().endswith(("ending", "outro")) else "opening"
-        if scope in ("whole", protected_scope):
+    settled = has_passages and scope == "whole" and passage_policy in ("keep", "develop", "fresh")
+    if protected and not selection:
+        protected_scope = "ending" if protected[1].lower() in ("ending", "outro", "end") else "opening"
+        if settled and passage_policy == "keep" and answer is None:
+            ancestor = request["scoredAncestor"]
+            edge = ancestor["frames"] if protected_scope == "ending" else 0
+            settled = any(edge in span for span in ancestor.get("editedFrames", []))
+        if scope in ("whole", protected_scope) and not settled:
             return {"state": "clarify", "error": "Select the passage you want to change so I can keep the part you liked."}
     if selection:
         start, end = selection
@@ -304,17 +328,9 @@ def plan_take(request, duration):
         start, end = None, None
     retained = {}
     if has_passages and start is None:
+        passage_policy = passage_policy or "develop"
         if passage_policy not in ("keep", "develop", "fresh"):
-            spans = request["scoredAncestor"].get("editedFrames", [])
-            part = "the passage you edited" if len(spans) <= 1 else "the passages you edited"
-            if len(spans) == 1:
-                first, last = spans[0]
-                if last == request["scoredAncestor"]["frames"]:
-                    part = "the ending you edited"
-                elif first == 0:
-                    part = "the opening you edited"
-            return {"state": "clarify", "clarificationKind": "retained_passage",
-                    "error": f"What should happen to {part} in the new take?"}
+            raise RuntimeError("The language planner did not resolve how to revise the saved passage.")
         ancestor = request["scoredAncestor"]
         if passage_policy == "keep" and ancestor.get("editedFrames") == [[0, ancestor.get("frames")]]:
             return {"state": "clarify", "error": "The saved passages cover the whole take. To change it, ask to change the edited passage too or choose an earlier take."}
