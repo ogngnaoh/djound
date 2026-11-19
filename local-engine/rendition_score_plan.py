@@ -349,7 +349,7 @@ def _roles(director, cast, meter, direction):
     return roles
 
 
-def _changes(director):
+def _changes(director, direction):
     axes = {"revoice": "change only the instrument that plays the existing lead melody",
             "players": "instruments / lineup only", "pulse": "speed only", "groove": "meter / rhythm or groove only",
             "phrasing": "lead articulation or timing only", "harmony": "chords or harmonic color only",
@@ -363,7 +363,12 @@ def _changes(director):
     if axis == "all":
         return set(GROUPS)
     if axis == "feel":
-        return {"pulse", "phrasing", "dynamics"}
+        scope = director.choose(
+            f"For this mood edit, which part may change? Listener's words: «{direction}». "
+            "If they like the backing or want the beat to stay, have the melody player carry the change.",
+            {"lead": "rephrase the tune over the existing performance",
+             "ensemble": "reshape the pace and intensity of the whole ensemble"})
+        return {"phrasing"} if scope == "lead" else {"pulse", "phrasing", "dynamics"}
     if axis == "several":
         return {group for group in GROUPS if director.choose(f"Did the listener request a change to {axes[group]}?",
                                                               {False: "keep the current decision", True: "change it"})}
@@ -415,8 +420,34 @@ def _subdivision(text):
     return found[0] if len(found) == 1 else None
 
 
+def _lead_touch(director, direction, phrasing, old):
+    """Write dynamics and articulation the melody player can perform within each source phrase."""
+    prior = (old or {}).get("leadTouch")
+    notation = director.write(
+        f"Write the lead player's expression for «{direction}» with {phrasing} phrasing. "
+        f"Previous expression: {prior or 'regular accents and note lengths'}. "
+        "Return just a JSON array of five integers: MIDI velocity of the opening note, the middle, "
+        "and the last note of a phrase (36 to 112, 80 is moderate); note length as a percentage "
+        "(55 to 115, 100 retains the written length); and how many milliseconds the last attack leans "
+        "ahead of or behind the pulse (-60 to 60, 0 is on time). Choose values the listener could hear. "
+        "The backing sets its own pace.", 64)
+    try:
+        marks = json.loads(notation.strip().removeprefix("```json").removeprefix("```").removesuffix("```").strip())
+    except ValueError:
+        marks = None
+    bounds = ((36, 112), (36, 112), (36, 112), (55, 115), (-60, 60))
+    if not (isinstance(marks, list) and len(marks) == len(bounds)
+            and all(type(n) is int and lo <= n <= hi for n, (lo, hi) in zip(marks, bounds))):
+        # Compact models can give performance prose. Ask for playable marks using constrained decoding.
+        levels = {80: "mezzo forte", 48: "piano", 64: "mezzo piano", 100: "forte"}
+        marks = [director.choose(f"Choose the lead note's dynamic at the {part} of the phrase.", levels)
+                 for part in ("opening", "middle", "end")]
+        marks.extend([100, 0])
+    return {"velocity": marks[:3], "lengthPercent": marks[3], "endOffsetMs": marks[4]}
+
+
 def _arrange(analysis, direction, old, director):
-    changes = _changes(director) if old else set(GROUPS)
+    changes = _changes(director, direction) if old else set(GROUPS)
     plan = copy.deepcopy(old) if old else {"version": 1}
     plan.setdefault("realization", "score")
     plan["themeAnchors"] = _anchors(analysis)
@@ -435,6 +466,7 @@ def _arrange(analysis, direction, old, director):
             "How should the players subdivide the pulse?", SUBDIVISIONS)
     if "phrasing" in changes:
         plan["phrasing"] = director.choose("How should the lead rephrase the source motif?", PHRASINGS)
+        plan["leadTouch"] = _lead_touch(director, direction, plan["phrasing"], old)
     if "harmony" in changes:
         plan["harmony"] = director.choose("How should the accompanists voice the source harmonies?", HARMONIES)
     if "dynamics" in changes:
@@ -456,6 +488,14 @@ def _arrange(analysis, direction, old, director):
         names = _catalog()[0]
         plan["leadProgram"] = director.choose("Which performer is the new melody player?", {p: names[p] for p in candidates})
         return plan
+    if old and changes == {"phrasing"} and "backingTiming" not in plan:
+        responsive = old.get("phraseInteraction", "steady") != "steady"
+        if any(r["kind"] == "counterline" or (responsive and r.get("followPhrases", True)) for r in old["roles"]):
+            # These players listened to the previous lead to place notes in its rests.
+            # Keep the cue they heard across further revisions of the lead.
+            plan["backingTiming"] = {key: copy.deepcopy(old[key]) for key in ("phrasing", "leadTouch") if key in old}
+    elif changes.intersection({"players", "groove", "interaction"}) or ("phrasing" in changes and len(changes) > 1):
+        plan.pop("backingTiming", None)
     if "players" in changes:
         plan["leadProgram"], cast = _score_players(director, direction, old)
     elif "groove" in changes:
@@ -592,6 +632,8 @@ def _run(request):
         context["currentScore"] = {k: old[k] for k in ("bpm", "meter", "subdivision", "phrasing", "harmony",
                                                         "phraseDynamics", "introBars", "endingBars")}
         context["currentScore"]["phraseInteraction"] = old.get("phraseInteraction", "steady")
+        if "leadTouch" in old:
+            context["currentScore"]["leadTouch"] = old["leadTouch"]
         names = _catalog()[0]
         context["currentScore"]["players"] = [names[old["leadProgram"]]] + [
             f"{r['kind']}: {names[r['program']] if r['program'] is not None else 'drum kit'}" for r in old["roles"]]

@@ -135,7 +135,19 @@ def _lead_track(notes, timeline, plan):
     shift = 12 * round((center - center_pitch) / 12) if center is not None else 0
     shift = max(-24, min(24, shift))
     track = {"program": plan["leadProgram"], "level_db": -19., "notes": []}
+    touch = plan.get("leadTouch")
+    if touch:
+        # Each curve runs from the first played attack to the last. A breath at
+        # the end of the source phrase must not hide the written closing dynamic.
+        onsets = [n[0] for n in melody]
+        edges = [bisect_left(onsets, boundary) for boundary in timeline.seconds[:-1]] + [len(melody)]
+        velocities = touch["velocity"]
+        # The player balances each part to a target RMS. Carry the director's
+        # overall touch into that balance as well as the attacks within the part.
+        mean_velocity = (velocities[0] + 2 * velocities[1] + velocities[2]) / 4
+        track["level_db"] += 20 * math.log10(mean_velocity / 80)
     positions = []
+    expression = []
     for start, end, pitch, confidence in melody:
         beat = timeline.source_beats(start)
         # The arranger's interpretation keeps small rubato and deliberately shifts weak subdivisions.
@@ -148,18 +160,38 @@ def _lead_track(notes, timeline, plan):
         elif phrase == "syncopated" and (round(snapped * 2) % 4 == 2):
             pos -= .12
         index = int(np.searchsorted(timeline.seconds, start, side="right") - 1)
-        if index in plan["themeAnchors"] and start - timeline.seconds[index] < .12:
+        anchor = index in plan["themeAnchors"] and start - timeline.seconds[index] < .12
+        if touch:
+            first, last = onsets[edges[index]], onsets[edges[index + 1] - 1]
+            progress = (start - first) / (last - first) if last > first else 0.
+            offset = 0. if anchor else progress ** 2 * touch["endOffsetMs"] / (1000 * timeline.beat)
+            expression.append((index, offset, np.interp(progress, (0., .5, 1.), velocities) / 80))
+        if anchor:
             pos = timeline.beats[index]
         pos = max(positions[-1][0] + .025 if positions else 0., pos)
         span = max(.1, (timeline.source_beats(end) - beat)
                    * {"articulated": .70, "laid_back": .92, "flowing": 1.06, "syncopated": .84}[phrase])
-        velocity = round((64 + 25 * confidence + 5 * math.cos(math.pi * pos)) * _level(plan, pos, timeline.last))
-        positions.append((pos, span, max(0, min(127, pitch + shift)), max(1, min(127, velocity))))
-    for i, (pos, span, pitch, velocity) in enumerate(positions):
+        positions.append((pos, span, max(0, min(127, pitch + shift)), confidence))
+    if touch:
+        timed = []
+        for i, (pos, span, pitch, confidence) in enumerate(positions):
+            index, offset, _ = expression[i]
+            previous = positions[i - 1][0] if i else 0.
+            following = positions[i + 1][0] if i + 1 < len(positions) else timeline.last
+            # A late attack must leave room to sound, including at the very end.
+            # Use nominal neighbors so one shifted note cannot displace the next phrase.
+            ahead = max(0., pos - max(previous, timeline.beats[index]))
+            behind = max(0., min(following, timeline.beats[index + 1], pos + span) - pos)
+            pos += max(-.45 * ahead, min(offset, .45 * behind))
+            timed.append((pos, span * touch["lengthPercent"] / 100, pitch, confidence))
+        positions = timed
+    for i, (pos, span, pitch, confidence) in enumerate(positions):
         next_onset = positions[i + 1][0] if i + 1 < len(positions) else timeline.last
         end = min(next_onset, pos + span, timeline.last)
         if end > pos:
-            track["notes"].append((pos * timeline.beat, end * timeline.beat, pitch, velocity))
+            accent = 64 + 25 * confidence + 5 * math.cos(math.pi * pos)
+            velocity = round(accent * (expression[i][2] if touch else 1.) * _level(plan, pos, timeline.last))
+            track["notes"].append((pos * timeline.beat, end * timeline.beat, pitch, max(1, min(127, velocity))))
     return track
 
 
@@ -299,8 +331,11 @@ def arrange(notes, analysis, plan):
     timeline = Timeline(analysis, plan)
     palette = _chord_palette(notes, timeline, plan)
     lead = _lead_track(notes, timeline, plan)
-    attacks = [a / timeline.beat for a, _, _, _ in lead["notes"]]
-    releases = [b / timeline.beat for _, b, _, _ in lead["notes"]]
+    cue = lead
+    if timing := plan.get("backingTiming"):
+        cue = _lead_track(notes, timeline, dict(plan, phrasing=timing["phrasing"], leadTouch=timing.get("leadTouch")))
+    attacks = [a / timeline.beat for a, _, _, _ in cue["notes"]]
+    releases = [b / timeline.beat for _, b, _, _ in cue["notes"]]
     sections = _phrase_backing(analysis, timeline, plan, attacks, releases)
     tracks = [lead]
     previous = {}
@@ -326,7 +361,7 @@ def arrange(notes, analysis, plan):
                 pitch = base + (root - base) % 12 + interval
                 if kind == "counterline":
                     # Let the response occupy space between theme notes.
-                    if any(a < end * timeline.beat and b > pos * timeline.beat for a,b,_,_ in lead["notes"]):
+                    if any(a < end * timeline.beat and b > pos * timeline.beat for a,b,_,_ in cue["notes"]):
                         continue
                 pitches = [pitch]
             velocity = max(1, min(127, round(hit["velocity"] * _level(plan, pos, timeline.last))))

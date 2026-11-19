@@ -7,7 +7,7 @@ import unittest
 from unittest.mock import patch
 
 import rendition_score_plan as score
-from rendition_score import arrange
+from rendition_score import Timeline, _lead_track, arrange
 
 
 SOURCE = {"bpm": 94, "durationSeconds": 25, "phrases": [
@@ -190,6 +190,71 @@ class PhraseBackingTest(unittest.TestCase):
         stretched["melody"][3][1] += .25
         later, _, _ = arrange(stretched, self.source, replying)
         self.assertGreater(next(a for a, *_ in later[1]["notes"] if 1.15 < a < 2), answer[0])
+
+    def test_mood_edit_performs_new_phrase_accents_over_the_selected_beat(self):
+        # The existing score already has the requested articulation. A change
+        # to the delivery still needs to sound different at the same tempo.
+        parent = dict(self.plan, phraseInteraction="steady", phrasing="flowing")
+        parent.pop("leadTouch", None)  # A take from before the player supported expression.
+        director = Musician({"What is the listener": "feel", "For this mood edit": "lead",
+                             "How should the lead": "flowing"}, players="[55, 88, 43, 75, 32]")
+        child = score._arrange(self.source, "I like that beat. Bring back the wistful feeling.", parent, director)
+        self.assertEqual(dict(parent, leadTouch={"velocity": [55, 88, 43], "lengthPercent": 75, "endOffsetMs": 32}), child)
+        old, duration, landmarks = arrange(self.notes, self.source, parent)
+        new, length, positions = arrange(self.notes, self.source, child)
+        self.assertEqual((old[1:], duration, landmarks), (new[1:], length, positions))
+        self.assertEqual([n[2] for n in old[0]["notes"]], [n[2] for n in new[0]["notes"]])
+        for i in (0, 4, 8):
+            opening, ending = new[0]["notes"][i], new[0]["notes"][i + 3]
+            self.assertEqual(opening[0], old[0]["notes"][i][0])
+            self.assertAlmostEqual(ending[0] - old[0]["notes"][i + 3][0], .032)
+            self.assertLess(ending[3], opening[3])
+        self.assertLess(new[0]["level_db"], old[0]["level_db"])
+        self.assertEqual(child["leadTouch"], score._arrange(
+            self.source, "Give the tune to a cello.", child,
+            Musician({"What is the listener": "revoice"}))["leadTouch"])
+
+    def test_late_phrase_end_cannot_remove_the_last_note_at_a_fast_tempo(self):
+        source = {"bpm": 120, "phrases": [{"start": 0., "end": 1.}]}
+        notes = {"melody": [(0., .3, 60, .8), (.46, .75, 64, .8), (.91, 1., 67, .8)]}
+        parent = dict(self.plan, bpm=240, introBars=0, endingBars=0, roles=[], phrasing="flowing")
+        parent.pop("leadTouch", None)
+        clock = Timeline(source, parent)
+        original = _lead_track(notes, clock, parent)["notes"]
+        touch = {"velocity": [80, 70, 65], "lengthPercent": 100, "endOffsetMs": 60}
+        updated = _lead_track(notes, clock, dict(parent, leadTouch=touch))["notes"]
+        self.assertEqual([60, 64, 67], [n[2] for n in updated])
+        self.assertGreater(updated[-1][0], original[-1][0])
+        self.assertGreaterEqual(updated[-1][1] - updated[-1][0], .5 * (original[-1][1] - original[-1][0]))
+        self.assertLessEqual(updated[-1][1], clock.last * clock.beat)
+
+    def test_lead_only_edits_keep_the_rhythm_of_players_responding_to_earlier_rests(self):
+        # Historical responsive tracks and ordinary counterlines both use the lead to time their attacks.
+        counterline = {"kind": "counterline", "program": 10, "gesture": "pulse",
+                       "pattern": score._pattern("counterline", "pulse", 4)}
+        for interaction, roles in (("phrase_answers", self.plan["roles"]), ("steady", [counterline])):
+            with self.subTest(interaction=interaction):
+                parent = dict(self.plan, phraseInteraction=interaction, phrasing="flowing",
+                              roles=[dict(role, followPhrases=True) for role in roles])
+                parent.pop("leadTouch", None)
+                director = Musician({"What is the listener": "feel", "For this mood edit": "lead",
+                                     "How should the lead": "articulated"}, players="[55,88,43,55,-60]")
+                child = score._arrange(self.source, "Keep the rhythm. Make the tune more urgent.", parent, director)
+                original = arrange(self.notes, self.source, parent)[0]
+                rephrased = arrange(self.notes, self.source, child)[0]
+                self.assertNotEqual(original[0]["notes"], rephrased[0]["notes"])
+                self.assertEqual(original[1:], rephrased[1:])
+                another = score._arrange(self.source, "A lighter touch.", child, director)
+                revoiced = score._arrange(self.source, "Give the melody to a cello.", another,
+                                          Musician({"What is the listener": "revoice"}))
+                self.assertEqual(original[1:], arrange(self.notes, self.source, revoiced)[0][1:])
+                # An explicit request to respond anew should follow the newly played lead.
+                unlocked = score._arrange(self.source, "Have the players follow my phrasing.", child,
+                                          Musician({"What is the listener": "interaction",
+                                                    "How should the backing": interaction,
+                                                    "Should the": "follow"}))
+                self.assertNotIn("backingTiming", unlocked)
+                self.assertNotEqual(original[1:], arrange(self.notes, self.source, unlocked)[0][1:])
 
     def test_v1_legacy_figure_and_exact_backing_after_a_lead_swap(self):
         legacy = dict(self.plan)
