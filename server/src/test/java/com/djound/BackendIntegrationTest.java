@@ -39,19 +39,22 @@ class BackendIntegrationTest {
         app = launch(root);
     }
 
-    ConfigurableApplicationContext launch(Path dir) {
-        return SpringApplication.run(
-                DjoundApplication.class,
-                "--server.port=0",
-                "--spring.datasource.url="
-                        + BASE
-                        + (BASE.contains("?") ? "&" : "?")
-                        + "currentSchema="
-                        + schema,
-                "--spring.datasource.username=" + USER,
-                "--spring.datasource.password=" + PASSWORD,
-                "--djound.data-dir=" + dir,
-                "--spring.main.banner-mode=off");
+    ConfigurableApplicationContext launch(Path dir, String... options) {
+        var args =
+                new ArrayList<>(
+                        List.of(
+                                "--server.port=0",
+                                "--spring.datasource.url="
+                                        + BASE
+                                        + (BASE.contains("?") ? "&" : "?")
+                                        + "currentSchema="
+                                        + schema,
+                                "--spring.datasource.username=" + USER,
+                                "--spring.datasource.password=" + PASSWORD,
+                                "--djound.data-dir=" + dir,
+                                "--spring.main.banner-mode=off"));
+        args.addAll(List.of(options));
+        return SpringApplication.run(DjoundApplication.class, args.toArray(String[]::new));
     }
 
     @AfterEach
@@ -86,6 +89,234 @@ class BackendIntegrationTest {
         for (int n = 0; n < size / 2; n++)
             b.putShort((short) (Math.sin(n * 440 * 2 * Math.PI / rate) * 2000));
         return b.array();
+    }
+
+    @Test
+    void renditionVoiceMemoHistoryIsDurableAndBoundToTheSelectedParent() throws Exception {
+        app.close();
+        Path python = Path.of("/usr/bin/python3");
+        Path worker = root.resolve("test-worker.py");
+        Files.writeString(
+                worker,
+                """
+                import json, os, sys, wave
+                q=json.load(sys.stdin)
+                assert not os.path.exists(q["output"])
+                if q['prompt']=='question':
+                    print(json.dumps(dict(state='clarify',error='Which instrument?')))
+                else:
+                    with wave.open(q['source'],'rb') as orig:
+                        fmt=orig.getparams()
+                        pcm=bytearray(orig.readframes(fmt.nframes))
+                    pos=round(q.get('startSeconds',0)*fmt.framerate)*4
+                    if q['prompt'] != 'unchanged': pcm[pos]^=1
+                    with wave.open(q['output'],'wb') as out:
+                        out.setparams(fmt);out.writeframes(pcm)
+                    print(json.dumps(dict(state='ready',caption='Parent: '+q['parentCaption']+' / '+str(len(q['history'])),
+                                          label='Test output',durationSeconds=fmt.nframes/fmt.framerate)))
+                """);
+        String[] settings = {
+            "--djound.mode=LOCAL",
+            "--djound.rendition-worker=" + worker,
+            "--djound.local-python=" + python
+        };
+        app = launch(root, settings);
+        var projects = app.getBean(com.djound.rendition.RenditionProjects.class);
+        Path input = root.resolve("memo.wav"), memo = root.resolve("memo.m4a");
+        Files.write(input, wave(32000, 1, 16, 2));
+        assertEquals(
+                0,
+                new ProcessBuilder(
+                                "ffmpeg",
+                                "-loglevel",
+                                "error",
+                                "-i",
+                                input.toString(),
+                                "-c:a",
+                                "aac",
+                                memo.toString())
+                        .inheritIO()
+                        .start()
+                        .waitFor());
+        var upload =
+                new MockMultipartFile("file", "memo.m4a", "audio/mp4", Files.readAllBytes(memo));
+        var session = projects.create(upload, "import");
+        String id = session.id();
+        assertEquals(id, projects.create(upload, "import").id());
+        assertEquals("original", session.originalUrl().split("/")[5]);
+        assertEquals(2, session.durationSeconds(), .05);
+        var conflict =
+                new MockMultipartFile("file", "other.m4a", "audio/mp4", Files.readAllBytes(memo));
+        assertEquals(
+                "RENDITION_REQUEST_CONFLICT",
+                assertThrows(ApiProblem.class, () -> projects.create(conflict, "import")).code());
+        var first =
+                new com.djound.rendition.RenditionProjects.Command(
+                        "first", "original", "jazz", null, null);
+        projects.submit(id, first);
+        var take = awaitRendition(projects, id, "first");
+        assertEquals("ready", take.state(), take.error());
+        assertEquals("Parent:  / 0", take.caption());
+        assertEquals(take.id(), projects.submit(id, first).takes().getFirst().id());
+        assertThrows(
+                ApiProblem.class,
+                () ->
+                        projects.submit(
+                                id,
+                                new com.djound.rendition.RenditionProjects.Command(
+                                        "first", "original", "different", null, null)));
+        projects.submit(
+                id,
+                new com.djound.rendition.RenditionProjects.Command(
+                        "next", take.id(), "quieter", .25, .75));
+        var second = awaitRendition(projects, id, "next");
+        assertEquals("ready", second.state(), second.error());
+        assertEquals(take.id(), second.parentId());
+        assertEquals("Parent: " + take.caption() + " / 1", second.caption());
+        assertEquals(.25, second.appliedStartSeconds());
+        assertNotEquals(take.sha256(), second.sha256());
+        String url = "http://127.0.0.1:" + app.getEnvironment().getProperty("local.server.port");
+        try (var http = java.net.http.HttpClient.newHttpClient()) {
+            var exported =
+                    http.send(
+                            java.net.http.HttpRequest.newBuilder(
+                                            java.net.URI.create(url + second.exportUrl()))
+                                    .build(),
+                            java.net.http.HttpResponse.BodyHandlers.ofByteArray());
+            assertEquals(200, exported.statusCode());
+            assertEquals(
+                    second.sha256(),
+                    HexFormat.of()
+                            .formatHex(
+                                    java.security.MessageDigest.getInstance("SHA-256")
+                                            .digest(exported.body())));
+            var partial =
+                    http.send(
+                            java.net.http.HttpRequest.newBuilder(
+                                            java.net.URI.create(url + session.originalUrl()))
+                                    .header("Range", "bytes=0-43")
+                                    .build(),
+                            java.net.http.HttpResponse.BodyHandlers.ofByteArray());
+            assertEquals(206, partial.statusCode());
+            assertEquals(44, partial.body().length);
+        }
+        assertEquals(second.id(), projects.favorite(id, second.id()).favoriteId());
+        projects.submit(
+                id,
+                new com.djound.rendition.RenditionProjects.Command(
+                        "ask", take.id(), "question", null, null));
+        assertEquals("clarify", awaitRendition(projects, id, "ask").state());
+        projects.submit(
+                id,
+                new com.djound.rendition.RenditionProjects.Command(
+                        "same", take.id(), "unchanged", null, null));
+        assertEquals("failed", awaitRendition(projects, id, "same").state());
+        var db = app.getBean(JdbcClient.class);
+        db.sql("UPDATE rendition_take SET state='running' WHERE project_id=? AND request_id='same'")
+                .param(id)
+                .update();
+        app.close();
+        app = launch(root);
+        var restored = app.getBean(com.djound.rendition.RenditionProjects.class);
+        assertEquals(1, restored.list().size());
+        assertEquals(second.id(), restored.state(id).favoriteId());
+        assertEquals(second.sha256(), restored.state(id).takes().get(1).sha256());
+        assertEquals("failed", awaitRendition(restored, id, "same").state());
+        assertThrows(
+                ApiProblem.class,
+                () ->
+                        restored.submit(
+                                id,
+                                new com.djound.rendition.RenditionProjects.Command(
+                                        "offline", take.id(), "another", null, null)));
+    }
+
+    @Test
+    void concurrentRenditionRequestsAreSerializedAndQueuedWorkSurvivesShutdown() throws Exception {
+        app.close();
+        var worker = root.resolve("blocking-worker.py");
+        var pidFile = root.resolve("worker-child");
+        Files.writeString(
+                worker,
+                """
+                import json,os,subprocess,sys
+                from pathlib import Path
+                request=json.load(sys.stdin)
+                if request['prompt']=='block':
+                    child=subprocess.Popen([sys.executable,'-c','import time; time.sleep(45)'])
+                    Path(__file__).with_name('worker-child').write_text(str(child.pid))
+                    child.wait()
+                print(json.dumps(dict(state='clarify',error='Choose a direction.')))
+                """);
+        String[] settings = {
+            "--djound.mode=LOCAL",
+            "--djound.rendition-worker=" + worker,
+            "--djound.local-python=/usr/bin/python3"
+        };
+        app = launch(root, settings);
+        var projects = app.getBean(com.djound.rendition.RenditionProjects.class);
+        var a = projects.create(wav("one.wav", 44100, 1, 16, 1), null);
+        var b = projects.create(wav("two.wav", 44100, 1, 16, 1), null);
+        projects.submit(
+                a.id(),
+                new com.djound.rendition.RenditionProjects.Command(
+                        "long", "original", "block", null, null));
+        for (int i = 0; i < 120 && !Files.exists(pidFile); i++) Thread.sleep(50);
+        long childPid = Long.parseLong(Files.readString(pidFile));
+        try (var submitters = Executors.newFixedThreadPool(3)) {
+            var futures = new ArrayList<Future<?>>();
+            for (int i = 0; i < 6; i++) {
+                final int n = i;
+                futures.add(
+                        submitters.submit(
+                                () ->
+                                        projects.submit(
+                                                n % 2 == 0 ? a.id() : b.id(),
+                                                new com.djound.rendition.RenditionProjects.Command(
+                                                        "q" + n, "original", "next", null, null))));
+            }
+            for (var future : futures) future.get(5, TimeUnit.SECONDS);
+        }
+        var db = app.getBean(JdbcClient.class);
+        assertEquals(
+                1,
+                db.sql("SELECT count(*) FROM rendition_take WHERE state='running'")
+                        .query(Integer.class)
+                        .single());
+        assertEquals(
+                6,
+                db.sql("SELECT count(*) FROM rendition_take WHERE state='queued'")
+                        .query(Integer.class)
+                        .single());
+        app.close();
+        for (int i = 0;
+                i < 100 && ProcessHandle.of(childPid).map(ProcessHandle::isAlive).orElse(false);
+                i++) Thread.sleep(30);
+        assertFalse(
+                ProcessHandle.of(childPid).map(ProcessHandle::isAlive).orElse(false),
+                "render subprocess survived graceful shutdown");
+        app = launch(root, settings);
+        var resumed = app.getBean(com.djound.rendition.RenditionProjects.class);
+        assertEquals("failed", awaitRendition(resumed, a.id(), "long").state());
+        for (int i = 0; i < 6; i++)
+            assertEquals(
+                    "clarify",
+                    awaitRendition(resumed, i % 2 == 0 ? a.id() : b.id(), "q" + i).state());
+    }
+
+    private static com.djound.rendition.RenditionProjects.Take awaitRendition(
+            com.djound.rendition.RenditionProjects projects, String id, String requestId)
+            throws InterruptedException {
+        for (int i = 0; i < 130; i++) {
+            var take =
+                    projects.state(id).takes().stream()
+                            .filter(t -> t.requestId().equals(requestId))
+                            .findFirst()
+                            .orElseThrow();
+            if (!Set.of("running", "queued").contains(take.state())) return take;
+            Thread.sleep(50);
+        }
+        throw new AssertionError("Rendition did not reach a terminal state.");
     }
 
     @Test

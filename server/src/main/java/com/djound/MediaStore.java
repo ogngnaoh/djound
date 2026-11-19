@@ -44,6 +44,15 @@ public class MediaStore {
     }
 
     public Upload ingest(MultipartFile file) throws IOException {
+        return ingest(file, false);
+    }
+
+    /** Recording-led sessions decode voice memos as well as lossy or PCM music uploads. */
+    public Upload ingestRecording(MultipartFile file) throws IOException {
+        return ingest(file, true);
+    }
+
+    private Upload ingest(MultipartFile file, boolean recording) throws IOException {
         String fileName = safeName(file.getOriginalFilename());
         Path temp = Files.createTempFile(installation.root.resolve("temporary"), "upload-", ".tmp");
         try {
@@ -65,7 +74,8 @@ public class MediaStore {
                     out.write(buffer, 0, n);
                 }
             }
-            return inspect(temp, fileName, size, HexFormat.of().formatHex(digest.digest()));
+            return inspect(
+                    temp, fileName, size, HexFormat.of().formatHex(digest.digest()), recording);
         } catch (Exception e) {
             Files.deleteIfExists(temp);
             throw e;
@@ -84,10 +94,12 @@ public class MediaStore {
                 digest.update(buffer, 0, n);
             }
         }
-        return inspect(path, safeName(fileName), size, HexFormat.of().formatHex(digest.digest()));
+        return inspect(
+                path, safeName(fileName), size, HexFormat.of().formatHex(digest.digest()), false);
     }
 
-    private Upload inspect(Path temp, String fileName, long size, String hash) throws IOException {
+    private Upload inspect(Path temp, String fileName, long size, String hash, boolean recording)
+            throws IOException {
         if (size == 0) throw invalid("The selected file is empty.");
         byte[] header = new byte[12];
         try (InputStream in = Files.newInputStream(temp)) {
@@ -100,9 +112,18 @@ public class MediaStore {
         boolean mp3 =
                 (header[0] == 'I' && header[1] == 'D' && header[2] == '3')
                         || ((header[0] & 255) == 255 && (header[1] & 224) == 224);
-        if (!wav && !mp3)
+        boolean m4a =
+                recording
+                        && new String(header, 4, 4, java.nio.charset.StandardCharsets.US_ASCII)
+                                .equals("ftyp");
+        if (!wav && !mp3 && !m4a)
             throw new ApiProblem(
-                    415, "UNSUPPORTED_MEDIA", "Choose WAV PCM16 or MP3 audio.", "CHOOSE_FILE");
+                    415,
+                    "UNSUPPORTED_MEDIA",
+                    recording
+                            ? "Choose an M4A voice memo, WAV, or MP3 recording."
+                            : "Choose WAV PCM16 or MP3 audio.",
+                    "CHOOSE_FILE");
         if (wav) validateWaveStructure(temp, size);
         JsonNode data = probe(temp);
         JsonNode streams = data.path("streams");
@@ -119,17 +140,28 @@ public class MediaStore {
         if (audio == null) throw invalid("The file contains no audio stream.");
         String codec = audio.path("codec_name").asString();
         String format = data.path("format").path("format_name").asString();
-        if (!(wav && format.equals("wav") && codec.equals("pcm_s16le"))
-                && !(mp3 && format.equals("mp3") && codec.equals("mp3")))
+        if (!(wav
+                        && format.equals("wav")
+                        && (codec.equals("pcm_s16le") || recording && codec.startsWith("pcm_")))
+                && !(mp3 && format.equals("mp3") && codec.equals("mp3"))
+                && !(m4a
+                        && java.util.List.of(format.split(",")).contains("m4a")
+                        && (codec.equals("aac") || codec.equals("alac"))))
             throw new ApiProblem(
                     415,
                     "UNSUPPORTED_CODEC",
-                    "Choose WAV with 16-bit PCM or MP3 audio.",
+                    recording
+                            ? "Choose an AAC or ALAC voice memo, PCM WAV, or MP3 recording."
+                            : "Choose WAV with 16-bit PCM or MP3 audio.",
                     "CHOOSE_FILE");
         int rate = audio.path("sample_rate").asInt();
         int channels = audio.path("channels").asInt();
-        if ((rate != 44100 && rate != 48000) || (channels != 1 && channels != 2))
-            throw invalid("Audio must be mono or stereo at 44.1 or 48 kHz.");
+        if ((recording ? rate < 8000 || rate > 192000 : rate != 44100 && rate != 48000)
+                || (channels != 1 && channels != 2))
+            throw invalid(
+                    recording
+                            ? "Choose a mono or stereo recording sampled at 8–192 kHz."
+                            : "Audio must be mono or stereo at 44.1 or 48 kHz.");
         double seconds = data.path("format").path("duration").asDouble();
         if (!Double.isFinite(seconds) || seconds < 1 || seconds > 300)
             throw invalid("Audio must be between 1 and 300 seconds long.");
@@ -144,7 +176,7 @@ public class MediaStore {
                 rate,
                 channels,
                 codec,
-                wav ? "audio/wav" : "audio/mpeg",
+                wav ? "audio/wav" : m4a ? "audio/mp4" : "audio/mpeg",
                 seconds);
     }
 

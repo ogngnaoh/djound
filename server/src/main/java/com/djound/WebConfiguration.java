@@ -53,7 +53,9 @@ public class WebConfiguration implements WebMvcConfigurer {
             "/remix/{id}/melody",
             "/remix/{id}/notes",
             "/mixes",
-            "/mixes/{id}"
+            "/mixes/{id}",
+            "/renditions",
+            "/renditions/{id}"
         })
         public String app() {
             return "forward:/index.html";

@@ -6,6 +6,85 @@ info:
 servers:
   - url: /
 paths:
+  /api/renditions:
+    get:
+      operationId: listRenditionProjects
+      description: List recording-led projects from newest to oldest.
+      responses:
+        '200':
+          description: Recording library
+          content: { application/json: { schema: { type: array, items: { $ref: '#/components/schemas/RenditionIndex' } } } }
+        default: { $ref: '#/components/responses/Problem' }
+    post:
+      operationId: createRenditionProject
+      description: Import a 1–300 second mono or stereo AAC/ALAC M4A, PCM WAV or MP3, up to 64 MiB. Decode it synchronously to a 44.1 kHz stereo PCM16 recording.
+      parameters:
+        - { name: Idempotency-Key, in: header, schema: { type: string, minLength: 1, maxLength: 160 }, description: Replay the same filename and uploaded bytes to reopen the existing project. }
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema: { type: object, required: [file], properties: { file: { type: string, format: binary } } }
+      responses:
+        '201': { $ref: '#/components/responses/RenditionProject' }
+        default: { $ref: '#/components/responses/Problem' }
+  /api/renditions/{id}:
+    get:
+      operationId: getRenditionProject
+      description: Get the original, all submitted takes and the saved favorite. Poll this resource while a take is queued or running.
+      parameters:
+        - { $ref: '#/components/parameters/ResourceId' }
+      responses:
+        '200': { $ref: '#/components/responses/RenditionProject' }
+        default: { $ref: '#/components/responses/Problem' }
+  /api/renditions/{id}/takes:
+    post:
+      operationId: submitRenditionTake
+      description: Queue an instrumental version from the original or a ready parent. Replaying a requestId with the same parent, prompt and bounds returns the existing submission.
+      parameters:
+        - { $ref: '#/components/parameters/ResourceId' }
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: '#/components/schemas/RenditionCommand' } } }
+      responses:
+        '202': { $ref: '#/components/responses/RenditionProject' }
+        default: { $ref: '#/components/responses/Problem' }
+  /api/renditions/{id}/favorite:
+    put:
+      operationId: favoriteRenditionTake
+      description: Save a ready take as this project's favorite.
+      parameters:
+        - { $ref: '#/components/parameters/ResourceId' }
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: '#/components/schemas/RenditionFavorite' } } }
+      responses:
+        '200': { $ref: '#/components/responses/RenditionProject' }
+        default: { $ref: '#/components/responses/Problem' }
+  /api/renditions/{id}/takes/{takeId}/audio:
+    get:
+      operationId: playRenditionAudio
+      description: Stream a saved rendition or the original recording.
+      parameters:
+        - { $ref: '#/components/parameters/ResourceId' }
+        - { name: takeId, in: path, required: true, schema: { type: string }, description: A ready take ID or original. }
+        - { name: Range, in: header, schema: { type: string } }
+      responses:
+        '200': { $ref: '#/components/responses/RenditionAudio' }
+        '206': { $ref: '#/components/responses/RenditionAudio' }
+        default: { $ref: '#/components/responses/Problem' }
+  /api/renditions/{id}/takes/{takeId}/export:
+    get:
+      operationId: exportRenditionAudio
+      description: Download the saved WAV of this take or the original recording.
+      parameters:
+        - { $ref: '#/components/parameters/ResourceId' }
+        - { name: takeId, in: path, required: true, schema: { type: string }, description: A ready take ID or original. }
+        - { name: Range, in: header, schema: { type: string } }
+      responses:
+        '200': { $ref: '#/components/responses/RenditionAudio' }
+        '206': { $ref: '#/components/responses/RenditionAudio' }
+        default: { $ref: '#/components/responses/Problem' }
   /api/mixes:
     get:
       operationId: listFinishedMixes
@@ -641,6 +720,12 @@ components:
       required: true
       schema: { type: string, minLength: 8, maxLength: 128, pattern: '^[A-Za-z0-9._:-]{8,128}$' }
   responses:
+    RenditionProject:
+      description: Current recording project and take history
+      content: { application/json: { schema: { $ref: '#/components/schemas/RenditionProject' } } }
+    RenditionAudio:
+      description: Stereo 44.1 kHz PCM16 WAV or its requested byte range
+      content: { audio/wav: { schema: { type: string, format: binary } } }
     MixState:
       description: Current imported project state
       content: { application/json: { schema: { $ref: '#/components/schemas/MixState' } } }
@@ -653,6 +738,57 @@ components:
         application/problem+json:
           schema: { $ref: '#/components/schemas/Problem' }
   schemas:
+    RenditionIndex:
+      type: object
+      required: [id, title]
+      properties:
+        id: { type: string, format: uuid }
+        title: { type: string }
+    RenditionProject:
+      type: object
+      required: [id, title, durationSeconds, originalUrl, favoriteId, takes]
+      properties:
+        id: { type: string, format: uuid }
+        title: { type: string }
+        durationSeconds: { type: number, exclusiveMinimum: 0, maximum: 300 }
+        originalUrl: { type: string }
+        favoriteId: { type: [string, 'null'], format: uuid }
+        takes: { type: array, items: { $ref: '#/components/schemas/RenditionTake' } }
+    RenditionCommand:
+      type: object
+      required: [requestId, parentId, prompt]
+      description: Omit both bounds for a full-song request or include both in seconds on the parent timeline.
+      properties:
+        requestId: { type: string, minLength: 1, maxLength: 160 }
+        parentId: { type: string, description: The original recording uses the ID original. }
+        prompt: { type: string, minLength: 1, maxLength: 1000 }
+        startSeconds: { type: [number, 'null'], minimum: 0 }
+        endSeconds: { type: [number, 'null'], exclusiveMinimum: 0 }
+    RenditionFavorite:
+      type: object
+      required: [takeId]
+      properties:
+        takeId: { type: string, format: uuid }
+    RenditionTake:
+      type: object
+      required: [id, parentId, requestId, label, request, caption, state, audioUrl, exportUrl, durationSeconds, startSeconds, endSeconds, appliedStartSeconds, appliedEndSeconds, sha256, error]
+      properties:
+        id: { type: string, format: uuid }
+        parentId: { type: string }
+        requestId: { type: string }
+        label: { type: string }
+        request: { type: string }
+        caption: { type: string }
+        state: { type: string, enum: [queued, running, ready, failed, clarify] }
+        audioUrl: { type: [string, 'null'] }
+        exportUrl: { type: [string, 'null'] }
+        durationSeconds: { type: [number, 'null'] }
+        startSeconds: { type: [number, 'null'], description: User-supplied start on the parent timeline. }
+        endSeconds: { type: [number, 'null'] }
+        appliedStartSeconds: { type: [number, 'null'], description: Actual start of the changed range including a range inferred from the prompt. }
+        appliedEndSeconds: { type: [number, 'null'] }
+        sha256: { type: [string, 'null'] }
+        error: { type: [string, 'null'] }
     MixSelection:
       type: object
       required: [startFrame, endFrame]
