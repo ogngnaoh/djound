@@ -1,4 +1,5 @@
 import { mixListQuery } from "../mixes/MixLibrary";
+import { recordingList } from "../renditions/api";
 import { useState } from "react";
 import { Link } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
@@ -26,12 +27,17 @@ export function LibraryPage() {
     enabled: mode === "backend",
     retry: false,
   });
+  const recordings = useQuery({
+    ...recordingList,
+    enabled: mode === "backend",
+    retry: false,
+  });
   const [search, setSearch] = useState(""),
     [selectedId, setSelectedId] = useState("");
-  if (q.isPending) return <Loading />;
-  if (q.isError)
+  if (mode === "prototype" && q.isPending) return <Loading />;
+  if (mode === "prototype" && q.isError)
     return <Failure message={q.error.message} retry={() => void q.refetch()} />;
-  const projects = q.data,
+  const projects = q.data ?? [],
     filtered = projects.filter((p) =>
       `${p.title} ${p.fileName}`.toLowerCase().includes(search.toLowerCase()),
     );
@@ -47,14 +53,57 @@ export function LibraryPage() {
           <h1>Library</h1>
           <p>Recent projects and kept versions</p>
           {mode === "backend" && (
-            <Button asChild>
-              <Link to="/mixes">
-                <Music2 />
-                Edit a finished mix
+            <div className="mix-choice">
+              <Button asChild>
+                <Link to="/renditions">
+                  <Music2 /> Reimagine a recording
+                </Link>
+              </Button>
+              <Button asChild variant="outline">
+                <Link to="/mixes">Edit a finished mix</Link>
+              </Button>
+              <Link className="text-action" to="/remix/new">
+                Arrange a short melody
               </Link>
-            </Button>
+            </div>
           )}
         </header>
+        {mode === "backend" &&
+          (recordings.isError || mixes.isError || q.isError) && (
+            <p role="alert" className="notice error">
+              Some projects could not be loaded.{" "}
+              <button
+                className="text-action"
+                onClick={() => {
+                  if (recordings.isError) void recordings.refetch();
+                  if (mixes.isError) void mixes.refetch();
+                  if (q.isError) void q.refetch();
+                }}
+              >
+                Try again
+              </button>
+            </p>
+          )}
+        {!!recordings.data?.length && (
+          <section className="recent-projects">
+            <h2>Reimagined recordings</h2>
+            {recordings.data.slice(0, 5).map((recording) => (
+              <article className="project-row" key={recording.id}>
+                <h3>
+                  <Link to={"/renditions/" + recording.id}>
+                    {recording.title}
+                  </Link>
+                </h3>
+                <Link
+                  className="text-action"
+                  to={"/renditions/" + recording.id}
+                >
+                  Open recording
+                </Link>
+              </article>
+            ))}
+          </section>
+        )}
         {!!mixes.data?.items.length && (
           <section className="recent-projects">
             <h2>Finished mixes</h2>
@@ -81,21 +130,33 @@ export function LibraryPage() {
               <label>
                 <Search size={19} />
                 <input
-                  aria-label="Find a project"
-                  placeholder="Find a project"
+                  aria-label={
+                    mode === "backend"
+                      ? "Find a melody project"
+                      : "Find a project"
+                  }
+                  placeholder={
+                    mode === "backend"
+                      ? "Find a melody project"
+                      : "Find a project"
+                  }
                   value={search}
                   onChange={(e) => setSearch(e.target.value)}
                 />
               </label>
-              <Button asChild>
-                <Link to="/remix/new">
-                  <Plus />
-                  New project
-                </Link>
-              </Button>
+              {mode === "prototype" && (
+                <Button asChild>
+                  <Link to="/remix/new">
+                    <Plus />
+                    New project
+                  </Link>
+                </Button>
+              )}
             </div>
             <section className="recent-projects">
-              <h2>Recent projects</h2>
+              <h2>
+                {mode === "backend" ? "Melody projects" : "Recent projects"}
+              </h2>
               {filtered.length ? (
                 filtered.map((p) => (
                   <article className="project-row" key={p.id}>
@@ -131,7 +192,9 @@ export function LibraryPage() {
               )}
             </section>
             <section className="kept-section">
-              <h2>Kept versions</h2>
+              <h2>
+                {mode === "backend" ? "Kept melody versions" : "Kept versions"}
+              </h2>
               {kept.length ? (
                 kept.map(({ project: p, track: t }) => (
                   <article
@@ -182,7 +245,17 @@ export function LibraryPage() {
               </p>
             </section>
           </>
-        ) : mixes.data?.items.length ? null : (
+        ) : mode === "backend" ? (
+          recordings.isSuccess &&
+          mixes.isSuccess &&
+          q.isSuccess &&
+          !recordings.data.length &&
+          !mixes.data.items.length && (
+            <p className="subtle">
+              Your recordings and saved takes will appear here.
+            </p>
+          )
+        ) : (
           <div className="library-empty">
             <div className="empty-symbol">
               <Music2 size={30} />

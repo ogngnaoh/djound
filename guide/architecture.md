@@ -1,11 +1,15 @@
 # Architecture
 
-Djound serves the Studio and API from one local Spring Boot process. PostgreSQL stores the project, draft, confirmed notes, approved arrangements and version history. Audio lives on disk. The arrangement client uses the OpenAPI contract. The finished mix client has its own typed revision and playback requests. [Arrangement API](../contracts/openapi.yaml) · [Finished mix API client](../web/src/mixes/api.ts)
+Djound serves the React studio and its API from a local Spring Boot process. PostgreSQL records projects, take history and preferences. Audio lives on disk. Three workflows share this installation. Reimagine performs a new version of a recording, Mix editor adjusts estimated instruments in a stereo passage, and the melody editor builds an arrangement from confirmed notes. [Rendition API client](../web/src/renditions/api.ts) · [Finished mix client](../web/src/mixes/api.ts) · [OpenAPI contract](../contracts/openapi.yaml)
 
 ```mermaid
 flowchart LR
     Studio[React Studio] --> API[Spring Boot]
     API --> DB[(PostgreSQL)]
+    API --> Rendition[Rendition worker]
+    Rendition --> Caption[Named style or Qwen musical direction]
+    Caption --> ACE[ACE-Step native Metal or HTTP]
+    ACE --> Media[Local audio files]
     API --> Worker[Local Python worker]
     Worker --> SCNet[SCNet passage separation]
     SCNet --> Estimates[Cached vocals and drums]
@@ -14,9 +18,20 @@ flowchart LR
     Worker --> Notes[Basic Pitch transcription]
     Worker --> Plan[Arrangement planner]
     Worker --> Render[Soundfont renderer and stereo mixer]
-    Render --> Media[Local audio files]
+    Render --> Media
     Media --> API
 ```
+
+## From a recording to a rendition
+
+1. An import starts a project at `/renditions/{id}`. FFmpeg decodes the recording into a 44.1 kHz stereo PCM16 WAV. The project keeps that file as its original and the database records its digest. Import and take requests have stable retry keys so a lost response can be recovered without creating a second project or take.
+2. The listener chooses the original or a saved take as the source. The request names that parent explicitly. Jazz Trio, Solo Piano, Lo-fi Hip-hop and Cinematic Strings each supply a musical description. For free-form requests, a local Qwen3.5 0.8B planner reads the parent’s description, recent requests from that branch, and whether the listener selected a passage. It returns a description and a scope, or asks for clarification. A clarification creates a history entry the listener can revise.
+3. ACE-Step 1.5 receives both the parent audio and the musical description. A whole-recording request uses its cover operation. A local edit uses its repaint operation. An explicit range is measured on the parent recording. An explicit “last 8 seconds” request uses those exact times. For an opening or ending without a length, the worker uses the first or last quarter, capped at 16 seconds. Named sections such as a second chorus need a listener selection. “Closer to the original melody” starts a fresh full take using the imported audio, the selected arrangement description and stronger source conditioning. The Apple Silicon path runs the `ace-synth` Metal executable with GGUF weights. An alternative adapter sends the request to a configured ACE-Step HTTP service. [Rendition worker](../local-engine/rendition_worker.py) · [Audio adapters](../local-engine/rendition_audio.py) · [Setup](running.md#generate-song-renditions)
+4. The worker returns a full-length stereo WAV. For a short passage on a long track, the native path sends the selection with 12 seconds of context on each side, borrowing context from the other side at a song boundary. It keeps the whole recording if the window spans at least three quarters of the take. It pads the model input to its 80 ms grid and crops the generated audio to the real sample count. For a passage the worker blends the generated samples inside the boundaries and copies the rest from the parent. Before publication, Spring checks the WAV format and length, verifies that samples changed, and checks that every sample outside a requested passage still matches its parent. How closely the result carries the source melody, style, and instrumentation depends on the model and recording. [Audio checks](../server/src/main/java/com/djound/rendition/RenditionAudio.java)
+
+Jobs run in a queue. After a restart, queued jobs can proceed and an interrupted running job is marked failed for deliberate retry. Each ready take has its own immutable file, request, parent ID and SHA-256 digest. Playback and export serve that file. Keeping a favorite changes which take the project opens on, and the listener can still play or develop any other saved take. [Project and job storage](../server/src/main/java/com/djound/rendition/RenditionProjects.java)
+
+The four suggested sounds are shortcuts. A free-form direction can name a genre, mix instruments, describe a mood, or change something about the current take. The planner produces a description of the requested performance and a time scope. The renderer receives the selected audio, that description and the listener’s original wording. The finite set of audio operations is cover and passage repaint. The musical descriptions are open-ended.
 
 ## From a stereo mix to a kept take
 
@@ -37,8 +52,8 @@ Each preview has a durable ID and full WAV hash. Keep associates the auditioned 
 
 ## Playback and recovery
 
-One browser player handles the original, auditions and saved takes. A tone audition remixes the verified dry tracks of a saved version and returns a temporary WAV. Only an explicit creation adds a version to the library.
+In the rendition studio, one browser player switches between the original and saved takes at the current elapsed time. In the melody editor, a tone audition remixes the verified dry tracks of a saved version and returns a temporary WAV. Only an explicit creation adds that arrangement to the library.
 
-The database tracks jobs and request receipts. Replaying an accepted request returns its existing result. Draft and note revisions protect against stale edits. An interrupted local job can be retried deliberately after restart. A single worker, deadlines and memory checks bound inference on the supported Mac.
+The melody editor uses draft and note revisions to protect against stale edits. Job records and request receipts distinguish a retry of an accepted request from the creation of a new version. The local workers use deadlines, and the rendition queue processes one take at a time.
 
 [Worker assets and checksums](../local-engine/assets.json) · [Local setup and storage](running.md)

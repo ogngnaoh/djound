@@ -4,6 +4,109 @@
  */
 
 export interface paths {
+    "/api/renditions": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** @description List recording-led projects from newest to oldest. */
+        get: operations["listRenditionProjects"];
+        put?: never;
+        /** @description Import a 1–300 second mono or stereo AAC/ALAC M4A, PCM WAV or MP3, up to 64 MiB. Decode it synchronously to a 44.1 kHz stereo PCM16 recording. */
+        post: operations["createRenditionProject"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/renditions/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** @description Get the original, all submitted takes and the saved favorite. Poll this resource while a take is queued or running. */
+        get: operations["getRenditionProject"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/renditions/{id}/takes": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** @description Queue an instrumental version from the original or a ready parent. Replaying a requestId with the same parent, prompt and bounds returns the existing submission. */
+        post: operations["submitRenditionTake"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/renditions/{id}/favorite": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /** @description Save a ready take as this project's favorite. */
+        put: operations["favoriteRenditionTake"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/renditions/{id}/takes/{takeId}/audio": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** @description Stream a saved rendition or the original recording. */
+        get: operations["playRenditionAudio"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/renditions/{id}/takes/{takeId}/export": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** @description Download the saved WAV of this take or the original recording. */
+        get: operations["exportRenditionAudio"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/mixes": {
         parameters: {
             query?: never;
@@ -648,6 +751,56 @@ export interface paths {
 export type webhooks = Record<string, never>;
 export interface components {
     schemas: {
+        RenditionIndex: {
+            /** Format: uuid */
+            id: string;
+            title: string;
+        };
+        RenditionProject: {
+            /** Format: uuid */
+            id: string;
+            title: string;
+            durationSeconds: number;
+            originalUrl: string;
+            /** Format: uuid */
+            favoriteId: string | null;
+            takes: components["schemas"]["RenditionTake"][];
+        };
+        /** @description Omit both bounds for a full-song request or include both in seconds on the parent timeline. */
+        RenditionCommand: {
+            requestId: string;
+            /** @description The original recording uses the ID original. */
+            parentId: string;
+            prompt: string;
+            startSeconds?: number | null;
+            endSeconds?: number | null;
+        };
+        RenditionFavorite: {
+            /** Format: uuid */
+            takeId: string;
+        };
+        RenditionTake: {
+            /** Format: uuid */
+            id: string;
+            parentId: string;
+            requestId: string;
+            label: string;
+            request: string;
+            caption: string;
+            /** @enum {string} */
+            state: "queued" | "running" | "ready" | "failed" | "clarify";
+            audioUrl: string | null;
+            exportUrl: string | null;
+            durationSeconds: number | null;
+            /** @description User-supplied start on the parent timeline. */
+            startSeconds: number | null;
+            endSeconds: number | null;
+            /** @description Actual start of the changed range including a range inferred from the prompt. */
+            appliedStartSeconds: number | null;
+            appliedEndSeconds: number | null;
+            sha256: string | null;
+            error: string | null;
+        };
         MixSelection: {
             startFrame: number;
             endFrame: number;
@@ -1108,6 +1261,24 @@ export interface components {
         };
     };
     responses: {
+        /** @description Current recording project and take history */
+        RenditionProject: {
+            headers: {
+                [name: string]: unknown;
+            };
+            content: {
+                "application/json": components["schemas"]["RenditionProject"];
+            };
+        };
+        /** @description Stereo 44.1 kHz PCM16 WAV or its requested byte range */
+        RenditionAudio: {
+            headers: {
+                [name: string]: unknown;
+            };
+            content: {
+                "audio/wav": string;
+            };
+        };
         /** @description Current imported project state */
         MixState: {
             headers: {
@@ -1146,6 +1317,143 @@ export interface components {
 }
 export type $defs = Record<string, never>;
 export interface operations {
+    listRenditionProjects: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Recording library */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RenditionIndex"][];
+                };
+            };
+            default: components["responses"]["Problem"];
+        };
+    };
+    createRenditionProject: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Replay the same filename and uploaded bytes to reopen the existing project. */
+                "Idempotency-Key"?: string;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "multipart/form-data": {
+                    /** Format: binary */
+                    file: string;
+                };
+            };
+        };
+        responses: {
+            201: components["responses"]["RenditionProject"];
+            default: components["responses"]["Problem"];
+        };
+    };
+    getRenditionProject: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: components["parameters"]["ResourceId"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: components["responses"]["RenditionProject"];
+            default: components["responses"]["Problem"];
+        };
+    };
+    submitRenditionTake: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: components["parameters"]["ResourceId"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["RenditionCommand"];
+            };
+        };
+        responses: {
+            202: components["responses"]["RenditionProject"];
+            default: components["responses"]["Problem"];
+        };
+    };
+    favoriteRenditionTake: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: components["parameters"]["ResourceId"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["RenditionFavorite"];
+            };
+        };
+        responses: {
+            200: components["responses"]["RenditionProject"];
+            default: components["responses"]["Problem"];
+        };
+    };
+    playRenditionAudio: {
+        parameters: {
+            query?: never;
+            header?: {
+                Range?: string;
+            };
+            path: {
+                id: components["parameters"]["ResourceId"];
+                /** @description A ready take ID or original. */
+                takeId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: components["responses"]["RenditionAudio"];
+            206: components["responses"]["RenditionAudio"];
+            default: components["responses"]["Problem"];
+        };
+    };
+    exportRenditionAudio: {
+        parameters: {
+            query?: never;
+            header?: {
+                Range?: string;
+            };
+            path: {
+                id: components["parameters"]["ResourceId"];
+                /** @description A ready take ID or original. */
+                takeId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: components["responses"]["RenditionAudio"];
+            206: components["responses"]["RenditionAudio"];
+            default: components["responses"]["Problem"];
+        };
+    };
     listFinishedMixes: {
         parameters: {
             query?: never;

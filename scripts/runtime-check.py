@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Bounded local launch checks and read-only application status; never contact a provider."""
+"""Bounded, read-only checks for Djound and its configured music engines."""
 import argparse
 import json
 import os
@@ -102,8 +102,11 @@ def local_editors(environment):
     python = environment.get('DJOUND_LOCAL_PYTHON') or str(ROOT / '.runtime/local-engine/venv/bin/python')
     mix_python = environment.get('DJOUND_MIX_PYTHON') or python
     worker = environment.get('DJOUND_LOCAL_WORKER') or str(ROOT / 'local-engine/worker.py')
-    return [label for label, executable, flag in (('melody arrangements', python, '--check'),
-             ('finished mixes', mix_python, '--check-mix')) if ready_engine(executable, worker, flag)]
+    rendition = environment.get('DJOUND_RENDITION_WORKER') or str(ROOT / 'local-engine/rendition_worker.py')
+    checks = [('song renditions', python, rendition, '--check'),
+              ('melody arrangements', python, worker, '--check'),
+              ('finished mixes', mix_python, worker, '--check-mix')]
+    return [label for label, executable, script, flag in checks if ready_engine(executable, script, flag)]
 
 
 def check(port, mode):
@@ -138,8 +141,9 @@ def check(port, mode):
         if editors:
             print('Local editing available for ' + ' and '.join(editors) + '.')
         else:
-            problems.append('Set up a local editor with local-engine/setup_localengine.sh --finished-mix '
-                            'for stereo mixes or --audio-only for melody arrangements.')
+            problems.append('For song renditions run bash local-engine/renditions.sh setup. '
+                            'For stereo mixes or melody arrangements '
+                            'run bash local-engine/setup_localengine.sh with --finished-mix or --audio-only.')
     try:
         host = os.environ.get('DOCKER_HOST', '')
         endpoint = command(['docker', 'context', 'inspect', '--format', '{{.Endpoints.docker.Host}}']).stdout.strip()

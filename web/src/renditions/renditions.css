@@ -1,0 +1,29 @@
+.rendition-studio audio {
+  display: block;
+  width: 100%;
+  margin: 10px 0 14px;
+}
+.rendition-styles {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(185px, 100%), 1fr));
+  gap: 8px;
+  margin: 12px 0;
+}
+.rendition-styles button {
+  display: grid;
+  justify-content: start;
+  justify-items: start;
+  gap: 3px;
+  height: auto;
+  padding: 10px 12px;
+  text-align: left;
+  white-space: normal;
+}
+.rendition-styles button span {
+  font-size: 12px;
+  font-weight: 400;
+  color: var(--muted-foreground);
+}
+.rendition-studio .mix-save a {
+  padding-inline: 10px;
+}

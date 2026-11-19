@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { lazy, Suspense, useEffect, useMemo, useRef, useState } from "react";
 import {
   Link,
   NavLink,
@@ -56,6 +56,8 @@ import MixLibrary from "../mixes/MixLibrary";
 import MixEditor from "../mixes/MixEditor";
 import { NewProject } from "./NewProject";
 import "./studio.css";
+const RecordingLibrary = lazy(() => import("../renditions/RecordingLibrary"));
+const RenditionStudio = lazy(() => import("../renditions/RenditionStudio"));
 const scenarios: { value: Scenario; label: string }[] = [
   { value: "normal", label: "Complete project" },
   { value: "empty", label: "Empty library" },
@@ -66,16 +68,16 @@ const scenarios: { value: Scenario; label: string }[] = [
   { value: "stale", label: "Stale proposal" },
 ];
 export default function StudioApp() {
-  const [mode, setModeState] = useState<Mode>(() =>
-      new URLSearchParams(location.search).get("mode") === "prototype"
-        ? "prototype"
-        : new URLSearchParams(location.search).get("mode") === "backend"
-          ? "backend"
-          : storage("djound.mode", "backend") === "prototype"
-            ? "prototype"
-            : "backend",
-    ),
-    [scenario, setScenarioState] = useState<Scenario>("normal");
+  const [mode, setModeState] = useState<Mode>(() => {
+    const explicit = new URLSearchParams(location.search).get("mode");
+    if (explicit === "prototype" || explicit === "backend") return explicit;
+    const section = location.pathname.split("/")[1];
+    if (section === "renditions" || section === "mixes") return "backend";
+    return storage("djound.mode", "backend") === "prototype"
+      ? "prototype"
+      : "backend";
+  });
+  const [scenario, setScenarioState] = useState<Scenario>("normal");
   // Explicit URL mode survives client navigation that removes the query string.
   useEffect(() => remember("djound.mode", mode), [mode]);
   const service = useMemo(
@@ -153,6 +155,12 @@ function Shell() {
         )}
         <nav aria-label="Main navigation">
           {mode === "backend" && (
+            <NavLink to="/renditions" end>
+              <Plus />
+              New project
+            </NavLink>
+          )}
+          {mode === "backend" && (
             <NavLink to="/mixes">
               <SlidersHorizontal />
               Mix editor
@@ -162,21 +170,23 @@ function Shell() {
             <Folder />
             Library
           </NavLink>
-          <NavLink to="/remix/new">
-            <Plus />
-            New project
-          </NavLink>
+          {mode === "prototype" && (
+            <NavLink to="/remix/new">
+              <Plus />
+              New project
+            </NavLink>
+          )}
           <Link
             className={
               location.pathname.startsWith("/remix/") &&
-              location.pathname !== "/remix/new"
+              (mode === "backend" || location.pathname !== "/remix/new")
                 ? "active"
                 : ""
             }
             to={projectPath}
           >
             <SlidersHorizontal />
-            Project Studio
+            {mode === "backend" ? "Melody studio" : "Project Studio"}
           </Link>
         </nav>
         <div className="workspace-mode">
@@ -204,6 +214,26 @@ function Shell() {
       <main id="workspace">
         <Routes>
           <Route path="/" element={<LibraryPage />} />
+          {mode === "backend" && (
+            <>
+              <Route
+                path="/renditions"
+                element={
+                  <Suspense fallback={<Loading />}>
+                    <RecordingLibrary />
+                  </Suspense>
+                }
+              />
+              <Route
+                path="/renditions/:id"
+                element={
+                  <Suspense fallback={<Loading />}>
+                    <RenditionStudio />
+                  </Suspense>
+                }
+              />
+            </>
+          )}
           {mode === "backend" && (
             <Route path="/mixes" element={<MixLibrary />} />
           )}
@@ -296,8 +326,8 @@ function Shell() {
               </>
             ) : (
               <p>
-                Your existing backend must be running on port 8080. AI-dependent
-                actions report real availability; no sample fallback is used.
+                Open your local projects here. Start Djound in LOCAL mode to
+                generate new audio with its installed engines.
               </p>
             )}
           </div>
@@ -306,14 +336,9 @@ function Shell() {
     </div>
   );
 }
-function ProjectHeader({
-  project,
-  eyebrow = "PROJECT STUDIO",
-}: {
-  project: Project;
-  eyebrow?: string;
-}) {
+function ProjectHeader({ project }: { project: Project }) {
   const [actions, setActions] = useState(false);
+  const { mode } = useStudio();
   return (
     <header className="project-header">
       <Sheet open={actions} onOpenChange={setActions}>
@@ -348,7 +373,9 @@ function ProjectHeader({
                 onClick={() => setActions(false)}
               >
                 <Music2 />
-                Open Project Studio
+                {mode === "backend"
+                  ? "Open melody studio"
+                  : "Open Project Studio"}
               </Link>
             </Button>
             <Button variant="ghost" asChild>
@@ -365,7 +392,9 @@ function ProjectHeader({
           </div>
         </SheetContent>
       </Sheet>
-      <span className="eyebrow">{eyebrow}</span>
+      <span className="eyebrow">
+        {mode === "backend" ? "MELODY STUDIO" : "PROJECT STUDIO"}
+      </span>
       <h1>{project.title}</h1>
       <p>
         {project.fileName} · {clock(project.tracks[0]?.duration ?? 0)}

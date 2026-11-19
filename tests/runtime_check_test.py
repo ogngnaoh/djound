@@ -18,14 +18,17 @@ spec.loader.exec_module(runtime)
 
 
 class RuntimeCheckTest(unittest.TestCase):
-    def test_either_local_editor_can_launch_with_its_own_runtime(self):
+    def test_each_local_editor_can_launch_with_its_own_runtime(self):
         environment = {'DJOUND_LOCAL_PYTHON': '/melody/python', 'DJOUND_MIX_PYTHON': '/mix/python',
-                       'DJOUND_LOCAL_WORKER': '/worker'}
-        with patch.object(runtime, 'ready_engine', side_effect=[False, True]) as ready:
+                       'DJOUND_LOCAL_WORKER': '/worker', 'DJOUND_RENDITION_WORKER': '/renditions'}
+        with patch.object(runtime, 'ready_engine', side_effect=[False, False, True]) as ready:
             self.assertEqual(runtime.local_editors(environment), ['finished mixes'])
-        self.assertEqual(ready.call_args_list[1].args, ('/mix/python', '/worker', '--check-mix'))
-        with patch.object(runtime, 'ready_engine', side_effect=[True, False]):
+        self.assertEqual(ready.call_args_list[2].args, ('/mix/python', '/worker', '--check-mix'))
+        self.assertEqual(ready.call_args_list[0].args, ('/melody/python', '/renditions', '--check'))
+        with patch.object(runtime, 'ready_engine', side_effect=[False, True, False]):
             self.assertEqual(runtime.local_editors(environment), ['melody arrangements'])
+        with patch.object(runtime, 'ready_engine', side_effect=[True, False, False]):
+            self.assertEqual(runtime.local_editors(environment), ['song renditions'])
         with patch.object(runtime, 'ready_engine', return_value=False):
             self.assertEqual(runtime.local_editors(environment), [])
 

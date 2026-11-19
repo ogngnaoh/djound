@@ -35,12 +35,19 @@ export function NewProject() {
     <div className="page-grid">
       <section className="main-column new-project">
         <header className="project-header">
-          <span className="eyebrow">NEW PROJECT</span>
+          <span className="eyebrow">
+            {mode === "backend" ? "MELODY STUDIO" : "NEW PROJECT"}
+          </span>
           <h1>Start with a melody.</h1>
           {mode === "backend" && (
-            <Link className="text-action" to="/mixes">
-              Edit a finished mix <ArrowRight size={15} />
-            </Link>
+            <div className="mix-choice">
+              <Link className="text-action" to="/renditions">
+                Reimagine a recording <ArrowRight size={15} />
+              </Link>
+              <Link className="text-action" to="/mixes">
+                Edit a finished mix <ArrowRight size={15} />
+              </Link>
+            </div>
           )}
           <p>A familiar tune. A different possibility.</p>
         </header>
