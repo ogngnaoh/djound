@@ -138,6 +138,35 @@ class PerformanceTest(unittest.TestCase):
         self.assertEqual((self.parent, self.destination, "cello duet"), perform.call_args.args)
         self.assertNotIn("cover_noise_strength", perform.call_args.kwargs)
 
+    def test_instrument_change_reuses_the_edited_passage_for_its_tune_and_rhythm(self):
+        from unittest.mock import Mock
+        import time
+
+        def revoice(melody, guide, *, program, deadline, preserve_register):
+            self.assertEqual((self.parent, 42), (melody, program))
+            self.write(guide, 50, 2)
+            return True
+
+        backing = Mock()
+        def accompany(guide, performance, output, *, deadline):
+            self.assertEqual(("melody.wav", self.parent), (guide.name, performance))
+            self.write(output, 62, 2)
+            return backing
+
+        with (patch.object(music, "build_melody_guide", side_effect=revoice),
+              patch("rendition_sketch.backing_available", return_value=True),
+              patch("rendition_sketch.build_arrangement_sketch", side_effect=accompany),
+              patch.object(music.audio, "render_take", side_effect=AssertionError("Regenerated the rhythm section"))):
+            made = music._perform_with_guide(self.parent, self.parent, self.destination, self.root,
+                                             "Cello lead", "Cello lead", "Give it to the cello",
+                                             "Give it to the cello", True, 1., 2., time.monotonic() + 5,
+                                             voicing=(42, False), revoice_only=True)
+        self.assertTrue(made)
+        backing.close.assert_called_once()
+        # The constant-valued fixture is room tone; a new attack here would be audible.
+        with wave.open(str(self.destination)) as result, wave.open(str(self.parent)) as source:
+            self.assertEqual(source.readframes(88200), result.readframes(88200))
+
     def test_local_melody_recovery_uses_an_upload_excerpt_and_keeps_parent_around_it(self):
         original = self.root / "original.wav"
         self.write(self.parent, 10, 70)

@@ -65,6 +65,9 @@ def perform_score(parent, original, destination, work, *, direction, caption, pa
     render_score(tracks, seconds, score, deadline=deadline, room=plan.get("room", .44))
     if scored_ancestor:
         intervals = scored_ancestor["editedFrames"]
+        same_performance = all(plan.get(field) == parent_plan.get(field) for field in
+                               ("bpm", "meter", "subdivision", "roles", "phraseInteraction", "phraseDynamics",
+                                "harmony", "phrasing", "leadTouch", "room", "realization"))
         def passage_file(start, end, folder):
             if passage_policy == "keep":
                 return parent
@@ -77,10 +80,14 @@ def perform_score(parent, original, destination, work, *, direction, caption, pa
                 solo = all(role.get("program") == plan["leadProgram"] for role in plan["roles"])
                 voiced = _perform_with_guide(parent, parent, part, folder, caption, caption, direction,
                                              direction, True, start / audio.RATE, end / audio.RATE, deadline,
-                                             voicing=(plan["leadProgram"], solo))
+                                             voicing=(plan["leadProgram"], solo), revoice_only=same_performance)
             if not voiced:
                 audio.render_take(parent, part, caption, duration=frames / audio.RATE,
                                   start=start / audio.RATE, end=end / audio.RATE, deadline=deadline)
+                if same_performance and plan["leadProgram"] != parent_plan["leadProgram"]:
+                    shaped = folder / "shaped.wav"
+                    audio.follow_passage_dynamics(parent, part, shaped, start, end, deadline=deadline)
+                    return shaped
             return part
 
         audio.combine_performances(score, destination, frames, intervals, passage_file, deadline=deadline)
@@ -142,7 +149,7 @@ def perform_take(parent, destination, caption, *, description, prompt, duration,
 
 
 def _perform_with_guide(parent, reference, destination, work, caption, description, prompt, named_direction,
-                        keep_ensemble, start, end, deadline, *, voicing=None):
+                        keep_ensemble, start, end, deadline, *, voicing=None, revoice_only=False):
     from rendition_voicing import accompaniment_lane, choose_voicing, guide_named, preserve_register
 
     melody = reference or parent
@@ -183,7 +190,18 @@ def _perform_with_guide(parent, reference, destination, work, caption, descripti
         audio.render_take(performance, draft, caption, duration=seconds, deadline=deadline)
         performance = draft
     refined = work / "refined.wav"
-    if lane:
+    if revoice_only:
+        # An instrument change inherits the accepted performance. Keep its
+        # measured backing on its own clock and play the new lead over it.
+        result = guide
+        if not solo:
+            result = work / "revoiced.wav"
+            backing = build_arrangement_sketch(guide, performance, result, deadline=deadline)
+            backing.close()
+        shaped = work / "shaped.wav"
+        audio.follow_passage_dynamics(performance, result, shaped, 0, right - left, deadline=deadline)
+        result = shaped
+    elif lane:
         result = _play_duet(guide, work, program, lane, named_direction, seconds, deadline)
     elif solo:
         report_stage("rendering")
@@ -199,7 +217,7 @@ def _perform_with_guide(parent, reference, destination, work, caption, descripti
                               cover_noise_strength=0.20, deadline=deadline)
             report_stage("finishing")
             restore_backing(performance, refined, result, cache=backing, deadline=deadline)
-    if not lane and guide_named(program, named_direction):
+    if not revoice_only and not lane and guide_named(program, named_direction):
         from rendition_lead import retain_requested_lead
         report_stage("finishing")
         finished = work / "finished.wav"

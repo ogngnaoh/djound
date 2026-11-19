@@ -33,6 +33,31 @@ def timed_samples(frames, base):
 
 
 class RecordedPassageTest(unittest.TestCase):
+    def test_revoicing_preserves_accents_and_rests_with_dc_offset(self):
+        import numpy as np
+
+        with tempfile.TemporaryDirectory() as folder:
+            root = Path(folder)
+            source, candidate, result = (root / name for name in ("selected.wav", "cello.wav", "shaped.wav"))
+            rate = render.RATE
+            times = np.arange(rate * 2) / rate
+            # A late loud note in the candidate would interrupt the accepted fade.
+            envelope = np.select([times < .5, times < 1., times < 1.5], [2700, 5000, 1300], 0)
+            old = 38 + np.rint(np.sin(2 * np.pi * 220 * times) * envelope).astype("<i2")
+            new = np.rint(np.sin(2 * np.pi * 330 * times) * 4800).astype("<i2")
+            for path, signal in ((source, old), (candidate, new)):
+                path.write_bytes(wav_bytes(rate, 2, signal.repeat(2).tobytes()))
+            render.follow_passage_dynamics(source, candidate, result, rate // 2, len(old),
+                                           deadline=time.monotonic() + 5)
+            with wave.open(str(result)) as wav:
+                played = np.frombuffer(wav.readframes(wav.getnframes()), "<i2")[::2]
+            np.testing.assert_array_equal(played[:rate//2], new[:rate//2])
+            np.testing.assert_array_equal(played[-rate//4:], old[-rate//4:])
+            for start in (.6, 1.1):
+                section = slice(int(start * rate), int((start + .22) * rate))
+                self.assertAlmostEqual(played[section].std() / old[section].std(), 1., delta=.04)
+                self.assertLess(abs(np.corrcoef(played[section], old[section])[0, 1]), .03)
+
     def test_interior_and_end_keep_every_selected_sample(self):
         with tempfile.TemporaryDirectory() as folder:
             root = Path(folder)

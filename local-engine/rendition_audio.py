@@ -376,6 +376,56 @@ def _separate_output(destination, *recordings):
             raise ValueError("Save a new take separately from its input recordings.")
 
 
+def follow_passage_dynamics(parent, revoiced, destination, start, end, *, deadline):
+    """Carry the accepted passage's accents, fades and rests into a change of instrument."""
+    import numpy as np
+
+    _separate_output(destination, parent, revoiced)
+    hop = RATE // 40
+    with (wave.open(str(parent), "rb") as source, wave.open(str(revoiced), "rb") as take,
+          tempfile.TemporaryDirectory(dir=destination.parent) as directory):
+        frames = _pcm_frames(source)
+        if frames != _pcm_frames(take) or not 0 <= start < end <= frames:
+            raise ValueError("A melody change must use the selected performance's timeline.")
+        # Measure AC energy separately in each channel. A quiet tail with a DC
+        # offset is still a rest. Identical quiet music or room tone can be kept.
+        centers, gains, activity = [], [], []
+        for begin in range(start, end, hop):
+            _remaining(deadline)
+            count = min(hop, end - begin)
+            levels = []
+            for recording in (source, take):
+                recording.setpos(begin)
+                block = np.frombuffer(recording.readframes(count), "<i2").reshape(-1, 2)
+                levels.append(float(np.sqrt(block.var(axis=0).mean())))
+            dry, wet = levels
+            centers.append(begin + (count - 1) / 2)
+            # Bound lift so a missing played note never raises separation noise.
+            gains.append(min(1.6, dry / max(1., wet)))
+            activity.append(float(np.clip((dry - 3) / 6, 0, 1)))
+        output = Path(directory) / "shaped.wav"
+        with wave.open(str(output), "wb") as writer:
+            writer.setparams(take.getparams())
+            _copy_pcm(take, 0, start, writer)
+            for begin in range(start, end, BLOCK):
+                _remaining(deadline)
+                count = min(BLOCK, end - begin)
+                samples = np.arange(begin, begin + count)
+                gain = np.interp(samples, centers, gains)[:, None]
+                weight = np.interp(samples, centers, activity)[:, None]
+                source.setpos(begin)
+                take.setpos(begin)
+                dry = np.frombuffer(source.readframes(count), "<i2").reshape(-1, 2)
+                wet = np.frombuffer(take.readframes(count), "<i2").reshape(-1, 2)
+                mixed = dry * (1 - weight) + wet * (gain * weight)
+                peak = np.max(np.abs(mixed), axis=1, keepdims=True)
+                mixed *= np.minimum(1., 32767 / np.maximum(1., peak))
+                writer.writeframesraw(np.rint(mixed).astype("<i2").tobytes())
+            _copy_pcm(take, end, frames, writer)
+        _remaining(deadline)
+        os.link(output, destination)
+
+
 def combine_performances(score, destination, frames, intervals, passage_file, *, deadline):
     """Keep the chosen samples intact and blend on the new score's side of each cut."""
     _separate_output(destination, score)
