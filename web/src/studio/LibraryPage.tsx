@@ -102,6 +102,11 @@ export function LibraryPage() {
                 </Link>
               </article>
             ))}
+            {recordings.data.length > 5 && (
+              <Link className="text-action" to="/renditions">
+                View all recordings
+              </Link>
+            )}
           </section>
         )}
         {!!mixes.data?.items.length && (
