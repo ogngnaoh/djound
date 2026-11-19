@@ -23,6 +23,10 @@ public class LocalWorker implements AutoCloseable {
 
     private final ObjectMapper json = new ObjectMapper();
     private final Path root, python, script;
+
+    @Value("${djound.mix-python:}")
+    private String mixPython;
+
     private final Map<String, Process> processes = new ConcurrentHashMap<>();
     private volatile boolean closing;
     private long checkedAt;
@@ -104,7 +108,16 @@ public class LocalWorker implements AutoCloseable {
 
     public JsonNode execute(String id, Map<String, Object> request, BooleanSupplier cancelled)
             throws Exception {
-        if (!readiness().ready())
+        boolean mix =
+                Set.of("mix-decode", "mix-prepare", "mix-preview")
+                        .contains(request.get("operation"));
+        Path executable =
+                mix && mixPython != null && !mixPython.isBlank()
+                        ? Path.of(mixPython).toAbsolutePath().normalize()
+                        : python;
+        if (mix
+                ? !Files.isExecutable(executable) || !Files.isRegularFile(script)
+                : !readiness().ready())
             throw new ApiProblem(
                     503,
                     "LOCAL_ENGINE_UNAVAILABLE",
@@ -117,7 +130,7 @@ public class LocalWorker implements AutoCloseable {
         Files.writeString(input, json.writeValueAsString(request), StandardOpenOption.CREATE_NEW);
         ProcessBuilder builder =
                 new ProcessBuilder(
-                        python.toString(),
+                        executable.toString(),
                         script.toString(),
                         "--request",
                         input.toString(),
@@ -133,8 +146,12 @@ public class LocalWorker implements AutoCloseable {
         builder.redirectErrorStream(true).redirectOutput(dir.resolve("worker.log").toFile());
         Process process = builder.start();
         processes.put(id, process);
-        long deadline = System.nanoTime()
-                + TimeUnit.SECONDS.toNanos("audition".equals(request.get("operation")) ? 35 : 180);
+        long deadline =
+                System.nanoTime()
+                        + TimeUnit.SECONDS.toNanos(
+                                "mix-prepare".equals(request.get("operation"))
+                                        ? 600
+                                        : "audition".equals(request.get("operation")) ? 35 : 180);
         try {
             while (!process.waitFor(200, TimeUnit.MILLISECONDS)) {
                 if (closing || cancelled.getAsBoolean())
@@ -142,7 +159,7 @@ public class LocalWorker implements AutoCloseable {
                             409,
                             "CANCELLED",
                             "Local work was cancelled; your saved audio and notes remain"
-                                + " available.",
+                                    + " available.",
                             "EDIT_TEXT");
                 if (System.nanoTime() > deadline)
                     throw new ApiProblem(
@@ -163,6 +180,11 @@ public class LocalWorker implements AutoCloseable {
             JsonNode response = json.readTree(Files.readString(result));
             if (process.exitValue() != 0 || !response.path("status").asText().equals("succeeded")) {
                 String code = response.path("error").path("code").asText("LOCAL_WORKER_FAILED");
+                if ("mix-preview".equals(request.get("operation"))
+                        && "MIX_WOULD_CLIP".equals(code)
+                        && response.path("schemaVersion").asInt() == 1
+                        && "mix-preview".equals(response.path("operation").asText()))
+                    return response;
                 String message =
                         response.path("error")
                                 .path("message")

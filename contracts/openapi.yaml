@@ -6,6 +6,183 @@ info:
 servers:
   - url: /
 paths:
+  /api/mixes:
+    get:
+      operationId: listFinishedMixes
+      description: List imported projects with their current playback and version state.
+      responses:
+        '200':
+          description: Imported mixes
+          content:
+            application/json:
+              schema: { type: object, required: [items], properties: { items: { type: array, items: { $ref: '#/components/schemas/MixState' } } } }
+        default: { $ref: '#/components/responses/Problem' }
+    post:
+      operationId: importFinishedMix
+      description: Store an immutable stereo MP3 and start decoding its canonical PCM timeline.
+      parameters:
+        - { name: Idempotency-Key, in: header, schema: { type: string, maxLength: 160 } }
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema: { type: object, required: [file], properties: { file: { type: string, format: binary } } }
+      responses:
+        '201': { $ref: '#/components/responses/MixState' }
+        default: { $ref: '#/components/responses/Problem' }
+  /api/mixes/{id}:
+    get:
+      operationId: getFinishedMix
+      description: Reopen the mix with its saved selection, heard take and kept take.
+      parameters:
+        - { $ref: '#/components/parameters/ResourceId' }
+      responses:
+        '200': { $ref: '#/components/responses/MixState' }
+        default: { $ref: '#/components/responses/Problem' }
+  /api/mixes/{id}/retry:
+    post:
+      operationId: retryMixPreparation
+      description: Retry an interrupted decode or passage preparation.
+      parameters:
+        - { $ref: '#/components/parameters/ResourceId' }
+      responses:
+        '200': { $ref: '#/components/responses/MixState' }
+        default: { $ref: '#/components/responses/Problem' }
+  /api/mixes/{id}/selection:
+    put:
+      operationId: selectMixPassage
+      description: Select one passage using inclusive start and exclusive end PCM frame indices.
+      parameters:
+        - { $ref: '#/components/parameters/ResourceId' }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [startFrame, endFrame]
+              properties:
+                startFrame: { type: integer, minimum: 0 }
+                endFrame: { type: integer, minimum: 0 }
+                basisTakeId: { type: string }
+      responses:
+        '200': { $ref: '#/components/responses/MixState' }
+        default: { $ref: '#/components/responses/Problem' }
+  /api/mixes/{id}/edits:
+    post:
+      operationId: previewMixEdit
+      description: Interpret a typed request against its audible basis and return a durable take or clarification. Replay a successful request with the same project, idempotency key and body to retrieve its original take.
+      parameters:
+        - { $ref: '#/components/parameters/ResourceId' }
+        - { name: Idempotency-Key, in: header, required: false, schema: { type: string, minLength: 1, maxLength: 160 } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [text, basisTakeId, startFrame, endFrame]
+              properties:
+                text: { type: string, minLength: 1, maxLength: 1000 }
+                basisTakeId: { type: string }
+                startFrame: { type: integer, minimum: 0 }
+                endFrame: { type: integer, minimum: 0 }
+                referenceTakeId: { type: string }
+                passageTrimDb: { type: number, minimum: -12, maximum: 0 }
+      responses:
+        '200':
+          description: Preview, playable reference choices or explicit clipping alternatives
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/MixEditReply' }
+        default: { $ref: '#/components/responses/Problem' }
+  /api/mixes/{id}/heard:
+    put:
+      operationId: acknowledgeMixPlayback
+      description: Record the take that started playback.
+      parameters:
+        - { $ref: '#/components/parameters/ResourceId' }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [takeId]
+              properties:
+                takeId: { type: string }
+      responses:
+        '200': { $ref: '#/components/responses/MixState' }
+        default: { $ref: '#/components/responses/Problem' }
+  /api/mixes/{id}/keep:
+    post:
+      operationId: keepMixTake
+      description: Promote the named auditioned WAV by its verified hash. A replay cannot create another version.
+      parameters:
+        - { $ref: '#/components/parameters/ResourceId' }
+        - { name: Idempotency-Key, in: header, required: true, schema: { type: string, minLength: 1, maxLength: 160 } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [takeId, sha256]
+              properties:
+                takeId: { type: string }
+                sha256: { type: string, pattern: '^[0-9a-f]{64}$' }
+      responses:
+        '200': { $ref: '#/components/responses/MixState' }
+        default: { $ref: '#/components/responses/Problem' }
+  /api/mixes/{id}/undo:
+    post:
+      operationId: undoMixTake
+      description: Move from this kept take to its exact parent.
+      parameters:
+        - { $ref: '#/components/parameters/ResourceId' }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [takeId]
+              properties:
+                takeId: { type: string }
+      responses:
+        '200': { $ref: '#/components/responses/MixState' }
+        default: { $ref: '#/components/responses/Problem' }
+  /api/mixes/{id}/import:
+    get:
+      operationId: streamImportedMp3
+      description: Stream the unmodified imported MP3 while the canonical WAV is being prepared.
+      parameters:
+        - { $ref: '#/components/parameters/ResourceId' }
+      responses:
+        '200':
+          description: Original compressed recording
+          content: { audio/mpeg: { schema: { type: string, format: binary } } }
+        default: { $ref: '#/components/responses/Problem' }
+  /api/mixes/{id}/takes/{takeId}/audio:
+    get:
+      operationId: streamMixTake
+      description: Stream an immutable mix, including the original canonical WAV.
+      parameters:
+        - { $ref: '#/components/parameters/ResourceId' }
+        - { name: takeId, in: path, required: true, schema: { type: string } }
+      responses:
+        '200': { $ref: '#/components/responses/MixAudio' }
+        default: { $ref: '#/components/responses/Problem' }
+  /api/mixes/{id}/takes/{takeId}/export:
+    get:
+      operationId: exportMixTake
+      description: Download a kept WAV after checking it against the auditioned hash.
+      parameters:
+        - { $ref: '#/components/parameters/ResourceId' }
+        - { name: takeId, in: path, required: true, schema: { type: string } }
+      responses:
+        '200': { $ref: '#/components/responses/MixAudio' }
+        default: { $ref: '#/components/responses/Problem' }
   /api/explorations/{id}/local/tone-auditions:
     post:
       operationId: auditionLocalTone
@@ -464,12 +641,77 @@ components:
       required: true
       schema: { type: string, minLength: 8, maxLength: 128, pattern: '^[A-Za-z0-9._:-]{8,128}$' }
   responses:
+    MixState:
+      description: Current imported project state
+      content: { application/json: { schema: { $ref: '#/components/schemas/MixState' } } }
+    MixAudio:
+      description: Stereo PCM16 WAV on the project's canonical timeline
+      content: { audio/wav: { schema: { type: string, format: binary } } }
     Problem:
       description: Typed recoverable application error
       content:
         application/problem+json:
           schema: { $ref: '#/components/schemas/Problem' }
   schemas:
+    MixSelection:
+      type: object
+      required: [startFrame, endFrame]
+      properties:
+        startFrame: { type: integer, minimum: 0 }
+        endFrame: { type: integer, minimum: 0 }
+    MixTake:
+      type: object
+      required: [id, number, parentId, sourceTakeId, selectionBaseId, startFrame, endFrame, vocalsDb, drumsDb, passageTrimDb, lastControl, lastChangeDb, direction, label, text, audioUrl, sha256, kept, heard]
+      properties:
+        id: { type: string }
+        number: { type: integer, minimum: 0 }
+        parentId: { type: string }
+        sourceTakeId: { type: [string, 'null'] }
+        selectionBaseId: { type: string }
+        startFrame: { type: integer, minimum: 0 }
+        endFrame: { type: integer, minimum: 0 }
+        vocalsDb: { type: number }
+        drumsDb: { type: number }
+        passageTrimDb: { type: number }
+        lastControl: { type: string, enum: [vocals, drums] }
+        lastChangeDb: { type: number }
+        direction: { type: string, enum: [up, down, unchanged] }
+        label: { type: string }
+        text: { type: string }
+        audioUrl: { type: string }
+        sha256: { type: string }
+        kept: { type: boolean }
+        heard: { type: boolean }
+    MixState:
+      type: object
+      required: [id, title, sampleRate, frames, durationMs, importUrl, sourceUrl, revision, selection, selectionBaseId, preparation, error, heardTakeId, keptTakeId, takes]
+      properties:
+        id: { type: string }
+        title: { type: string }
+        sampleRate: { type: integer, const: 44100 }
+        frames: { type: integer, minimum: 0 }
+        durationMs: { type: integer, minimum: 0 }
+        importUrl: { type: string }
+        sourceUrl: { type: [string, 'null'] }
+        revision: { type: integer, minimum: 0 }
+        selection: { anyOf: [{ $ref: '#/components/schemas/MixSelection' }, { type: 'null' }] }
+        selectionBaseId: { type: string }
+        preparation: { type: string, enum: [DECODING, IDLE, PREPARING, READY, FAILED] }
+        error: { type: [string, 'null'] }
+        heardTakeId: { type: string }
+        keptTakeId: { type: string }
+        takes: { type: array, items: { $ref: '#/components/schemas/MixTake' } }
+    MixEditReply:
+      type: object
+      required: [status, message, take, choices, control, suggestedTrimDb, suggestedGainDb]
+      properties:
+        status: { type: string, enum: [PREVIEW, CLARIFY, CLIPPING] }
+        message: { type: string }
+        take: { anyOf: [{ $ref: '#/components/schemas/MixTake' }, { type: 'null' }] }
+        choices: { type: array, items: { $ref: '#/components/schemas/MixTake' } }
+        control: { enum: [vocals, drums, null] }
+        suggestedTrimDb: { type: [number, 'null'] }
+        suggestedGainDb: { type: [number, 'null'] }
     Problem:
       type: object
       required: [type, title, status, detail, code, permittedActions]

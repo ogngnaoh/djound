@@ -89,6 +89,151 @@ class BackendIntegrationTest {
     }
 
     @Test
+    void keepsTheAuditionedMixAcrossLaterPreviewsRestartAndReceiptReplay() throws Exception {
+        var mix = app.getBean(com.djound.mix.MixProjects.class);
+        var db = app.getBean(JdbcClient.class);
+        String id = UUID.randomUUID().toString(), passage = UUID.randomUUID().toString();
+        byte[] original = wave(44100, 2, 16, 1);
+        Files.write(root.resolve("original.wav"), original);
+        Files.write(root.resolve("prepared.npz"), original);
+        String originalHash =
+                HexFormat.of()
+                        .formatHex(
+                                java.security.MessageDigest.getInstance("SHA-256")
+                                        .digest(original));
+        db.sql(
+                        """
+                        INSERT INTO mix_project(id,title,import_sha,duration_ms,frames,source_path,source_sha,preparation)
+                        VALUES(?,'song.mp3',?,1000,44100,'original.wav',?,'READY')
+                        """)
+                .params(id, originalHash, originalHash)
+                .update();
+        db.sql(
+                        "INSERT INTO"
+                            + " mix_passage(id,project_id,base_id,start_frame,end_frame,prep_path,prep_sha)"
+                            + " VALUES(?,?,'original',100,200,'prepared.npz',?)")
+                .params(passage, id, originalHash)
+                .update();
+        db.sql("UPDATE mix_project SET passage_id=? WHERE id=?").params(passage, id).update();
+        String first = null, hash = null;
+        for (int n = 1; n <= 2; n++) {
+            String take = UUID.randomUUID().toString(), file = take + ".wav";
+            byte[] preview = original.clone();
+            preview[44 + 4 * 150] = (byte) n;
+            Files.write(root.resolve(file), preview);
+            String sha =
+                    HexFormat.of()
+                            .formatHex(
+                                    java.security.MessageDigest.getInstance("SHA-256")
+                                            .digest(preview));
+            db.sql(
+                            """
+                            INSERT INTO mix_take(id,project_id,number,passage_id,parent_id,vocals_db,drums_db,last_control,
+                            last_change_db,request_text,label,audio_path,sha256)
+                            VALUES(?,?,?,?,'original',?,0,'vocals',1,'lift the voice','Vocal level',?,?)
+                            """)
+                    .params(take, id, n, passage, n, file, sha)
+                    .update();
+            mix.heard(id, take);
+            if (n == 1) {
+                first = take;
+                hash = sha;
+            }
+        }
+        var command = new com.djound.mix.MixModels.Keep(first, hash);
+        var edit =
+                new com.djound.mix.MixModels.Edit(
+                        "lift the voice", "original", 100, 200, null, null);
+        db.sql(
+                        "INSERT INTO mix_edit_receipt(project_id,command_key,request_json,take_id)"
+                                + " VALUES(?,?,?,?)")
+                .params(
+                        id,
+                        "preview-key",
+                        new tools.jackson.databind.ObjectMapper().writeValueAsString(edit),
+                        first)
+                .update();
+        String key = "keep-heard-version";
+        assertEquals(first, mix.keep(id, command, key).keptTakeId());
+        assertEquals(
+                hash,
+                HexFormat.of()
+                        .formatHex(
+                                java.security.MessageDigest.getInstance("SHA-256")
+                                        .digest(
+                                                Files.readAllBytes(
+                                                        mix.takePath(id, first, true)))));
+        app.close();
+        app = launch(root);
+        var restored = app.getBean(com.djound.mix.MixProjects.class);
+        var replay = restored.keep(id, command, key);
+        assertEquals(first, replay.keptTakeId());
+        assertEquals(first, restored.edit(id, edit, "preview-key").take().id());
+        assertEquals(
+                "IDEMPOTENCY_CONFLICT",
+                assertThrows(
+                                ApiProblem.class,
+                                () ->
+                                        restored.edit(
+                                                id,
+                                                new com.djound.mix.MixModels.Edit(
+                                                        "lift the drums",
+                                                        "original",
+                                                        100,
+                                                        200,
+                                                        null,
+                                                        null),
+                                                "preview-key"))
+                        .code());
+        assertEquals(
+                1, replay.takes().stream().filter(com.djound.mix.MixModels.Take::kept).count());
+        var undone = restored.undo(id, first);
+        assertEquals("original", undone.keptTakeId());
+        assertEquals(replay.heardTakeId(), undone.heardTakeId());
+        restored.heard(id, "original");
+        var missingTake =
+                restored.edit(
+                        id,
+                        new com.djound.mix.MixModels.Edit(
+                                "Use drums from version 99", "original", 100, 200, null, null),
+                        "absent-take");
+        assertEquals("CLARIFY", missingTake.status());
+        assertEquals("drums", missingTake.control());
+        assertEquals(2, restored.state(id).takes().size());
+        assertEquals("original", restored.keep(id, command, key).keptTakeId());
+        assertEquals(
+                "IDEMPOTENCY_CONFLICT",
+                assertThrows(
+                                ApiProblem.class,
+                                () ->
+                                        restored.keep(
+                                                id,
+                                                new com.djound.mix.MixModels.Keep(
+                                                        command.takeId(), "different"),
+                                                key))
+                        .code());
+        Files.delete(root.resolve("prepared.npz"));
+        assertEquals(
+                "MIX_PREPARATION_INVALID",
+                assertThrows(
+                                ApiProblem.class,
+                                () ->
+                                        restored.edit(
+                                                id,
+                                                new com.djound.mix.MixModels.Edit(
+                                                        "Bring the vocal forward",
+                                                        "original",
+                                                        100,
+                                                        200,
+                                                        null,
+                                                        null),
+                                                null))
+                        .code());
+        assertEquals("FAILED", restored.state(id).preparation());
+        assertTrue(Files.isRegularFile(restored.takePath(id, first, true)));
+    }
+
+    @Test
     void uploadReceiptSurvivesRestartAndKeepsExactBytes() throws Exception {
         var service = app.getBean(Explorations.class);
         var file = wav("Study.wav", 44100, 1, 16, 2);

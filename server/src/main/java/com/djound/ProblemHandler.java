@@ -68,6 +68,12 @@ public class ProblemHandler {
                 List.of("RETRY"));
     }
 
+    // Switching a take or seeking can close an in-flight WAV range response.
+    // Its socket is unavailable, so there is no problem document to send.
+    @ExceptionHandler(
+            org.springframework.web.context.request.async.AsyncRequestNotUsableException.class)
+    void disconnectedAudioResponse() {}
+
     static ResponseEntity<Map<String, Object>> body(
             int status, String code, String detail, List<String> actions) {
         return ResponseEntity.status(status)
