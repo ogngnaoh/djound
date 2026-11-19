@@ -3,6 +3,7 @@ package com.djound.rendition;
 import com.djound.ApiProblem;
 import com.djound.MediaStore;
 import com.djound.generation.GenerationConfiguration;
+import com.fasterxml.jackson.annotation.JsonInclude;
 
 import jakarta.annotation.PostConstruct;
 
@@ -51,6 +52,7 @@ public final class RenditionProjects implements AutoCloseable {
             String request,
             String caption,
             String state,
+            @JsonInclude(JsonInclude.Include.NON_NULL) String progress,
             String audioUrl,
             String exportUrl,
             Double durationSeconds,
@@ -118,8 +120,10 @@ public final class RenditionProjects implements AutoCloseable {
         db.sql(
                         "UPDATE rendition_take SET state='failed',error='Generation was"
                             + " interrupted. Your recording and earlier takes are saved. Submit it"
-                            + " again to retry.' WHERE state='running'")
-                .update();
+                            + " again to retry.' WHERE state='running' RETURNING id")
+                .query(String.class)
+                .list()
+                .forEach(audio::clearProgress);
         if (mode.local()) {
             executor.submit(this::consume);
             wake.offer(true);
@@ -266,6 +270,7 @@ public final class RenditionProjects implements AutoCloseable {
                 job.prompt(),
                 job.caption(),
                 job.state(),
+                "running".equals(job.state()) ? audio.progress(job.id()) : null,
                 ready ? url(job.projectId(), job.id(), "audio") : null,
                 ready ? url(job.projectId(), job.id(), "export") : null,
                 job.frames() == null ? null : seconds(job.frames()),

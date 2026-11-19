@@ -3,6 +3,8 @@ package com.djound.rendition;
 import com.djound.ApiProblem;
 import com.djound.Installation;
 
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Component;
 
@@ -10,6 +12,7 @@ import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.ObjectMapper;
 
 import java.io.*;
+import java.nio.charset.StandardCharsets;
 import java.nio.file.*;
 import java.security.*;
 import java.util.*;
@@ -20,6 +23,8 @@ import javax.sound.sampled.*;
 @Component
 final class RenditionAudio {
     static final int RATE = 44100;
+    private static final Logger log = LoggerFactory.getLogger(RenditionAudio.class);
+    private static final String PROGRESS_ENV = "DJOUND_RENDITION_PROGRESS";
 
     record Wave(int frames, String hash) {}
 
@@ -49,6 +54,37 @@ final class RenditionAudio {
     Path pending(String take) {
         // The renderer creates its output exclusively. Each database take owns one fresh path.
         return directory.resolve(UUID.fromString(take) + ".pending.wav");
+    }
+
+    private Path progressFile(String id) {
+        return directory.resolve(UUID.fromString(id) + ".stage");
+    }
+
+    String progress(String id) {
+        Path file = progressFile(id);
+        if (!Files.isRegularFile(file, LinkOption.NOFOLLOW_LINKS)) return null;
+        try (var input = Files.newInputStream(file, LinkOption.NOFOLLOW_LINKS)) {
+            byte[] data = input.readNBytes(17);
+            if (data.length > 16) return null;
+            return switch (new String(data, StandardCharsets.US_ASCII).strip()) {
+                case "planning" -> "Planning your take…";
+                case "melody" -> "Learning the tune…";
+                case "arranging" -> "Arranging the instruments…";
+                case "rendering" -> "Rendering the performance…";
+                case "finishing" -> "Finishing the take…";
+                default -> null;
+            };
+        } catch (IOException e) {
+            return null;
+        }
+    }
+
+    void clearProgress(String id) {
+        try {
+            Files.deleteIfExists(progressFile(id));
+        } catch (IOException e) {
+            log.debug("Could not remove rendition progress for {}", id, e);
+        }
     }
 
     Path temporary() throws IOException {
@@ -180,11 +216,18 @@ final class RenditionAudio {
             throw new IOException(
                     "The local rendition worker is unavailable. Install the recording rendition"
                             + " engine and try again.");
-        Path result = directory.resolve(id + ".json"), log = directory.resolve(id + ".log");
+        Path result = directory.resolve(id + ".json"), logFile = directory.resolve(id + ".log");
         ProcessBuilder builder = new ProcessBuilder(python.toString(), script.toString());
-        builder.redirectOutput(result.toFile()).redirectError(log.toFile());
-        Process process = builder.start();
+        builder.redirectOutput(result.toFile()).redirectError(logFile.toFile());
+        builder.environment().remove(PROGRESS_ENV);
         try {
+            builder.environment().put(PROGRESS_ENV, Files.createFile(progressFile(id)).toString());
+        } catch (IOException e) {
+            log.debug("Could not attach rendition progress for {}", id, e);
+        }
+        Process process = null;
+        try {
+            process = builder.start();
             try (var out = process.getOutputStream()) {
                 out.write(json.writeValueAsBytes(request));
             }
@@ -211,7 +254,8 @@ final class RenditionAudio {
                                 + " installation.");
             return reply;
         } finally {
-            stop(process);
+            if (process != null) stop(process);
+            clearProgress(id);
         }
     }
 

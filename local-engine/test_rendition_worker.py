@@ -9,6 +9,21 @@ import rendition_worker as worker
 
 
 class RenditionPlannerTest(unittest.TestCase):
+    def test_only_complete_musical_plans_skip_the_scope_fallback(self):
+        valid = {"scope": "whole", "caption": "A cello carries the tune.", "label": "Cello"}
+        self.assertTrue(worker.usable_plan(valid))
+        for field, value in (("scope", "cello"), ("caption", ""), ("caption", 44), ("label", "")):
+            self.assertFalse(worker.usable_plan({**valid, field: value}))
+
+    def test_broad_requests_leave_the_ensemble_open(self):
+        for prompt in ("make it jazz", "make this a piano version", "give it a rainy evening feel"):
+            with self.subTest(prompt=prompt):
+                plan = {"scope": "whole", "caption": prompt, "label": "Another interpretation"}
+                with patch.object(worker, "infer_plan", return_value=(plan, "language model")) as infer:
+                    result = worker.plan_take({"prompt": prompt}, 24)
+                self.assertEqual(infer.call_args.args[0]["listener_request"], prompt)
+                self.assertEqual(result["planner"], "language model")
+
     def test_an_unlisted_arrangement_uses_the_listeners_words_and_selected_take(self):
         request = "Fingerpicked guitar and cello; let the cello sing the tune."
         result = {"scope": "whole", "caption": "Chamber folk duet for guitar and cello.", "label": "Chamber folk", "reference": "parent"}
@@ -28,6 +43,7 @@ class RenditionPlannerTest(unittest.TestCase):
         self.assertEqual(request, interpret.call_args.args[0]["listener_request"])
         self.assertEqual("An oud and cello duet.", decision["caption"])
         self.assertEqual("original", decision["melodyReference"])
+        self.assertFalse(decision["keepEnsemble"])
 
     def test_parent_placeholder_cannot_become_the_new_arrangement_description(self):
         request = "Let a bowed cello play the tune with fingerpicked guitar."
@@ -85,11 +101,12 @@ class RenditionPlannerTest(unittest.TestCase):
     def test_a_paraphrased_reference_uses_both_the_parent_and_the_selected_range(self):
         request = "That bit I hummed in my voice memo belongs here. Keep the duo."
         reply = {"scope":"selection", "caption":"A cello leads the duo.", "label":"The old tune",
-                 "reference":"original"}
+                 "reference":"original", "keep_ensemble":True}
         with patch.object(worker, "infer_plan", return_value=(reply, "local model")):
             decision = worker.plan_take({"prompt":request, "parentCaption":"A cello duo.",
                                          "startSeconds":3, "endSeconds":8}, 31)
         self.assertEqual("original", decision["melodyReference"])
+        self.assertTrue(decision["keepEnsemble"])
         self.assertEqual((3, 8), (decision["appliedStartSeconds"], decision["appliedEndSeconds"]))
 
     def test_mentioning_the_original_can_explicitly_leave_it_out(self):
@@ -112,7 +129,8 @@ class RenditionPlannerTest(unittest.TestCase):
                 self.assertIn("Warm piano trio", caption)
                 self.assertEqual(0.8, options["cover_strength"])
                 destination.write_bytes(source.read_bytes())
-            with patch("rendition_audio.render_take", side_effect=render):
+            with (patch("rendition_performance.guide_available", return_value=False),
+                  patch("rendition_audio.render_take", side_effect=render)):
                 result = worker.run({"prompt": "Closer to the original melody", "original": str(original),
                                      "parentCaption": "Warm piano trio.", "source": str(take), "output": str(output)})
             self.assertEqual(result["state"], "ready")

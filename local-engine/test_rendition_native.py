@@ -1,5 +1,6 @@
 """Check the pinned CLI boundary without loading any model."""
 from pathlib import Path
+import hashlib
 import json
 import os
 import subprocess
@@ -11,6 +12,7 @@ from unittest.mock import patch
 import wave
 
 import rendition_native as native
+import rendition_audio as adapter
 
 
 class NativeRenditionTest(unittest.TestCase):
@@ -37,7 +39,8 @@ class NativeRenditionTest(unittest.TestCase):
     def test_reads_source_conditions_cover_or_repaint_and_uses_only_pinned_models(self):
         timbre = self.home / "folk-parent-clip.wav"
         timbre.touch()
-        for scope in ({}, {"cover_strength": .8, "timbre_reference": timbre}, {"start": .25, "end": .5}):
+        for scope in ({}, {"cover_strength": .8, "cover_noise_strength": .625, "timbre_reference": timbre},
+                      {"start": .25, "end": .5}):
             with self.subTest(scope=scope):
                 def fake_cli(args, **kwargs):
                     self.assertEqual(str(self.binary), args[0])
@@ -50,6 +53,10 @@ class NativeRenditionTest(unittest.TestCase):
                     self.assertEqual(set(native.MODELS), {f.name for f in registry.iterdir()})
                     request = Path(args[args.index("--request") + 1])
                     settings = json.loads(request.read_text())
+                    if "cover_noise_strength" in scope:
+                        self.assertEqual(.625, settings["cover_noise_strength"])
+                    else:
+                        self.assertNotIn("cover_noise_strength", settings)
                     self.assertEqual("[Instrumental]", settings["lyrics"])
                     self.assertEqual("wav16", settings["output_format"])
                     self.assertEqual("Instrumental trio", settings["caption"])
@@ -75,7 +82,74 @@ class NativeRenditionTest(unittest.TestCase):
             for strength in (True, "0.8", -0.1, 1.1, float("inf"), float("nan")):
                 with self.subTest(strength=strength), self.assertRaisesRegex(ValueError, "cover strength"):
                     self.render(cover_strength=strength)
+                with self.subTest(strength=strength), self.assertRaisesRegex(ValueError, "cover noise strength"):
+                    self.render(cover_noise_strength=strength)
+            with self.assertRaisesRegex(ValueError, "requires a cover"):
+                self.render(start=.1, end=.5, cover_noise_strength=.4)
             execute.assert_not_called()
+
+    def test_part_uses_only_base_encoder_and_vae_with_its_own_track_instructions(self):
+        base = self.home / "models" / native.BASE_MODEL
+        checkpoint = b"pinned Base checkpoint fixture"
+        self.enterContext(patch.object(native, "BASE_BYTES", len(checkpoint)))
+        self.enterContext(patch.object(native, "BASE_SHA256", hashlib.sha256(checkpoint).hexdigest()))
+        self.enterContext(patch.dict(os.environ, {"DJOUND_RENDITION_BACKEND": "native", "DJOUND_ACE_BASE_MODEL": ""}))
+        self.assertFalse(adapter.part_available())
+        base.write_bytes(b"!" * len(checkpoint))
+        self.assertFalse(adapter.part_available())
+        base.write_bytes(checkpoint)
+        self.assertTrue(adapter.part_available())
+        with patch.dict(os.environ, {"DJOUND_RENDITION_BACKEND": "http"}):
+            self.assertFalse(adapter.part_available())
+            with patch.dict(os.environ, {"DJOUND_ACE_BASE_MODEL": str(base)}):
+                self.assertTrue(adapter.part_available())
+
+        def fake_cli(args, **kwargs):
+            self.assertEqual(str(self.basis), args[args.index("--src-audio") + 1])
+            self.assertNotIn("--ref-audio", args)
+            registry = Path(args[args.index("--models") + 1])
+            self.assertEqual({native.BASE_MODEL, *native.MODELS[1:]}, {f.name for f in registry.iterdir()})
+            self.assertTrue((registry / native.BASE_MODEL).samefile(base))
+            request = Path(args[args.index("--request") + 1])
+            settings = json.loads(request.read_text())
+            self.assertEqual(
+                ("lego", "guitar", native.BASE_MODEL, 50, 1., 1., "Fingerpicked steel strings"),
+                tuple(settings[k] for k in ("task_type", "track", "synth_model", "inference_steps", "guidance_scale",
+                                            "shift", "caption")),
+            )
+            self.assertEqual("[Instrumental]", settings["lyrics"])
+            self.assertNotIn("audio_cover_strength", settings)
+            with wave.open(str(request.with_name("take0.wav")), "wb") as wav:
+                wav.setparams((2, 2, 48000, 0, "NONE", ""))
+                wav.writeframes(b"\x01\x00" * 2 * 3840)
+            return subprocess.CompletedProcess(args, 0)
+
+        with patch.object(native.subprocess, "run", side_effect=fake_cli):
+            native.generate_native_part(self.basis, self.target, lane="guitar", caption="Fingerpicked steel strings",
+                                        duration=.08, deadline=time.monotonic() + 4)
+        with wave.open(str(self.target), "rb") as wav:
+            self.assertEqual(3840, wav.getnframes())
+        base.write_bytes(b"?" * len(checkpoint))
+        self.assertFalse(adapter.part_available())
+
+    def test_unsupported_part_lanes_and_wrong_raw_grid_never_publish(self):
+        with patch.object(native.subprocess, "run") as call:
+            for name in ("vocals", "backing_vocals", "trombone", "guitar | bass", ""):
+                with self.subTest(name=name), self.assertRaisesRegex(ValueError, "instrumental accompaniment lane"):
+                    native.generate_native_part(self.basis, self.target, lane=name, caption="Instrumental",
+                                                deadline=time.monotonic()+5, duration=.08)
+            call.assert_not_called()
+        def short(args, **kwargs):
+            request = Path(args[args.index("--request") + 1])
+            with wave.open(str(request.with_name("take0.wav")), "wb") as wav:
+                wav.setparams((2, 2, 48000, 0, "NONE", ""))
+                wav.writeframes(b"\0" * 4 * 3839)
+            return subprocess.CompletedProcess(args, 0)
+        with patch.object(native, "_base_checkpoint", return_value=self.basis), patch.object(native.subprocess, "run", side_effect=short):
+            with self.assertRaisesRegex(RuntimeError, "usable rendered WAV"):
+                native.generate_native_part(self.basis, self.target, lane="woodwinds", caption="Reed part",
+                                            duration=.08, deadline=time.monotonic()+5)
+        self.assertFalse(self.target.exists())
 
     def test_an_orphaned_child_holds_the_engine_slot_until_it_finishes(self):
         # A harmless child stands in for ace-synth. It keeps the inherited open file description

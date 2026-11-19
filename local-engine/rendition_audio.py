@@ -15,7 +15,7 @@ import time
 from urllib.parse import urlsplit
 import wave
 
-from rendition_native import generate_native, native_available
+from rendition_native import generate_native, generate_native_part, native_available, native_part_available
 
 
 RATE = 44100
@@ -36,6 +36,20 @@ def _remaining(deadline):
     if left <= 0:
         raise RuntimeError("ACE-Step exceeded its configured time limit.")
     return left
+
+
+def rendition_deadline(shared: float | None = None) -> float:
+    """Return an absolute monotonic cutoff shared by the steps of one rendition."""
+    timeout = float(os.environ.get("DJOUND_ACE_TIMEOUT_SECONDS", "1200"))
+    if not math.isfinite(timeout) or timeout <= 0:
+        raise ValueError("DJOUND_ACE_TIMEOUT_SECONDS must be a positive number.")
+    cutoff = time.monotonic() + timeout
+    if shared is not None:
+        if type(shared) not in (float, int) or not math.isfinite(shared):
+            raise ValueError("Choose a finite monotonic deadline.")
+        cutoff = min(cutoff, shared)
+    _remaining(cutoff)
+    return cutoff
 
 
 def _origin(url):
@@ -167,6 +181,11 @@ def _use_native():
     return mode == "native" or (mode == "auto" and not os.environ.get("DJOUND_ACE_URL") and native_available())
 
 
+def part_available() -> bool:
+    """HTTP Turbo uses its ordinary cover unless a separate native Base model is configured."""
+    return (_use_native() or bool(os.environ.get("DJOUND_ACE_BASE_MODEL"))) and native_part_available()
+
+
 def check_service() -> str:
     if _use_native():
         if not native_available():
@@ -232,23 +251,27 @@ def _fade(original, generated, direction):
     return wet.tobytes()
 
 
-def _copy_pcm(reader, begin, stop, writer):
+def _copy_pcm(reader, begin, stop, writer, *, require_sound=False):
     reader.setpos(begin)
+    heard = False
     while begin < stop:
         count = min(BLOCK, stop - begin)
         chunk = reader.readframes(count)
         if len(chunk) != 4 * count:
             raise RuntimeError("The take ended before the requested selection.")
+        if require_sound and not heard:
+            heard = any(chunk)
         writer.writeframesraw(chunk)
         begin += count
+    if require_sound and not heard:
+        raise RuntimeError("The generated instrumental part contains only silence.")
 
 
 def _round_up(frames, grid):
     return ((frames + grid - 1) // grid) * grid
 
 
-def _model_input(basis, frames, start, end, target):
-    """Return the model input, its origin on the full timeline, and the real and padded sizes."""
+def _context_bounds(frames, start, end):
     left, right = 0, frames
     if start is not None:
         width = min(frames, end - start + 2 * REPAINT_CONTEXT)
@@ -258,6 +281,48 @@ def _model_input(basis, frames, start, end, target):
         bound_right = min(frames, _round_up(begin + width, NATIVE_PATCH))
         if (bound_right - bound_left) * 4 < frames * 3:
             left, right = bound_left, bound_right
+    return left, right
+
+
+def _selected_frames(frames, start, end):
+    if not (0 <= start < end <= frames / RATE):
+        raise ValueError("Choose a valid passage within the source recording.")
+    first, last = round(start * RATE), round(end * RATE)
+    if first == last:
+        raise ValueError("The selected passage contains no audio samples.")
+    return first, last
+
+
+def _pcm_frames(reader):
+    if reader.getparams()[:3] != (2, 2, RATE) or not 0 < reader.getnframes() <= MAX_SECONDS * RATE:
+        raise ValueError("Choose a canonical 44.1 kHz stereo PCM16 recording.")
+    return reader.getnframes()
+
+
+def context_window(parent: Path, *, start: float, end: float) -> tuple[int, int]:
+    """Find the unpadded model context on a canonical parent's timeline, in frames."""
+    with wave.open(str(parent), "rb") as reader:
+        frames = _pcm_frames(reader)
+    return _context_bounds(frames, *_selected_frames(frames, start, end))
+
+
+def crop_context(source: Path, target: Path, left_frame: int, right_frame: int) -> None:
+    """Copy a canonical context into a fresh WAV, excluding the right endpoint."""
+    with wave.open(str(source), "rb") as reader:
+        frames = _pcm_frames(reader)
+        if type(left_frame) is not int or type(right_frame) is not int or not 0 <= left_frame < right_frame <= frames:
+            raise ValueError("Choose frame bounds inside the context recording.")
+        with tempfile.TemporaryDirectory(prefix=".crop-", dir=target.parent) as directory:
+            chunk = Path(directory) / "context.wav"
+            with wave.open(str(chunk), "wb") as writer:
+                writer.setparams((2, 2, RATE, right_frame - left_frame, "NONE", "not compressed"))
+                _copy_pcm(reader, left_frame, right_frame, writer)
+            os.link(chunk, target)
+
+
+def _model_input(basis, frames, start, end, target):
+    """Return the model input, its origin on the full timeline, and the real and padded sizes."""
+    left, right = _context_bounds(frames, start, end)
     size = right - left
     padded = _round_up(size, NATIVE_PATCH)
     if left == 0 and size == frames == padded:
@@ -304,9 +369,62 @@ def _publish(source, generated, frames, start, end, target, *, wet_offset=0):
         _copy_pcm(dry, end, frames, out)
 
 
+def _separate_output(destination, *recordings):
+    for recording in recordings:
+        if recording is not None and (recording.resolve() == destination.resolve() or
+                                      (destination.exists() and recording.exists() and destination.samefile(recording))):
+            raise ValueError("Save a new take separately from its input recordings.")
+
+
+def generate_part(context: Path, output: Path, *, lane: str, caption: str, deadline: float) -> None:
+    """Generate the requested instrumental part on exactly this canonical recording's timeline."""
+    deadline = rendition_deadline(deadline)
+    _separate_output(output, context)
+    if not _use_native() and not os.environ.get("DJOUND_ACE_BASE_MODEL"):
+        raise RuntimeError("Configure a separate native Base model to generate parts alongside HTTP covers.")
+    with wave.open(str(context), "rb") as wav:
+        frames = _pcm_frames(wav)
+        wav.setpos(frames - 1)
+        if len(wav.readframes(1)) != 4:
+            raise ValueError("The instrumental part context is truncated.")
+    with tempfile.TemporaryDirectory(prefix=".part-", dir=output.parent) as directory:
+        work = Path(directory)
+        source, _, _, padded = _model_input(context, frames, None, None, work / "context.wav")
+        raw = work / "generated.wav"
+        generate_native_part(source, raw, lane=lane, caption=caption, duration=padded / RATE, deadline=deadline)
+        generated, length = _canonical(raw, work / "decoded.wav", deadline, generated=True)
+        if length != padded:
+            raise RuntimeError("The generated instrumental part does not match the context timeline.")
+        ready = work / "ready.wav"
+        with wave.open(str(generated), "rb") as wav, wave.open(str(ready), "wb") as writer:
+            writer.setparams((2, 2, RATE, frames, "NONE", "not compressed"))
+            _copy_pcm(wav, 0, frames, writer, require_sound=True)
+        _remaining(deadline)
+        os.replace(ready, output)
+
+
+def publish_scoped_take(parent: Path, refined: Path, destination: Path, *, start: float, end: float,
+                        wet_offset_frames: int = 0, deadline: float | None = None) -> None:
+    """Place a full refinement or a timeline-aligned excerpt into the unchanged parent."""
+    deadline = rendition_deadline(deadline)
+    _separate_output(destination, parent, refined)
+    with tempfile.TemporaryDirectory(prefix=".rendition-", dir=destination.parent) as directory:
+        work = Path(directory)
+        dry, frames = _canonical(parent, work / "parent.wav", deadline)
+        first, last = _selected_frames(frames, start, end)
+        wet, length = _canonical(refined, work / "refined.wav", deadline)
+        if type(wet_offset_frames) is not int or not 0 <= wet_offset_frames <= first or wet_offset_frames + length < last:
+            raise ValueError("The refinement must cover the entire selected passage on the parent timeline.")
+        output = work / "ready.wav"
+        _publish(dry, wet, frames, first, last, output, wet_offset=wet_offset_frames)
+        _remaining(deadline)
+        os.replace(output, destination)
+
+
 def render_take(source: Path, destination: Path, caption: str, *, start: float | None = None,
                 end: float | None = None, duration: float, cover_strength: float = 0.55,
-                reference: Path | None = None) -> None:
+                reference: Path | None = None, cover_noise_strength: float = 0.0,
+                timbre_reference: Path | None = None, deadline: float | None = None) -> None:
     """Publish on the parent's timeline. A separate reference supplies melody while the parent supplies timbre."""
     if not math.isfinite(duration) or not 0 < duration <= MAX_SECONDS:
         raise ValueError("Choose a positive duration of up to ten minutes.")
@@ -314,16 +432,15 @@ def render_take(source: Path, destination: Path, caption: str, *, start: float |
         raise ValueError("Provide a short description of the instrumental arrangement.")
     if type(cover_strength) not in (int, float) or not math.isfinite(cover_strength) or not 0 <= cover_strength <= 1:
         raise ValueError("Cover strength must be a finite number from 0 to 1.")
+    if type(cover_noise_strength) not in (int, float) or not 0 <= cover_noise_strength <= 1:
+        raise ValueError("Cover noise strength must be a finite number from 0 to 1.")
     if (start is None) != (end is None) or (start is not None and not 0 <= start < end <= duration):
         raise ValueError("Choose a valid passage within the source recording.")
-    for recording in (source, reference):
-        if recording is not None and (recording.resolve() == destination.resolve() or
-                                      (destination.exists() and recording.exists() and destination.samefile(recording))):
-            raise ValueError("Save a new take separately from its parent and melody reference.")
-    timeout = float(os.environ.get("DJOUND_ACE_TIMEOUT_SECONDS", "1200"))
-    if not math.isfinite(timeout) or timeout <= 0:
-        raise ValueError("DJOUND_ACE_TIMEOUT_SECONDS must be a positive number.")
-    deadline = time.monotonic() + timeout
+    repaint = start is not None and reference is None
+    if repaint and cover_noise_strength:
+        raise ValueError("Source latent initialization requires a cover.")
+    _separate_output(destination, source, reference, timbre_reference)
+    deadline = rendition_deadline(deadline)
     with tempfile.TemporaryDirectory(prefix=".rendition-", dir=destination.parent) as directory:
         work = Path(directory)
         basis, frames = _canonical(source, work / "basis.wav", deadline)
@@ -348,10 +465,15 @@ def render_take(source: Path, destination: Path, caption: str, *, start: float |
         if native or reference is not None:
             model_input, offset, real_size, padded = _model_input(model_input, frames, first, last, work / "context.wav")
         timbre = None
-        if reference is not None and not reference.samefile(source):
+        if timbre_reference is not None:
+            clip, clip_frames = _canonical(timbre_reference, work / "timbre-source.wav", deadline)
+            if clip_frames == frames:
+                timbre = _timbre_excerpt(clip, offset, real_size, first, last, work / "timbre.wav")
+            else:
+                timbre = _timbre_excerpt(clip, 0, clip_frames, None, None, work / "timbre.wav")
+        elif reference is not None and not reference.samefile(source):
             timbre = _timbre_excerpt(basis, offset, real_size, first, last, work / "timbre.wav")
         # Repaint masks the requested music. Cover keeps the original phrase available to the model.
-        repaint = first is not None and reference is None
         download = work / "generated.wav"
         if native:
             # The native mask uses whole 40ms VAE frames. Publish only the
@@ -360,7 +482,7 @@ def render_take(source: Path, destination: Path, caption: str, *, start: float |
             mask_end = _round_up(last - offset, VAE_FRAME) / RATE if repaint else None
             generate_native(model_input, download, caption.strip(), duration=padded / RATE,
                             start=mask_start, end=mask_end, deadline=deadline, cover_strength=cover_strength,
-                            timbre_reference=timbre)
+                            timbre_reference=timbre, cover_noise_strength=cover_noise_strength)
         else:
             fields = {"task_type": "repaint" if repaint else "cover", "prompt": caption.strip(),
                       "lyrics": "[Instrumental]", "vocal_language": "unknown", "thinking": "false",
@@ -370,6 +492,8 @@ def render_take(source: Path, destination: Path, caption: str, *, start: float |
                 fields.update(repainting_start=str(first / RATE), repainting_end=str(last / RATE), chunk_mask_mode="explicit")
             else:
                 fields["audio_cover_strength"] = str(cover_strength)
+                if cover_noise_strength:
+                    fields["cover_noise_strength"] = str(cover_noise_strength)
             client = _AceClient(deadline)
             task = client.submit(model_input, fields, timbre_reference=timbre)
             client.download_take(task, download)
@@ -381,4 +505,5 @@ def render_take(source: Path, destination: Path, caption: str, *, start: float |
             raise RuntimeError("ACE-Step returned audio that does not cover the requested timeline.")
         output = work / "ready.wav"
         _publish(basis, generated, frames, first, last, output, wet_offset=offset)
+        _remaining(deadline)
         os.replace(output, destination)

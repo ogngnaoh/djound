@@ -780,6 +780,7 @@ components:
         request: { type: string }
         caption: { type: string }
         state: { type: string, enum: [queued, running, ready, failed, clarify] }
+        progress: { type: [string, 'null'], description: Current worker-reported stage for a running take when available. }
         audioUrl: { type: [string, 'null'] }
         exportUrl: { type: [string, 'null'] }
         durationSeconds: { type: [number, 'null'] }

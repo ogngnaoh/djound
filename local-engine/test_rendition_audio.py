@@ -9,6 +9,7 @@ from pathlib import Path
 import struct
 import tempfile
 import threading
+import time
 import unittest
 from unittest.mock import Mock, patch
 import wave
@@ -111,6 +112,7 @@ class RenditionAdapterTest(unittest.TestCase):
         self.run_take(cover_strength=0.8)
         self.assertEqual(self.source.read_bytes(), self.service.fields["src_audio"])
         self.assertNotIn("ref_audio", self.service.fields)
+        self.assertNotIn("cover_noise_strength", self.service.fields)
         self.assertEqual(b"cover", self.service.fields["task_type"])
         self.assertEqual(b"[Instrumental]", self.service.fields["lyrics"])
         self.assertEqual(b"1", self.service.fields["batch_size"])
@@ -118,6 +120,19 @@ class RenditionAdapterTest(unittest.TestCase):
         self.assertEqual({"task_id_list": ["job-1"]}, self.service.query)
         self.assertEqual(2, self.service.polls)
         self.assert_generated(self.samples()[40000:40004])
+
+    def test_whole_sketch_sends_opt_in_source_initialization_and_capped_timbre(self):
+        rate = render.RATE
+        timbre = self.source.with_name("ensemble.wav")
+        ensemble = timed_samples(40 * rate, 3200)
+        timbre.write_bytes(wav_bytes(rate, 2, ensemble))
+        self.run_take(cover_strength=.8, cover_noise_strength=.625, timbre_reference=timbre)
+        self.assertEqual(self.source.read_bytes(), self.service.fields["src_audio"])
+        self.assertEqual(b"0.625", self.service.fields["cover_noise_strength"])
+        self.assertEqual(b"0.8", self.service.fields["audio_cover_strength"])
+        with wave.open(io.BytesIO(self.service.fields["ref_audio"]), "rb") as wav:
+            self.assertEqual(30 * rate, wav.getnframes())
+            self.assertEqual(ensemble[5 * rate * 4:35 * rate * 4], wav.readframes(wav.getnframes()))
 
     def test_readiness_requires_an_initialized_ace_audio_model(self):
         self.service.health = {"status": "ok", "service": "ACE-Step API", "models_initialized": True,
@@ -216,6 +231,57 @@ class NativeContextTest(unittest.TestCase):
         self.output = self.source.with_name("out.wav")
         self.enterContext(patch.dict(os.environ, {"DJOUND_RENDITION_BACKEND": "native"}))
 
+    def test_generated_part_pads_only_the_context_and_returns_exact_audible_source_span(self):
+        frames = render.RATE + 17
+        pcm = timed_samples(frames, 4100)
+        self.source.write_bytes(wav_bytes(render.RATE, 2, pcm))
+        deadline = time.monotonic() + 9
+        def synth(source, raw, *, lane, caption, duration, deadline):
+            self.assertEqual(("strings", "Short bowed chords"), (lane, caption))
+            self.assertEqual(expected_deadline, deadline)
+            with wave.open(str(source), "rb") as wav:
+                padded = wav.getnframes()
+                self.assertEqual(45864, padded)
+                self.assertEqual(padded, round(duration * render.RATE))
+                self.assertEqual(pcm, wav.readframes(frames))
+                self.assertEqual(bytes(4 * (padded - frames)), wav.readframes(padded))
+            raw.write_bytes(wav_bytes(48000, 2, struct.pack("<hh", 1800, -1230) * round(48000 * duration)))
+        expected_deadline = deadline
+        with patch.object(render, "generate_native_part", side_effect=synth):
+            render.generate_part(self.source, self.output, lane="strings", caption="Short bowed chords", deadline=deadline)
+        with wave.open(str(self.output), "rb") as wav:
+            self.assertEqual((2, 2, render.RATE, frames), wav.getparams()[:4])
+            wav.setpos(frames - 1)
+            left, right = struct.unpack("<hh", wav.readframes(1))
+            self.assertAlmostEqual(1800, left, delta=1)
+            self.assertAlmostEqual(-1230, right, delta=1)
+
+    def test_unavailable_short_silent_and_expired_parts_preserve_the_previous_file(self):
+        frames = render.NATIVE_PATCH
+        self.source.write_bytes(wav_bytes(render.RATE, 2, timed_samples(frames, 1000)))
+        self.output.write_bytes(b"earlier part")
+        def part(deadline):
+            render.generate_part(self.source, self.output, lane="bass", caption="Picked bass", deadline=deadline)
+        with patch.dict(os.environ, {"DJOUND_RENDITION_BACKEND":"http", "DJOUND_ACE_BASE_MODEL":""}):
+            with patch.object(render, "generate_native_part") as synth:
+                with self.assertRaisesRegex(RuntimeError, "separate native Base"):
+                    part(time.monotonic() + 5)
+                synth.assert_not_called()
+        for audio, issue in ((bytes(4 * (frames - 1)), "timeline"),
+                             (bytes(4 * (frames + 1)), "timeline"), (bytes(4 * frames), "silence")):
+            def faulty(source, raw, **kwargs):
+                raw.write_bytes(wav_bytes(render.RATE, 2, audio))
+            with self.subTest(issue=issue), patch.object(render, "generate_native_part", side_effect=faulty):
+                with self.assertRaisesRegex(RuntimeError, issue):
+                    part(time.monotonic() + 5)
+        with patch.object(render, "generate_native_part") as synth:
+            with self.assertRaisesRegex(RuntimeError, "time limit"):
+                part(time.monotonic() - 1)
+            with self.assertRaisesRegex(ValueError, "separately"):
+                render.generate_part(self.source, self.source, lane="bass", caption="Picked bass", deadline=time.monotonic()+5)
+            synth.assert_not_called()
+        self.assertEqual(b"earlier part", self.output.read_bytes())
+
     def exercise(self, frames, first, last, left, right, mask_start, mask_end, *, timbre_span=None):
         rate = render.RATE
         source = timed_samples(frames, 4000)
@@ -230,9 +296,11 @@ class NativeContextTest(unittest.TestCase):
         padded = (size + 3527) // 3528 * 3528
         generated = timed_samples(padded, -9000)
 
-        def synth(model_input, download, caption, *, duration, start, end, deadline, cover_strength, timbre_reference):
+        def synth(model_input, download, caption, *, duration, start, end, deadline, cover_strength, timbre_reference,
+                  cover_noise_strength):
             expected_strength = 0.9 if reference else (0.8 if first is None else 0.55)
             self.assertEqual(cover_strength, expected_strength)
+            self.assertEqual(0, cover_noise_strength)
             self.assertEqual((start, end), (mask_start, mask_end))
             self.assertEqual(padded, round(duration * rate))
             with wave.open(str(model_input), "rb") as wav:
@@ -332,6 +400,69 @@ class NativeContextTest(unittest.TestCase):
         for strength in (float("nan"), float("inf"), -0.1, 1.1, "0.8", True):
             with self.subTest(strength=strength), self.assertRaisesRegex(ValueError, "Cover strength"):
                 render.render_take(self.source, self.output, "Piano", duration=60, cover_strength=strength)
+            with self.subTest(strength=strength), self.assertRaisesRegex(ValueError, "Cover noise strength"):
+                render.render_take(self.source, self.output, "Piano", duration=60, cover_noise_strength=strength)
+        with self.assertRaisesRegex(ValueError, "requires a cover"):
+            render.render_take(self.source, self.output, "Piano", duration=60, start=1, end=2, cover_noise_strength=.6)
+
+    def test_shared_deadline_is_carried_through_synthesis_and_publication(self):
+        now = time.monotonic()
+        self.source.write_bytes(wav_bytes(render.RATE, 2, timed_samples(render.RATE, 2500)))
+        self.output.write_bytes(b"earlier result")
+        with patch.dict(os.environ, {"DJOUND_ACE_TIMEOUT_SECONDS": "50"}), patch.object(render.time, "monotonic") as clock:
+            clock.return_value = now
+            self.assertEqual(now + 50, render.rendition_deadline())
+            self.assertEqual(now + 50, render.rendition_deadline(now + 80))
+            def synth(source, target, caption, **kwargs):
+                self.assertEqual(now + 5, kwargs["deadline"])
+                self.assertEqual(.4, kwargs["cover_noise_strength"])
+                target.write_bytes(self.source.read_bytes())
+                clock.return_value = now + 6
+            with patch.object(render, "generate_native", side_effect=synth) as model:
+                with self.assertRaisesRegex(RuntimeError, "time limit"):
+                    render.render_take(self.source, self.output, "Piano", duration=1, deadline=now + 5, cover_noise_strength=.4)
+                with self.assertRaisesRegex(RuntimeError, "time limit"):
+                    render.render_take(self.source, self.output, "Piano", duration=1, deadline=now + 5)
+                model.assert_called_once()
+        self.assertEqual(b"earlier result", self.output.read_bytes())
+        for bad in (True, "30", float("inf"), float("nan")):
+            with self.subTest(bad=bad), self.assertRaisesRegex(ValueError, "monotonic"):
+                render.rendition_deadline(bad)
+
+    def test_context_crop_and_local_publication_match_full_refinement(self):
+        rate = render.RATE
+        frames = 60 * rate
+        parent = timed_samples(frames, 1100)
+        wet = timed_samples(frames, 4800)
+        self.source.write_bytes(wav_bytes(rate, 2, parent))
+        refined = self.source.with_name("refined.wav")
+        refined.write_bytes(wav_bytes(rate, 2, wet))
+        bounds = {"start": 30.50, "end": 32.75}
+        left, right = render.context_window(self.source, **bounds)
+        self.assertEqual((round(18.48 * rate), round(44.8 * rate)), (left, right))
+        excerpt = self.source.with_name("excerpt.wav")
+        render.crop_context(refined, excerpt, left, right)
+        with wave.open(str(excerpt), "rb") as audio:
+            self.assertEqual(wet[left * 4:right * 4], audio.readframes(audio.getnframes()))
+        render.publish_scoped_take(self.source, refined, self.output, **bounds)
+        expected = self.output.read_bytes()
+        render.publish_scoped_take(self.source, excerpt, self.output, **bounds, wet_offset_frames=left)
+        self.assertEqual(expected, self.output.read_bytes())
+        with wave.open(str(self.output), "rb") as audio:
+            result = audio.readframes(frames)
+        a, b = round(30.50 * rate), round(32.75 * rate)
+        self.assertEqual(parent[:a * 4], result[:a * 4])
+        self.assertEqual(parent[b * 4:], result[b * 4:])
+        self.assertEqual(wet[(a + 441) * 4:(b - 441) * 4], result[(a + 441) * 4:(b - 441) * 4])
+        for invalid_offset in (a + 1, 0, -1):
+            with self.subTest(invalid_offset=invalid_offset), self.assertRaisesRegex(ValueError, "entire selected passage"):
+                render.publish_scoped_take(self.source, excerpt, self.output, **bounds, wet_offset_frames=invalid_offset)
+        for protected in (self.source, refined):
+            with self.assertRaisesRegex(ValueError, "separately"):
+                render.publish_scoped_take(self.source, refined, protected, **bounds)
+        with self.assertRaisesRegex(RuntimeError, "time limit"):
+            render.publish_scoped_take(self.source, refined, self.output, **bounds, deadline=time.monotonic() - 1)
+        self.assertEqual(expected, self.output.read_bytes())
 
 
 if __name__ == "__main__":

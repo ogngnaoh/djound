@@ -71,6 +71,31 @@ class MelodyGuideTest(unittest.TestCase):
         self.assertFalse(any(p.name.startswith(".melody-") for p in self.root.iterdir()))
 
     @unittest.skipUnless(melody.guide_available(), "local melody assets are optional")
+    def test_guide_placement_uses_the_selected_patch_and_preserves_absolute_requests(self):
+        def render(program, pitches, keep, tag):
+            folder = self.root / tag
+            folder.mkdir()
+            events = [(i * 0.4, i * 0.4 + 0.32, p, 0.68) for i, p in enumerate(pitches)]
+            out = folder / "take.wav"
+            melody._synthesize(events, out, program, round(0.4 * len(events) * melody.RATE), keep)
+            return out.read_bytes()
+
+        for program, pitches, shift in [
+            (42, [83, 86, 88, 90], -12),
+            (73, [43, 47, 50, 52], 12),
+            (42, [57, 61, 64, 67], 0),
+            (0, [83, 86, 88, 90], 0),
+            (80, [43, 47, 50, 52], 0),
+        ]:
+            with self.subTest(program=program, pitches=pitches):
+                name = f"{program}-{pitches[0]}"
+                actual = render(program, pitches, False, name + "auto")
+                expected = render(program, [n + shift for n in pitches], True, name + "manual")
+                self.assertEqual(actual, expected)
+                if shift:
+                    self.assertNotEqual(actual, render(program, pitches, True, name + "unchanged"))
+
+    @unittest.skipUnless(melody.guide_available(), "local melody assets are optional")
     def test_real_recording_becomes_a_timed_instrumental_line(self):
         import numpy as np
 

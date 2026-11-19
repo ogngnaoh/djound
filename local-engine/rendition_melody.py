@@ -29,7 +29,7 @@ def guide_available() -> bool:
         return False
     try:
         probe = subprocess.run([HOME / "renderer", "--guide-version"], capture_output=True, timeout=2)
-        return probe.returncode == 0 and probe.stdout.strip() == b"1"
+        return probe.returncode == 0 and probe.stdout.strip() == b"2"
     except (OSError, subprocess.TimeoutExpired):
         return False
 
@@ -47,8 +47,12 @@ def _frame_count(source):
         return wav.getnframes()
 
 
-def build_melody_guide(source: Path, output: Path, *, program: int, deadline: float) -> bool:
+def build_melody_guide(
+    source: Path, output: Path, *, program: int, deadline: float, preserve_register: bool = False
+) -> bool:
     """Write the complete guide atomically. False means the recording lacks a reliable musical line."""
+    if type(preserve_register) is not bool:
+        raise ValueError("Specify whether to keep the recorded octave.")
     if type(program) is not int or not 0 <= program <= 127:
         raise ValueError("Choose a General MIDI instrument between 0 and 127.")
     if not math.isfinite(deadline) or deadline <= time.monotonic():
@@ -79,7 +83,15 @@ def build_melody_guide(source: Path, output: Path, *, program: int, deadline: fl
         env.pop("LIBROSA_CACHE_DIR", None)
         with (work / "extract.log").open("wb") as log:
             child = subprocess.Popen(
-                [sys.executable, "-B", Path(__file__).resolve(), source, work, str(program)],
+                [
+                    sys.executable,
+                    "-B",
+                    Path(__file__).resolve(),
+                    source,
+                    work,
+                    str(program),
+                    str(int(preserve_register)),
+                ],
                 cwd=work,
                 env=env,
                 stdin=subprocess.DEVNULL,
@@ -351,7 +363,7 @@ def _reliable(notes, duration):
     )
 
 
-def _synthesize(notes, path, program, frames):
+def _synthesize(notes, path, program, frames, preserve_register=False):
     events = []
     for start, end, pitch, confidence in notes:
         lo, hi = max(0, round(start * RATE)), min(frames, round(end * RATE))
@@ -365,7 +377,8 @@ def _synthesize(notes, path, program, frames):
         for event in sorted(events):
             print(*event, file=file)
     raw = work / "guide.pcm"
-    subprocess.run([HOME / "renderer", "--guide", HOME / BANK, schedule, raw], check=True)
+    mode = "--guide-absolute" if preserve_register else "--guide"
+    subprocess.run([HOME / "renderer", mode, HOME / BANK, schedule, raw], check=True)
     if raw.stat().st_size != 4 * frames:
         raise RuntimeError("The guide renderer returned incomplete audio.")
     with raw.open("rb") as samples, wave.open(str(path), "wb") as out:
@@ -374,7 +387,7 @@ def _synthesize(notes, path, program, frames):
             out.writeframesraw(block)
 
 
-def _extract(source, work, program):
+def _extract(source, work, program, preserve_register):
     import numpy as np
     import soundfile as sf
 
@@ -393,10 +406,10 @@ def _extract(source, work, program):
     )
     if not _reliable(notes, frames / RATE):
         return False
-    _synthesize(notes, work / "guide.wav", program, frames)
+    _synthesize(notes, work / "guide.wav", program, frames, preserve_register)
     return True
 
 
 if __name__ == "__main__":
-    ok = _extract(Path(sys.argv[1]), Path(sys.argv[2]), int(sys.argv[3]))
+    ok = _extract(Path(sys.argv[1]), Path(sys.argv[2]), int(sys.argv[3]), bool(int(sys.argv[4])))
     sys.exit(0 if ok else NO_LINE)

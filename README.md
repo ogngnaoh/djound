@@ -9,7 +9,7 @@ bring a recording you love and hear it played another way. the aim is a performa
 3. play the take you want to change and describe the next move. try “keep the piano, but make the ending quieter.” choose a passage if you want exact boundaries. you can switch back to the original at the same playback time or pick an earlier take and start another version from it.
 4. choose **Keep as favorite** to reopen the project on that take. every completed version stays in the project. **Download this take** saves the selected stereo WAV to send to a friend.
 
-on a 16 GB M2 Pro, **Jazz Trio** took 84 seconds for a 2:49 piano performance of *To Zanarkand* rendered from MIDI. asking “make just the last 8 seconds gentler” took 23 seconds and preserved every sample before the edit. these are timings from one local session.
+the quality of the reimagining still varies. on a full-length *to zanarkand* take, the listener recognized the tune and wanted a much stronger jazz feel. on a 16 GB M2 Pro, turning a 24-second sung recording into **Solo Piano** took 45 seconds. an eight-second ending revision on a 2:49 piano performance took 23 seconds and preserved every sample before the edit. these are timings from individual local takes.
 
 ## edit a finished mix
 
@@ -48,7 +48,7 @@ bash scripts/package.sh
 DJOUND_MODE=LOCAL bash scripts/run.sh
 ```
 
-setup downloads the tools and models. the native Metal backend runs the quantized ACE-Step 1.5 Turbo audio model locally. the four style buttons supply a musical direction directly. Qwen interprets custom requests in the context of the take you chose. the running guide also covers configuring the ACE-Step HTTP service on a larger host. [open Reimagine](http://127.0.0.1:8080/renditions?mode=backend) · [rendition setup and backend choices](guide/running.md#generate-song-renditions)
+setup downloads the tools and models. the native Metal backend runs ACE-Step 1.5 Turbo locally and can use ACE-Step Base to play a requested supporting instrument in a duet. the four style buttons supply a musical direction directly. Qwen interprets custom requests in the context of the take you chose. the running guide also covers configuring the ACE-Step HTTP service on a larger host. [open Reimagine](http://127.0.0.1:8080/renditions?mode=backend) · [rendition setup and backend choices](guide/running.md#generate-song-renditions)
 
 for the finished mix editor, use `bash local-engine/setup_localengine.sh --finished-mix` and open **Mix editor**. it uses its own vocal and drum separation model.
 
@@ -56,7 +56,7 @@ for the melody workflow, run `bash local-engine/setup_localengine.sh --audio-onl
 
 ## how it works
 
-in the rendition studio, ACE-Step receives the selected recording and an instrumental direction. each ready take has its own audio file, the original request, and a link to the version it grew from.
+in the rendition studio, the language planner interprets your words in the context of the take you’re playing. when the worker can follow a tune in the recording, it plays that line on an instrument and gives the music model both the melody and an instrumental performance in the requested sound. an ensemble can carry parts from that new performance into the finished take. recordings with too little pitch information for a dependable melody guide go straight to the cover model. each ready take keeps its own audio, your request and the version it grew from.
 
 in the melody editor, Basic Pitch detects the notes. you can correct them, keep the uploaded performance as the lead, or play them on a different instrument. the renderer builds the backing from the arrangement you approve. the melody setup includes built-in text edits and direct controls. running `bash local-engine/setup_localengine.sh` without flags installs the melody and finished mix engines plus the optional Qwen arrangement planner.
 

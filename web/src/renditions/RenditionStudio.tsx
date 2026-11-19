@@ -28,6 +28,8 @@ type Passage = { start: string; end: string };
 type Revision = { text: string; range: Passage | null };
 const inProgress = (take: Rendition) =>
   take.state === "queued" || take.state === "running";
+const progressText = (take: Rendition) =>
+  take.state === "queued" ? "Queued" : take.progress || "Making take…";
 
 export default function RenditionStudio() {
   const { id = "" } = useParams();
@@ -105,7 +107,9 @@ function RecordingSession({
     .at(-1);
   const latest =
     project.takes.find((t) => t.requestId === lastRequest) ??
-    (newestChild?.state === "clarify" ? newestChild : undefined);
+    (newestChild && (newestChild.state === "clarify" || inProgress(newestChild))
+      ? newestChild
+      : undefined);
   const revisionKey = (id: string) =>
     "rendition-revision:" + project.id + ":" + id;
   useEffect(() => {
@@ -372,7 +376,11 @@ function RecordingSession({
                 </button>
               </div>
             )}
-            <div className="rendition-styles" role="group" aria-label="Suggested sounds">
+            <div
+              className="rendition-styles"
+              role="group"
+              aria-label="Suggested sounds"
+            >
               {styles.map(([style, description]) => (
                 <Button
                   key={style}
@@ -508,7 +516,7 @@ function RecordingSession({
                     <Play /> Play new take · {latest.label}
                   </Button>
                 ) : inProgress(latest) ? (
-                  `Making ${latest.label}…`
+                  progressText(latest)
                 ) : (
                   <>
                     <p>
@@ -570,9 +578,7 @@ function RecordingSession({
               <span>{take.request}</span>
               {take.caption && <small>{take.caption}</small>}
               {inProgress(take) && (
-                <small role="status">
-                  {take.state === "queued" ? "Queued" : "Making take…"}
-                </small>
+                <small role="status">{progressText(take)}</small>
               )}
               {(take.state === "failed" || take.state === "clarify") && (
                 <>

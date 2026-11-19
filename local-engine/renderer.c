@@ -11,13 +11,91 @@ typedef struct { int frame, channel, on, pitch, velocity; } Event;
 
 static int fail(const char *message) { fprintf(stderr, "%s\n", message); return 1; }
 
+/* Locate the weighted quantile of a MIDI-note histogram. */
+static int pitch_quantile(const long weights[128], long total, int percent) {
+    long sum = 0;
+    for (int key = 0; key < 128; ++key) {
+        sum += weights[key];
+        if (100 * sum >= percent * total) return key;
+    }
+    return 127;
+}
+
+static int range_distance(int pitch, int low, int high) {
+    return pitch < low ? low - pitch : (pitch > high ? pitch - high : 0);
+}
+
+/* Play a narrow sampled instrument near its recorded timbre. A nominal SF2 key
+   range can stretch a single sample across the keyboard; use unique sample roots
+   and the duration of the actual guide notes rather than that nominal range. */
+static int guide_octave(tsf *synth, int program, const Event *events, int count) {
+    if (program < 8 || (program >= 80 && program < 104) || program >= 112) return 0;
+    int index = tsf_get_presetindex(synth, 0, program);
+    if (index < 0) return 0;
+    long duration[128] = {0}, roots[128] = {0}, total = 0, root_count = 0;
+    long velocities[128] = {0};
+    int started[128], velocity[128];
+    for (int k = 0; k < 128; ++k) started[k] = -1;
+    for (int i = 0; i < count; ++i) {
+        const Event *e = &events[i];
+        if (e->on) {
+            started[e->pitch] = e->frame;
+            velocity[e->pitch] = e->velocity;
+        } else if (started[e->pitch] >= 0) {
+            int length = e->frame - started[e->pitch];
+            duration[e->pitch] += length;
+            velocities[velocity[e->pitch]] += length;
+            total += length;
+            started[e->pitch] = -1;
+        }
+    }
+    if (!total) return 0;
+    int dynamic = pitch_quantile(velocities, total, 50);
+    int playable[128] = {0};
+    const struct tsf_preset *preset = &synth->presets[index];
+    for (int i = 0; i < preset->regionNum; ++i) {
+        const struct tsf_region *region = &preset->regions[i];
+        if (dynamic < region->lovel || dynamic > region->hivel) continue;
+        int root = region->pitch_keycenter - region->transpose;
+        if (root >= 0 && root < 128 && !roots[root]) {
+            roots[root] = 1;
+            ++root_count;
+        }
+        for (int k = region->lokey; k <= region->hikey && k < 128; ++k) playable[k] = 1;
+    }
+    if (root_count < 4) return 0;
+    int span = pitch_quantile(roots, root_count, 100) - pitch_quantile(roots, root_count, 1);
+    if (span < 9 || span > 55) return 0;
+    int low = pitch_quantile(roots, root_count, 25), high = pitch_quantile(roots, root_count, 75);
+    int melody = pitch_quantile(duration, total, 50);
+    int shift = melody > high + 3 ? -12 : (melody < low - 3 ? 12 : 0);
+    if (!shift) return 0;
+    long improvement = 0;
+    for (int k = 0; k < 128; ++k) if (duration[k]) {
+        int target = k + shift;
+        if (target < 0 || target > 127 || !playable[target]) return 0;
+        improvement += duration[k] * (range_distance(k, low, high) - range_distance(target, low, high));
+    }
+    return improvement >= 3 * total ? shift : 0;
+}
+
 /* Stream one program on the source timeline. No song-length sample allocation. */
-static int render_guide(const char *bank_path, const char *events_path, const char *output_path) {
+static int render_guide(const char *bank_path, const char *events_path, const char *output_path, int adapt) {
     FILE *events = fopen(events_path, "r");
     int frames, program, count;
     if (!events || fscanf(events, "%d %d %d", &frames, &program, &count) != 3 ||
         frames < 1 || frames > 300 * 44100 || program < 0 || program > 127 ||
         count < 2 || count > MAX_EVENTS) return fail("Invalid guide schedule");
+    Event *notes = calloc((size_t)count, sizeof(Event));
+    if (!notes) return fail("Cannot allocate guide events");
+    for (int i = 0; i < count; ++i) {
+        Event *e = &notes[i];
+        if (fscanf(events, "%d %d %d %d", &e->frame, &e->on, &e->pitch, &e->velocity) != 4 ||
+            e->frame < 0 || e->frame > frames || (i && e->frame < notes[i-1].frame) ||
+            (e->on != 0 && e->on != 1) || e->pitch < 0 || e->pitch > 127 ||
+            e->velocity < 1 || e->velocity > 127) return fail("Invalid guide event");
+    }
+    fclose(events);
     tsf *synth = tsf_load_filename(bank_path);
     if (!synth) return fail("Cannot load guide soundfont");
     tsf_set_output(synth, TSF_STEREO_INTERLEAVED, 44100, -6.0f);
@@ -27,11 +105,9 @@ static int render_guide(const char *bank_path, const char *events_path, const ch
     if (!out) return fail("Cannot open guide output");
     int position = 0;
     short buffer[1024 * 2];
+    int shift = adapt ? guide_octave(synth, program, notes, count) : 0;
     for (int i = 0; i <= count; ++i) {
-        int frame = frames, on = 0, pitch = 0, velocity = 0;
-        if (i < count && (fscanf(events, "%d %d %d %d", &frame, &on, &pitch, &velocity) != 4 ||
-            frame < position || frame > frames || (on != 0 && on != 1) || pitch < 0 || pitch > 127 ||
-            velocity < 1 || velocity > 127)) return fail("Invalid guide event");
+        int frame = i < count ? notes[i].frame : frames;
         while (position < frame) {
             int block = frame - position < 1024 ? frame - position : 1024;
             tsf_render_short(synth, buffer, block, 0);
@@ -40,19 +116,22 @@ static int render_guide(const char *bank_path, const char *events_path, const ch
             position += block;
         }
         if (i < count) {
-            if (on && !tsf_channel_note_on(synth, 0, pitch, velocity / 127.0f))
+            int pitch = notes[i].pitch + shift;
+            if (pitch < 0 || pitch > 127) return fail("Invalid transposed guide pitch");
+            if (notes[i].on && !tsf_channel_note_on(synth, 0, pitch, notes[i].velocity / 127.0f))
                 return fail("Cannot play guide note");
-            if (!on) tsf_channel_note_off(synth, 0, pitch);
+            if (!notes[i].on) tsf_channel_note_off(synth, 0, pitch);
         }
     }
-    fclose(events);
+    free(notes);
     tsf_close(synth);
     return fclose(out) == 0 ? 0 : fail("Cannot finish guide");
 }
 
 int main(int argc, char **argv) {
-    if (argc == 2 && strcmp(argv[1], "--guide-version") == 0) { puts("1"); return 0; }
-    if (argc == 5 && strcmp(argv[1], "--guide") == 0) return render_guide(argv[2], argv[3], argv[4]);
+    if (argc == 2 && strcmp(argv[1], "--guide-version") == 0) { puts("2"); return 0; }
+    if (argc == 5 && strcmp(argv[1], "--guide") == 0) return render_guide(argv[2], argv[3], argv[4], 1);
+    if (argc == 5 && strcmp(argv[1], "--guide-absolute") == 0) return render_guide(argv[2], argv[3], argv[4], 0);
     if (argc != 4) return fail("Usage: renderer soundfont events.txt output.f32");
     FILE *events = fopen(argv[2], "r");
     if (!events) return fail("Cannot read events");

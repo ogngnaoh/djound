@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# The setup subcommand downloads both engines. Serve works from local files.
+# Both access modes share one local planner, transcriber, separator and soundfont.
 set -euo pipefail
 
 usage() { echo 'Usage: bash local-engine/renditions.sh {setup|check|setup-http|serve}'; }
@@ -55,6 +55,7 @@ checkout() (
 if [[ "$1" == setup || "$1" == setup-http ]]; then
   command -v uv >/dev/null || fail 'Install uv before setting up song renditions.'
   command -v ffmpeg >/dev/null || fail 'Install ffmpeg before setting up song renditions.'
+  command -v cc >/dev/null || fail 'Install Apple Command Line Tools to build the local melody renderer.'
   export UV_CACHE_DIR="${UV_CACHE_DIR:-$runtime/uv-cache}"
   export UV_PYTHON_DOWNLOADS=never
   python="${DJOUND_PYTHON:-python3.11}"
@@ -63,9 +64,9 @@ if [[ "$1" == setup || "$1" == setup-http ]]; then
     uv venv --python "$python" "$planner/venv"
   fi
   "$planner/venv/bin/python" -c 'import sys; assert sys.version_info[:2] == (3, 11), "The pinned planner needs Python 3.11."'
-  # Share version pins with the other editors while installing the planner and model download CLI.
-  uv pip install --python "$planner/venv/bin/python" -c "$code/requirements.lock" mlx-lm huggingface-hub
-  "$planner/venv/bin/python" "$code/setup_assets.py" --planner-only
+  # Reuse the same interpreter, pinned packages and hash-verified assets as the other local editors.
+  uv pip install --python "$planner/venv/bin/python" -r "$code/requirements.lock"
+  "$planner/venv/bin/python" "$code/setup_assets.py"
 fi
 
 if [[ "$1" == setup ]]; then
@@ -89,6 +90,9 @@ if [[ "$1" == setup ]]; then
 0599862ac5d15cd308e1d2e368373aea6c02e25ebd1737ad4a4562a0901b0ef8  vae-BF16.gguf
 HASHES
   )
+  base_args=(--models "$native/models" --hf "$planner/venv/bin/hf")
+  if [[ -n "${DJOUND_ACE_BASE_CACHE:-}" ]]; then base_args+=(--reuse "$DJOUND_ACE_BASE_CACHE"); fi
+  "$planner/venv/bin/python" "$code/setup_native_base.py" "${base_args[@]}"
   echo 'The native Metal audio engine and Djound language planner are ready. Run bash local-engine/renditions.sh check.'
   exit 0
 fi

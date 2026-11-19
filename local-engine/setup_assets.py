@@ -24,6 +24,27 @@ def verify(path, item):
     return hashlib.sha1(f'blob {len(raw)}\0'.encode() + raw).hexdigest() == item['git_blob_sha1']
 
 
+def prepare_renderer():
+    binary = HOME / 'renderer'
+    source = HERE / 'renderer.c'
+    source_hash = digest(source)
+    receipt = HOME / 'setup.json'
+    if receipt.is_file() and binary.is_file():
+        try:
+            saved = json.loads(receipt.read_text())
+        except (OSError, ValueError):
+            saved = {}
+        if saved.get('rendererSourceSha256') == source_hash and saved.get('rendererSha256') == digest(binary):
+            return source_hash, saved['rendererSha256']
+    with tempfile.TemporaryDirectory(prefix='.renderer-', dir=HOME) as folder:
+        staged = Path(folder) / 'renderer'
+        subprocess.run(['cc', '-O2', '-std=c99', '-I', str(HOME), str(source), '-lm', '-o', str(staged)],
+                       check=True, timeout=30)
+        build_hash = digest(staged)
+        staged.replace(binary)
+    return source_hash, build_hash
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--reuse-cache', type=Path, help='Optional existing verified asset directory; never required at runtime')
@@ -83,10 +104,9 @@ def main():
             finally:
                 if stage.exists():
                     shutil.rmtree(stage)
-    binary = HOME / 'renderer'
-    subprocess.run(['cc', '-O2', '-std=c99', '-I', str(HOME), str(HERE / 'renderer.c'), '-lm', '-o', str(binary)], check=True, timeout=30)
+    source_hash, binary_hash = prepare_renderer()
     write_json(HOME / 'setup.json', {'schemaVersion': 1, 'assets': records,
-                                   'rendererSourceSha256': digest(HERE / 'renderer.c'), 'rendererSha256': digest(binary),
+                                   'rendererSourceSha256': source_hash, 'rendererSha256': binary_hash,
                                    'model': manifest['model'], 'revision': manifest['revision']})
     print('Local engine assets prepared. No inference or audio upload occurred.')
 

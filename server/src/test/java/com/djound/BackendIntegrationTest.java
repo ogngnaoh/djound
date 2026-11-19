@@ -156,6 +156,9 @@ class BackendIntegrationTest {
         projects.submit(id, first);
         var take = awaitRendition(projects, id, "first");
         assertEquals("ready", take.state(), take.error());
+        assertNull(take.progress());
+        var json = new tools.jackson.databind.ObjectMapper();
+        assertFalse(json.readTree(json.writeValueAsBytes(take)).has("progress"));
         assertEquals("Parent:  / 0", take.caption());
         assertEquals(take.id(), projects.submit(id, first).takes().getFirst().id());
         assertThrows(
@@ -210,18 +213,22 @@ class BackendIntegrationTest {
                 id,
                 new com.djound.rendition.RenditionProjects.Command(
                         "same", take.id(), "unchanged", null, null));
-        assertEquals("failed", awaitRendition(projects, id, "same").state());
+        var unchanged = awaitRendition(projects, id, "same");
+        assertEquals("failed", unchanged.state());
         var db = app.getBean(JdbcClient.class);
         db.sql("UPDATE rendition_take SET state='running' WHERE project_id=? AND request_id='same'")
                 .param(id)
                 .update();
         app.close();
+        Path abandonedStage = root.resolve("renditions").resolve(unchanged.id() + ".stage");
+        Files.writeString(abandonedStage, "rendering");
         app = launch(root);
         var restored = app.getBean(com.djound.rendition.RenditionProjects.class);
         assertEquals(1, restored.list().size());
         assertEquals(second.id(), restored.state(id).favoriteId());
         assertEquals(second.sha256(), restored.state(id).takes().get(1).sha256());
         assertEquals("failed", awaitRendition(restored, id, "same").state());
+        assertFalse(Files.exists(abandonedStage));
         assertThrows(
                 ApiProblem.class,
                 () ->
@@ -236,15 +243,27 @@ class BackendIntegrationTest {
         app.close();
         var worker = root.resolve("blocking-worker.py");
         var pidFile = root.resolve("worker-child");
+        Files.copy(
+                Path.of(
+                        System.getProperty("basedir"),
+                        "..",
+                        "local-engine",
+                        "rendition_progress.py"),
+                root.resolve("rendition_progress.py"));
         Files.writeString(
                 worker,
                 """
-                import json,os,subprocess,sys
+                import json,os,subprocess,sys,time
                 from pathlib import Path
+                from rendition_progress import report_stage
                 request=json.load(sys.stdin)
                 if request['prompt']=='block':
+                    report_stage('melody')
                     child=subprocess.Popen([sys.executable,'-c','import time; time.sleep(45)'])
                     Path(__file__).with_name('worker-child').write_text(str(child.pid))
+                    while not Path(__file__).with_name('arrange').exists():
+                        time.sleep(.02)
+                    report_stage('arranging')
                     child.wait()
                 print(json.dumps(dict(state='clarify',error='Choose a direction.')))
                 """);
@@ -263,6 +282,21 @@ class BackendIntegrationTest {
                         "long", "original", "block", null, null));
         for (int i = 0; i < 120 && !Files.exists(pidFile); i++) Thread.sleep(50);
         long childPid = Long.parseLong(Files.readString(pidFile));
+        var playing = projects.state(a.id()).takes().getFirst();
+        assertEquals("Learning the tune…", playing.progress());
+        var json = new tools.jackson.databind.ObjectMapper();
+        assertEquals(
+                "Learning the tune…",
+                json.readTree(json.writeValueAsBytes(playing)).path("progress").asString());
+        Path stageFile = root.resolve("renditions").resolve(playing.id() + ".stage");
+        Files.createFile(root.resolve("arrange"));
+        String progress = null;
+        for (int i = 0; i < 100; i++) {
+            progress = projects.state(a.id()).takes().getFirst().progress();
+            if ("Arranging the instruments…".equals(progress)) break;
+            Thread.sleep(30);
+        }
+        assertEquals("Arranging the instruments…", progress);
         try (var submitters = Executors.newFixedThreadPool(3)) {
             var futures = new ArrayList<Future<?>>();
             for (int i = 0; i < 6; i++) {
@@ -278,6 +312,7 @@ class BackendIntegrationTest {
             for (var future : futures) future.get(5, TimeUnit.SECONDS);
         }
         var db = app.getBean(JdbcClient.class);
+        assertTrue(projects.state(b.id()).takes().stream().allMatch(t -> t.progress() == null));
         assertEquals(
                 1,
                 db.sql("SELECT count(*) FROM rendition_take WHERE state='running'")
@@ -289,6 +324,7 @@ class BackendIntegrationTest {
                         .query(Integer.class)
                         .single());
         app.close();
+        assertFalse(Files.exists(stageFile));
         for (int i = 0;
                 i < 100 && ProcessHandle.of(childPid).map(ProcessHandle::isAlive).orElse(false);
                 i++) Thread.sleep(30);
@@ -297,7 +333,9 @@ class BackendIntegrationTest {
                 "render subprocess survived graceful shutdown");
         app = launch(root, settings);
         var resumed = app.getBean(com.djound.rendition.RenditionProjects.class);
-        assertEquals("failed", awaitRendition(resumed, a.id(), "long").state());
+        var interrupted = awaitRendition(resumed, a.id(), "long");
+        assertEquals("failed", interrupted.state());
+        assertNull(interrupted.progress());
         for (int i = 0; i < 6; i++)
             assertEquals(
                     "clarify",

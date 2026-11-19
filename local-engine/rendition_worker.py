@@ -11,6 +11,7 @@ import wave
 
 from common import HERE, HOME
 from planner import decode_plan
+from rendition_progress import report_stage
 
 STYLE_SUGGESTIONS = {
     "jazz trio": "An intimate instrumental jazz trio. Expressive acoustic piano rephrases the source melody with upright bass and brushed drums.",
@@ -47,6 +48,30 @@ Examples:
 "Paste the original recording here, exactly as it sounds" -> C
 Return just A, B or C."""
 
+SCOPE_QUESTION = """Which change to an existing recording does the listener want? Return one letter.
+A: Make a new instrumental version of the whole song in the described sound, mood or instrumentation.
+B: Change only the opening.
+C: Change only the ending.
+D: Change the selected passage.
+E: Ask for clarification. Use this for a nonmusical request, a request for vocals, an exact recording splice, or an unidentified section.
+A broad instrumental request is enough to make a take. Examples: "Play it on bowed cello with acoustic guitar" = A. "Keep the trio and soften the end" = C."""
+
+ENSEMBLE_QUESTION = """The listener wants an earlier melody back. Which accompaniment should be used?
+A: Use the chosen take's existing performance as backing. Choose this by default when the request is about restoring the tune.
+B: Perform a new accompaniment. Choose this when the request also changes its style, instruments or groove.
+"Keep this duo, but use the tune from my voice memo" = A.
+"Follow the original tune and turn the trio into a synth-pop track" = B.
+Answer with one letter."""
+
+
+def usable_plan(plan):
+    if not isinstance(plan, dict) or plan.keys() != {"scope", "caption", "label"}:
+        return False
+    scope, caption, label = plan["scope"], plan["caption"], plan["label"]
+    return (scope in ("whole", "selection", "opening", "ending", "clarify")
+            and isinstance(caption, str) and 0 < len(caption.strip()) <= 2200
+            and isinstance(label, str) and (scope == "clarify" or bool(label.strip())))
+
 
 def infer_plan(context):
     metadata = json.loads((HERE / "assets.json").read_text())
@@ -70,21 +95,37 @@ def infer_plan(context):
     prompt = tokenizer.apply_chat_template(messages, tokenize=False, add_generation_prompt=True, enable_thinking=False) + prefix
     if len(tokenizer.encode(prompt)) > 4096:
         raise ValueError("Shorten this request or select the take you want to change.")
-    result = generate(model, tokenizer, prompt=prompt, max_tokens=280, sampler=make_sampler(temp=0),
-                      prefill_step_size=128, verbose=False)
+
+    def choose(question, data, letters):
+        messages = [{"role": "system", "content": question}, {"role": "user", "content": data}]
+        encoded = tokenizer.apply_chat_template(messages, tokenize=False, add_generation_prompt=True, enable_thinking=False)
+        token_ids = [tokenizer.encode(letter, add_special_tokens=False) for letter in letters]
+        if any(len(ids) != 1 for ids in token_ids):
+            raise ValueError("The installed language model has an incompatible vocabulary.")
+        allowed = mx.array([ids[0] for ids in token_ids])
+        # Constrain only the operation. The music prompt stays in the listener's words.
+        def sample(log_probs):
+            return allowed[mx.argmax(log_probs[:, allowed], axis=-1)]
+        return generate(model, tokenizer, prompt=encoded, max_tokens=1, sampler=sample, verbose=False).strip()
+
     try:
-        plan = decode_plan(prefix + result)
-        if isinstance(plan, dict) and plan.get("scope") != "clarify" and context.get("choose_melody_reference"):
-            question = [
-                {"role": "system", "content": REFERENCE_QUESTION},
-                {"role": "user", "content": context["listener_request"]},
-            ]
-            reference_prompt = tokenizer.apply_chat_template(question, tokenize=False, add_generation_prompt=True,
-                                                             enable_thinking=False)
-            answer = generate(model, tokenizer, prompt=reference_prompt, max_tokens=5,
-                              sampler=make_sampler(temp=0), verbose=False).strip()
-            choice = re.match(r"([ABC])\b", answer, re.I)
-            plan["reference"] = {"A": "original", "B": "parent"}.get(choice[1].upper(), "clarify") if choice else "clarify"
+        result = generate(model, tokenizer, prompt=prompt, max_tokens=280, sampler=make_sampler(temp=0),
+                          prefill_step_size=128, verbose=False)
+        try:
+            plan = decode_plan(prefix + result)
+        except (TypeError, ValueError):
+            plan = None
+        if not usable_plan(plan):
+            scopes = {"A": "whole", "B": "opening", "C": "ending", "D": "selection", "E": "clarify"}
+            scope = scopes[choose(SCOPE_QUESTION, json.dumps(context, ensure_ascii=False), scopes)]
+            request = context["listener_request"]
+            caption = "Which instrumental change would you like to hear in this take?" if scope == "clarify" else request
+            plan = {"scope": scope, "label": request[:120], "caption": caption}
+        if plan.get("scope") != "clarify" and context.get("choose_melody_reference"):
+            choice = choose(REFERENCE_QUESTION, context["listener_request"], "ABC")
+            plan["reference"] = {"A": "original", "B": "parent", "C": "clarify"}[choice]
+            if choice == "A":
+                plan["keep_ensemble"] = choose(ENSEMBLE_QUESTION, context["listener_request"], "AB") == "A"
         return plan, metadata["model"] + "@" + metadata["revision"]
     except (TypeError, ValueError) as error:
         raise RuntimeError("The language planner could not interpret that request. Try describing the sound in a different way.") from error
@@ -154,6 +195,7 @@ def plan_take(request, duration):
     # A listener asking for "jazz" leaves the choice of ensemble open.
     style = prompt.strip().casefold()
     reference = "parent"
+    keep_ensemble = False
     mentions_recording = bool(request.get("parentCaption") or RECORDING_MENTION.search(prompt))
     section = SECTION_REFERENCE.search(prompt)
     if section and not selection:
@@ -161,6 +203,7 @@ def plan_take(request, duration):
     if ORIGINAL_REFERENCE.fullmatch(prompt.strip(" .!?")):
         arrangement = request.get("parentCaption") or "An instrumental arrangement in the character of the source."
         reference = "original"
+        keep_ensemble = True
         plan = {"scope": "selection" if selection else "whole", "caption": arrangement, "label": "Closer to the original"}
         planner = "original-reference"
     elif style in STYLE_SUGGESTIONS:
@@ -180,6 +223,7 @@ def plan_take(request, duration):
         if isinstance(plan, dict):
             plan = dict(plan)
             choice = plan.pop("reference", None)
+            keep_ensemble = choice == "original" and plan.pop("keep_ensemble", False) is True
             if mentions_recording and plan.get("scope") != "clarify":
                 if choice in ("parent", "original"):
                     reference = choice
@@ -215,16 +259,18 @@ def plan_take(request, duration):
     else:
         start, end = None, None
     return {"state": "planned", "caption": caption.strip(), "label": label.strip()[:120], "planner": planner,
-            "appliedStartSeconds": start, "appliedEndSeconds": end, "melodyReference": reference}
+            "appliedStartSeconds": start, "appliedEndSeconds": end, "melodyReference": reference,
+            "keepEnsemble": keep_ensemble}
 
 
 def run(request, plan_only=False):
     source = Path(request["source"]).resolve(strict=True)
     duration = audio_duration(source)
+    report_stage("planning")
     decision = plan_take(request, duration)
     if plan_only or decision["state"] == "clarify":
         return decision
-    from rendition_audio import render_take
+    from rendition_performance import perform_take
     output = Path(request["output"])
     if output.resolve() in (source, Path(request["original"]).resolve()) or output.exists():
         raise ValueError("A revision requires a new audio file.")
@@ -235,8 +281,12 @@ def run(request, plan_only=False):
     if reference and request.get("parentCaption") and decision["caption"] != request["parentCaption"]:
         caption += " The arrangement being revised: " + request["parentCaption"][:400]
     caption = caption[:3600] + " " + ARRANGEMENT_DIRECTION
-    render_take(source, output, caption, start=decision["appliedStartSeconds"],
-                end=decision["appliedEndSeconds"], duration=duration, cover_strength=0.8 if reference else 0.55, reference=reference)
+    named_direction = decision["caption"] if decision["planner"] in ("style", "original-reference") else request["prompt"]
+    perform_take(source, output, caption, description=decision["caption"], prompt=request["prompt"].strip(),
+                 named_direction=named_direction,
+                 duration=duration, start=decision["appliedStartSeconds"], end=decision["appliedEndSeconds"],
+                 original_reference=reference,
+                 keep_ensemble=bool(reference and reference != source and decision["keepEnsemble"]))
     return {**decision, "state": "ready", "durationSeconds": audio_duration(output)}
 
 
@@ -247,13 +297,17 @@ def main():
     args = parser.parse_args()
     if args.check:
         from shutil import which
-        from rendition_audio import check_service
+        from rendition_audio import check_service, part_available
+        from rendition_melody import guide_available
+        from rendition_sketch import backing_available
         try:
             model = check_service()
             metadata = json.loads((HERE / "assets.json").read_text())
             weights = HOME / metadata["modelDirectory"] / "model.safetensors"
+            guidance = guide_available() and backing_available()
             ready = bool(model and which("ffmpeg") and weights.is_file() and importlib.util.find_spec("mlx_lm"))
-            print(json.dumps({"ready": ready, "musicModel": model}))
+            print(json.dumps({"ready": ready, "musicModel": model, "melodyGuidanceReady": guidance,
+                              "nativeAccompanimentReady": part_available()}))
         except (OSError, RuntimeError, ValueError) as error:
             print(json.dumps({"ready": False, "error": str(error)[:360]}))
         return

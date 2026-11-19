@@ -789,6 +789,8 @@ export interface components {
             caption: string;
             /** @enum {string} */
             state: "queued" | "running" | "ready" | "failed" | "clarify";
+            /** @description Current worker-reported stage for a running take when available. */
+            progress?: string | null;
             audioUrl: string | null;
             exportUrl: string | null;
             durationSeconds: number | null;
