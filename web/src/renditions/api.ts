@@ -1,3 +1,4 @@
+import { queryOptions } from "@tanstack/react-query";
 import type { components } from "../api-schema";
 
 export type Recording = components["schemas"]["RenditionIndex"];
@@ -24,11 +25,13 @@ export async function renditionRequest(path: string, options?: RequestInit) {
   }
   return res;
 }
-export const recordingList = {
+export const recordingList = queryOptions({
   queryKey: ["renditions"],
   queryFn: async ({ signal }: { signal: AbortSignal }): Promise<Recording[]> =>
     (await renditionRequest("", { signal })).json(),
-};
+  refetchInterval: ({ state }) =>
+    state.data?.some((recording) => recording.inFlightCount > 0) ? 1500 : false,
+});
 export const projectKey = (id: string) => ["rendition-project", id];
 export const readProject = async (
   id: string,

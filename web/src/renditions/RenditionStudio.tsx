@@ -8,6 +8,7 @@ import { useAudio, clock } from "../studio/Player";
 import { Failure, Loading } from "../studio/Views";
 import {
   projectKey,
+  recordingList,
   readProject,
   renditionRequest,
   type RecordingProject,
@@ -109,6 +110,15 @@ function RecordingSession({
   refresh: () => void;
 }) {
   const client = useQueryClient();
+  // A worker can finish while the listener is comparing a different take.
+  const finishedCount = project.takes.filter((t) => !inProgress(t)).length;
+  const previousFinishedCount = useRef(finishedCount);
+  useEffect(() => {
+    if (previousFinishedCount.current !== finishedCount) {
+      previousFinishedCount.current = finishedCount;
+      void client.invalidateQueries({ queryKey: recordingList.queryKey });
+    }
+  }, [client, finishedCount]);
   const [params, setParams] = useSearchParams();
   const player = useRef<HTMLAudioElement>(null);
   const direction = useRef<HTMLTextAreaElement>(null);
@@ -192,6 +202,7 @@ function RecordingSession({
         },
       );
       setLastRequest(requestId);
+      void client.invalidateQueries({ queryKey: recordingList.queryKey });
       if ("prompt" in cmd) {
         setRevising(null);
         setText((previous) => (previous.trim() === cmd.prompt ? "" : previous));
@@ -394,6 +405,7 @@ function RecordingSession({
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ takeId: selected.id }),
       });
+      void client.invalidateQueries({ queryKey: recordingList.queryKey });
       await client.invalidateQueries(
         { queryKey: projectKey(project.id) },
         { throwOnError: true },
