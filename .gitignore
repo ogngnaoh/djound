@@ -45,12 +45,14 @@
 !/web/public/audio/pulse.wav
 !/web/public/audio/warm.wav
 
-# The public showcase contains only the featured film and two app screenshots.
+# Finished portfolio media and the two app screenshots can ship with the README.
 /showcase/*
 !/showcase/release/
 !/showcase/local-studio/
 /showcase/release/*
 !/showcase/release/zanarkand.mp4
+!/showcase/release/after-hours-piano.mp4
+!/showcase/release/after-hours-piano.jpg
 /showcase/local-studio/*
 !/showcase/local-studio/studio.png
 !/showcase/local-studio/library.png
