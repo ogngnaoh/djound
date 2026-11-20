@@ -4,6 +4,8 @@ Djound starts with a recording the listener knows. Success is hearing a new inst
 
 ## Two places to learn
 
+The [app map and page inventory](app-map.md) trace a first edit, a returning listener, a saved take and recovery through the proposed routes. They also specify where the browser Back button, an audition and a newly completed take should leave the listener.
+
 | Place | Listener’s question | Contents and navigation |
 | --- | --- | --- |
 | Library, at `/` | What can I listen to or work on? | Import a recording, search by title, see the recordings and their takes, open a favorite. Make Favorites a filter on the same collection. Put Trash in secondary library navigation. Keep the existing `/renditions` entry usable. Existing mix and melody editors stay reachable through secondary navigation. |
