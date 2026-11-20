@@ -70,6 +70,9 @@ if [[ "$1" == setup || "$1" == setup-http ]]; then
   director_args=(--score-director)
   if [[ -n "${DJOUND_SCORE_DIRECTOR_CACHE:-}" ]]; then director_args+=(--reuse-cache "$DJOUND_SCORE_DIRECTOR_CACHE"); fi
   "$planner/venv/bin/python" "$code/setup_assets.py" "${director_args[@]}"
+  transcriber_args=(--instrument-transcriber)
+  if [[ -n "${DJOUND_INSTRUMENT_TRANSCRIBER_CACHE:-}" ]]; then transcriber_args+=(--reuse-cache "$DJOUND_INSTRUMENT_TRANSCRIBER_CACHE"); fi
+  "$planner/venv/bin/python" "$code/setup_assets.py" "${transcriber_args[@]}"
 fi
 
 if [[ "$1" == setup ]]; then

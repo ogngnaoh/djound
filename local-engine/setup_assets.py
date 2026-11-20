@@ -26,24 +26,24 @@ def verify(path, item):
     return hashlib.sha1(f'blob {len(raw)}\0'.encode() + raw).hexdigest() == item['git_blob_sha1']
 
 
-def install_score_director(cache):
-    manifest = json.loads((HERE / 'score-director-assets.json').read_text())
-    target = HOME / 'score-director'
+def install_recording_model(directory, cache):
+    manifest = json.loads((HERE / f'{directory}-assets.json').read_text())
+    target = HOME / directory
     identity = {key: manifest[key] for key in ('model', 'revision')}
     HOME.mkdir(parents=True, exist_ok=True)
-    with tempfile.TemporaryDirectory(prefix='.director-', dir=HOME) as tmp:
+    with tempfile.TemporaryDirectory(prefix=f'.{directory}-', dir=HOME) as tmp:
         staged = Path(tmp) / 'ready'
         staged.mkdir()
         for item in manifest['assets']:
             name = item['path']
             if target.exists():
                 if not verify(target / name, item):
-                    raise ValueError(f'Existing arrangement model asset differs: {name}')
+                    raise ValueError(f'Existing {directory} asset differs: {name}')
                 continue
             output = staged / name
             if cache:
                 if not verify(cache / name, item):
-                    raise ValueError(f'Cached arrangement model asset differs: {name}')
+                    raise ValueError(f'Cached {directory} asset differs: {name}')
                 try:
                     os.link((cache / name).resolve(strict=True), output)
                 except OSError as error:
@@ -51,18 +51,18 @@ def install_score_director(cache):
                         raise
                     shutil.copyfile(cache / name, output)
             else:
-                url = f'https://huggingface.co/{manifest["model"]}/resolve/{manifest["revision"]}/{name}'
+                url = item.get('url') or f'https://huggingface.co/{manifest["model"]}/resolve/{manifest["revision"]}/{name}'
                 subprocess.run(['curl', '--fail', '--location', '--silent', '--show-error', '--proto', '=https',
                                 '--proto-redir', '=https', '--max-time', '1800', '--max-filesize', str(item['bytes']),
                                 url, '-o', output], check=True)
             if not verify(output, item):
-                raise ValueError(f'Arrangement model failed verification: {name}')
+                raise ValueError(f'Model asset failed verification: {name}')
         if not target.exists():
             write_json(staged / '.djound-verified.json', identity)
             staged.rename(target)
         elif json.loads((target / '.djound-verified.json').read_text()) != identity:
-            raise ValueError('The existing arrangement model receipt differs from its pinned release.')
-    print('Verified recording arrangement model:', manifest['model'])
+            raise ValueError(f'The existing {directory} receipt differs from its pinned release.')
+    print(f'Verified {directory}:', manifest['model'])
 
 
 def prepare_renderer(name='renderer', key='renderer'):
@@ -92,10 +92,14 @@ def main():
     parser.add_argument('--audio-only', action='store_true', help='Skip the optional freeform planner weights')
     parser.add_argument('--finished-mix', action='store_true', help='Install just the finished mix separator')
     parser.add_argument('--planner-only', action='store_true', help='Install only the language planner weights')
-    parser.add_argument('--score-director', action='store_true', help='Install the recording arrangement model')
+    recording = parser.add_mutually_exclusive_group()
+    recording.add_argument('--score-director', dest='recording_model', action='store_const', const='score-director',
+                           help='Install the recording arrangement model')
+    recording.add_argument('--instrument-transcriber', dest='recording_model', action='store_const',
+                           const='instrument-transcriber', help='Install the instrument transcription model')
     args = parser.parse_args()
-    if args.score_director:
-        install_score_director(args.reuse_cache)
+    if args.recording_model:
+        install_recording_model(args.recording_model, args.reuse_cache)
         return
     manifest = json.loads((HERE / 'assets.json').read_text())
     mix_assets = json.loads((HERE / 'finished-mix-assets.json').read_text())['assets']
