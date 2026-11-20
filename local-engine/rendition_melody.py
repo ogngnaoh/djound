@@ -21,8 +21,8 @@ MAX_FRAMES = 300 * RATE
 MODEL = Path("basic-pitch/basic_pitch/saved_models/icassp_2022/nmp.onnx")
 BANK = "FluidR3_GM.sf2"
 NO_LINE = 3
-MELODY_TRACE_VERSION = 7
-TRACE_SOURCES = ("single", "mix", "separated_voice", "instrument_tracks", "separated_player")
+MELODY_TRACE_VERSION = 8
+TRACE_SOURCES = ("single", "mix", "separated_voice", "instrument_tracks", "separated_player", "harmonic_solo")
 
 
 def guide_available() -> bool:
@@ -71,7 +71,8 @@ def _extract_to_file(source, output, program, deadline, preserve_register, *, no
         raise ValueError("This saved take uses an unsupported melody transcription.")
     if trace_source is not None and (trace_version < 3 or trace_source not in TRACE_SOURCES
                                      or (trace_source == "instrument_tracks" and trace_version < 6)
-                                     or (trace_source == "separated_player" and trace_version < 7)):
+                                     or (trace_source == "separated_player" and trace_version < 7)
+                                     or (trace_source == "harmonic_solo" and trace_version < 8)):
         raise ValueError("This saved take has an unknown melody source.")
     if type(preserve_register) is not bool:
         raise ValueError("Specify whether to keep the recorded octave.")
@@ -542,10 +543,17 @@ def _recorded_line(source, work, events, duration, trace_version, trace_source, 
 
     if trace_source in ("mix", "instrument_tracks"):
         return instrumental_line()
-    if trace_source not in ("separated_voice", "separated_player"):
+    if trace_source not in ("separated_voice", "separated_player", "harmonic_solo"):
         times, pitch, confidence = _fundamental(source)
         if trace_source == "single" or _single_voice(times, pitch, confidence, events):
             return _voiced_notes(source, times, pitch, confidence), "single"
+    if trace_version >= 8 and trace_source in (None, "harmonic_solo"):
+        from rendition_harmonic_solo import harmonic_solo
+        solo = harmonic_solo(source, events, duration)
+        if solo:
+            return solo, "harmonic_solo"
+        if trace_source == "harmonic_solo":
+            raise ValueError("This take's recorded solo could not be recovered from its saved source.")
     if trace_version >= 3:
         voice = _singer_in_mix(source, work, events, duration, deadline, require_foreground=trace_version >= 4)
         if voice:
