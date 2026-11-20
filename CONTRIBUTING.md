@@ -8,6 +8,8 @@ Start with the [local setup](README.md#run-it-locally). The [architecture guide]
 bash scripts/verify.sh
 ```
 
+The check uses the Python environment installed by rendition setup. For a checkout without local models, use a Python 3.11 virtual environment and run `python -m pip install -r local-engine/requirements-audio.lock` first. Set `DJOUND_LOCAL_PYTHON` to its Python executable if needed.
+
 This runs the unit tests, builds the app, checks its API against PostgreSQL, and exercises the packaged interface with Playwright. Docker must be running. On macOS, install Google Chrome or the Playwright Chromium browser. CI runs the same model-free suite on Linux.
 
 The packaged browser check opens the listening room, library and Studio. With a running local-engine installation and a disposable workspace, run the full browser rehearsal to import the bundled melody, arrange it, refine it and verify the saved WAV. The rehearsal creates a recording in that workspace.
