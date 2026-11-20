@@ -175,6 +175,21 @@ class ScoreRevisionTest(unittest.TestCase):
         self.assertNotIn("leadNoteDynamics", restored)
         self.assertEqual(original_audio, undone.read_bytes())
 
+        # Another listener may narrow the change: keep the first taper and
+        # soften only the last note further, then undo just that refinement.
+        narrower = self.root / "narrower.wav"
+        last = dict(edit, count=1, db=-4)
+        layered = revise(self.output, revised, narrower, last)
+        self.assertEqual([{"count": 1, "db": -4}, {"count": 2, "db": -8}],
+                         layered["leadNoteDynamics"]["ending"])
+        with wave.open(str(self.output)) as a, wave.open(str(narrower)) as b:
+            early = round(tracks[0]["notes"][-1][0] * player.RATE)
+            self.assertEqual(a.readframes(early), b.readframes(early))
+            self.assertNotEqual(a.readframes(a.getnframes()), b.readframes(b.getnframes()))
+        previous = self.root / "previous.wav"
+        self.assertEqual(revised, revise(narrower, layered, previous, dict(last, db=4)))
+        self.assertEqual(self.output.read_bytes(), previous.read_bytes())
+
     def test_explicit_register_follows_the_heard_lead_or_the_upload_through_revisions(self):
         role = {"program": 0, "kind": "arpeggio", "pattern": planner._pattern("arpeggio", "wave", 4)}
         trumpet = dict(self.parent, leadProgram=56, roles=[role])

@@ -258,7 +258,9 @@ def lead_note_edit(direction, old):
         if match["subject"].startswith("@") and int(match["subject"].strip("@")) != old["leadProgram"]:
             return None
         number = match["count"]
-        count = counts.get(number) or (int(number) if number else (1 if re.search(r"\bnote\b", words) else 4))
+        count = 1 if re.search(r"\bnote\b", words) else 4
+        if number:
+            count = int(number) if number.isdigit() else counts[number]
         if not 1 <= count <= 32:
             return None
         edge = "ending" if match["edge"] in ("last", "final", "closing") else "opening"
@@ -271,16 +273,17 @@ def apply_lead_note_edit(parent, edit):
     plan = copy.deepcopy(parent)
     marks = plan.setdefault("leadNoteDynamics", {})
     edge = edit["edge"]
-    previous = marks.get(edge)
-    if previous and previous["count"] != edit["count"]:
-        raise ArrangementClarification("This part already has a volume change over a different number of notes. "
-                                       "Use the same number, or start from the take before that change.")
-    db = edit["db"] + (previous["db"] if previous else 0)
-    if not -24 <= db <= 12:
+    previous = marks.get(edge, [])
+    layers = [previous] if isinstance(previous, dict) else previous
+    levels = {mark["count"]: mark["db"] for mark in layers}
+    count = edit["count"]
+    levels[count] = levels.get(count, 0) + edit["db"]
+    if not -24 <= levels[count] <= 12 or not -24 <= sum(levels.values()) <= 12:
         raise ArrangementClarification("The lead is at the available volume limit for those notes. "
                                        "Try a smaller change or start from an earlier take.")
-    if db:
-        marks[edge] = {"count": edit["count"], "db": db}
+    updated = [{"count": n, "db": db} for n, db in sorted(levels.items()) if db]
+    if updated:
+        marks[edge] = updated[0] if len(updated) == 1 else updated
     else:
         del marks[edge]
         if not marks:
@@ -1006,6 +1009,8 @@ def _run(request):
         context["currentScore"]["phraseInteraction"] = old.get("phraseInteraction", "steady")
         if "leadTouch" in old:
             context["currentScore"]["leadTouch"] = old["leadTouch"]
+        if "leadNoteDynamics" in old:
+            context["currentScore"]["leadNoteDynamics"] = old["leadNoteDynamics"]
         names = _catalog()[0]
         context["currentScore"]["players"] = [names[old["leadProgram"]]] + [
             f"{r['kind']}: {names[r['program']] if r['program'] is not None else 'drum kit'}" for r in old["roles"]]

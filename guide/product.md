@@ -24,6 +24,8 @@ After a listener edits an ending, “give the melody to a cello” applies to th
 
 The listener always has a take to play while another is being made. A whole interpretation can find a new tempo or leave space for an ending. Playback follows the corresponding phrase when comparing scored takes. If a request names a chorus the studio cannot locate, the listener can select the passage themselves.
 
+A listener can say what they like before asking for an edit. “I like the cello just the way it is. Could you add a little piano behind it?” keeps the cello and its backing while the piano joins. “Let the cello get quieter over its last few notes” follows the end of the cello line, even when the rest of the band plays an outro. On reopening a favorite, the listener can compare it directly with its parent at the same phrase.
+
 Suno is the reference for three actions in this journey. Covers use a song's melody as the starting point for a change of style. Studio Chat takes direction in the context of the project and selection. Its editor lets the listener hear a replacement in place. Djound applies those ideas to a first release that begins with an uploaded recording and ends with a playable instrumental file. Suno's public guides describe these listener actions. Djound's implementation choices are documented in its own architecture. [Suno Covers](https://help.suno.com/en/articles/2872257) · [Studio Chat](https://help.suno.com/en/articles/13670721) · [Song Editor](https://help.suno.com/en/articles/6141505)
 
 ## What still needs a listener's ear

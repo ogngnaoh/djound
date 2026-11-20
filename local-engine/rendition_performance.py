@@ -127,10 +127,14 @@ def _score_caption(plan, tracks):
         caption += f" The lead part calls for {feel}{closing}."
         for edge, change in plan.get("leadNoteDynamics", {}).items():
             where = "first" if edge == "opening" else "last"
-            quality = "softer" if change["db"] < 0 else "stronger"
-            count = change["count"]
-            noun = "note" if count == 1 else "notes"
-            caption += f" The {where} {count} lead {noun} {'is' if count == 1 else 'are'} {quality}."
+            if isinstance(change, list):
+                count = max(layer["count"] for layer in change)
+                caption += f" The lead changes volume in stages over its {where} {count} notes."
+            else:
+                quality = "softer" if change["db"] < 0 else "stronger"
+                count = change["count"]
+                notes = "note is" if count == 1 else f"{count} notes are"
+                caption += f" The lead’s {where} {notes} {quality}."
     return caption[0].upper() + caption[1:]
 
 
@@ -249,7 +253,7 @@ def perform_score(parent, original, destination, work, *, direction, caption, pa
         intervals = scored_ancestor["editedFrames"]
         same_performance = all(plan.get(field) == parent_plan.get(field) for field in
                                ("bpm", "meter", "subdivision", "roles", "phraseInteraction", "phraseDynamics",
-                                "harmony", "phrasing", "leadTouch", "room", "realization"))
+                                "harmony", "phrasing", "leadTouch", "leadNoteDynamics", "room", "realization"))
         def passage_file(start, end, folder):
             if passage_policy == "keep":
                 return parent
