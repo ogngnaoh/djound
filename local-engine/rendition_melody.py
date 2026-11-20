@@ -359,6 +359,9 @@ def _voiced_notes(source, times, pitch, confidence):
     from scipy.ndimage import binary_closing, median_filter
     from scipy.signal import find_peaks
 
+    use = np.isfinite(pitch) & (confidence > 0.05)
+    if not use.any():
+        return []
     # Use sustained pitch changes and syllable energy dips, avoiding a new note for each vibrato cycle.
     with sf.SoundFile(source) as wav:
         levels = [
@@ -366,7 +369,6 @@ def _voiced_notes(source, times, pitch, confidence):
             for block in wav.blocks(blocksize=882, dtype="float32", always_2d=True)
         ]
     envelope = median_filter(np.interp(times, np.arange(len(levels)) * 0.02 + 0.01, levels), 3)
-    use = np.isfinite(pitch) & (confidence > 0.05)
     voiced = binary_closing(use, structure=np.ones(3))
     line = median_filter(np.interp(times, times[use], pitch[use]), 5)
     energy_valleys = find_peaks(-envelope, prominence=5.5, distance=8)[0]

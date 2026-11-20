@@ -13,6 +13,13 @@ import rendition_melody as melody
 
 
 class MelodyGuideTest(unittest.TestCase):
+    def test_saved_single_line_with_no_longer_recoverable_voicing_returns_no_notes(self):
+        import numpy as np
+
+        with patch.object(melody, "_fundamental", return_value=(
+                np.array([0., .02]), np.array([np.nan, np.nan]), np.array([0., 0.]))):
+            self.assertEqual(([], "single"), melody._recorded_line(None, None, [], .04, 6, "single", None))
+
     def setUp(self):
         temp = tempfile.TemporaryDirectory()
         self.addCleanup(temp.cleanup)
