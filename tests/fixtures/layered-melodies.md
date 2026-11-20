@@ -42,4 +42,4 @@ The MusicNet, KRAISLER and TRIOS fixture commands accept `--transcribe` to evalu
 .runtime/local-engine/venv/bin/python tests/trios_melody_acceptance.py /path/to/TRIOS.zip /tmp/djound-layered --transcribe
 ```
 
-[Trout Quintet](musicnet-trout/README.md) · [American Quartet](musicnet-american/README.md) · [Violin and piano](kraisler-dichterliebe/README.md) · [Take Five](trios-take-five/README.md)
+[Trout Quintet](musicnet-trout/README.md) · [American Quartet](musicnet-american/README.md) · [Dichterliebe](kraisler-dichterliebe/README.md) · [Take Five](trios-take-five/README.md) · [Estrellita](kraisler-estrellita/README.md)
