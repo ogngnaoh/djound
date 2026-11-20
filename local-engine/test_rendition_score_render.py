@@ -205,12 +205,30 @@ class ScoreRendererTest(unittest.TestCase):
         later = dict(clarinet, gain=.1, notes=[(1.35,1.64,71,96)])
         for original, edited, reason in [
             ([clarinet,doubling], [clarinet,later], "overload"),
-            ([piano], [piano,answer], "too quiet"),
+            ([piano,answer], [piano,answer,dict(piano, notes=[(.15,.85,69,96), (1.6,1.8,79,96)])], "too quiet"),
         ]:
             with self.subTest(reason=reason):
                 selected = self.work / f"parent-{reason}.wav"
                 plan = dict(realization="score", fromUpload=True, room=0.)
-                player.render_score(original, 1.85, selected, deadline=self.deadline, room=0., receipt=plan)
+                if reason == "too quiet":
+                    # The first addition starts in unison, then plays its own answer.
+                    # It uses the space above the nominal peak without touching the
+                    # piano. A second coincident attack now hits the physical limit.
+                    master = player.render_score([piano], 1.85, self.work/"solo.wav",
+                                                 deadline=self.deadline, room=0.)
+                    player.render_score(original, 1.85, selected, deadline=self.deadline, room=0.,
+                                        master_gain=master, part_gains=[1.,1.], protected_parts=[0], receipt=plan)
+                    self.assertAlmostEqual(plan["scoreMasterGain"], master, places=6)
+                    self.assertGreater(plan["scorePartGains"][1], .05)
+                    replay = self.work / "with-first-answer.wav"
+                    player.render_score(original, 1.85, replay, deadline=self.deadline, room=0.,
+                                        master_gain=plan["scoreMasterGain"], part_gains=plan["scorePartGains"])
+                    self.assertEqual(replay.read_bytes(), selected.read_bytes())
+                    with wave.open(str(replay)) as wav:
+                        pcm = np.frombuffer(wav.readframes(wav.getnframes()), "<i2").astype(int)
+                    self.assertIn(abs(pcm).max(), range(32765, 32768))
+                else:
+                    player.render_score(original, 1.85, selected, deadline=self.deadline, room=0., receipt=plan)
                 heard = selected.read_bytes()
                 output = self.work / f"child-{reason}.wav"
                 def transcribe(source, dest, **kwargs):
@@ -235,7 +253,8 @@ class ScoreRendererTest(unittest.TestCase):
                 # rounding when replaying these exact same musical circumstances.
                 legacy = self.work / f"master-only-{reason}.wav"
                 receipt = {}
-                player.render_score(edited[::-1], 1.85, legacy, deadline=self.deadline, room=0.,
+                legacy_tracks = [answer,piano] if reason == "too quiet" else edited[::-1]
+                player.render_score(legacy_tracks, 1.85, legacy, deadline=self.deadline, room=0.,
                                     master_gain=plan["scoreMasterGain"], receipt=receipt)
                 self.assertTrue(legacy.is_file())
                 if reason == "overload":

@@ -18,6 +18,7 @@ BLOCK = 32768
 MAX_NOTES = 65536
 MAX_TRACKS = 32
 PEAK = 0.91
+PCM_PEAK = 32766 / 32768  # Leave a signed PCM count for float32 summation and quantization.
 REFLECTIONS = tuple((round(ms * RATE / 1000), gain) for ms, gain in
                     ((19, .09), (34, .067), (53, .053), (89, .038), (133, .024), (211, .014)))
 
@@ -159,6 +160,8 @@ def _headroom(mix, changed, limit, deadline, *, rounding_margin=0.):
     """Find the loudest constant gain for edited parts that leaves the other players fixed."""
     import numpy as np
 
+    mix.seek(0)
+    changed.seek(0)
     lower, upper = 0., 1.
     while block := mix.read(BLOCK * 8):
         _remaining(deadline)
@@ -267,28 +270,45 @@ def render_score(tracks, duration: float, output: Path, *, deadline: float, room
                 raise ValueError("The score contains no audible performance.")
             master = min(1., PEAK / peak) if master_gain is None else master_gain
             legacy_gain = 1.
-            if master * peak > PEAK + 1e-8:
+            # New takes start at nominal level. A replay with explicit per-part
+            # gains can include a protected edit that used the remaining PCM range.
+            ceiling = PCM_PEAK if part_gains is not None and protected_parts is None else PEAK
+            if master * peak > ceiling + 1e-8:
                 fit = None
+                written_peak = 0.
                 if editable:
-                    changed_peak = perform(changed, editable)
-                    limit = PEAK / master
-                    # An old post-sum gain can put a preserved isolated sample a
-                    # few float32 rounding units above the equivalent new mix.
-                    fit = _headroom(mix, changed, limit, deadline,
-                                    rounding_margin=0. if legacy else limit * 2e-7)
-                if protected and fit is not None:
-                    # A near-unison at just one attack can consume all remaining
-                    # headroom, silencing the edited group's later, unrelated notes.
-                    # Treat a reduction of over 30 dB to under eight PCM counts as
-                    # effectively muted; intentionally faint written parts are valid.
-                    written_peak = changed_peak * master
-                    if fit < .0316 and written_peak >= 8 / 32768 > written_peak * fit:
+                    written_peak = perform(changed, editable) * master
+
+                    def fit_at(target):
+                        limit = target / master
+                        # An old post-sum gain can put a preserved isolated sample
+                        # a few float32 rounding units above the equivalent new mix.
+                        return _headroom(mix, changed, limit, deadline,
+                                         rounding_margin=0. if legacy else limit * 2e-7)
+
+                    fit = fit_at(ceiling)
+
+                def effectively_muted(amount):
+                    # An overlapping attack can erase the group's distinct later
+                    # notes. Exclude intentionally faint written parts.
+                    return amount < .0316 and written_peak >= 8 / 32768 > written_peak * amount
+
+                if protected and (fit is None or effectively_muted(fit)):
+                    # A kept part may already touch the nominal 0.91 target.
+                    # Spend the remaining representable range before rejecting an
+                    # added player or turning down a player the listener kept.
+                    ceiling = PCM_PEAK
+                    if peak * master <= ceiling:
+                        fit = 1.
+                    elif editable:
+                        fit = fit_at(ceiling)
+                    if fit is not None and effectively_muted(fit):
                         raise ScoreBalanceConflict("The changed part would be too quiet to hear at this balance.")
                 if fit is None:
                     # A standalone protected mix may itself exceed the limit, e.g.
                     # when removing a player that partially cancelled it.
-                    master = PEAK / peak
-                else:
+                    master = ceiling / peak
+                elif fit < 1.:
                     for i in editable:
                         gains[i] *= fit
                     if legacy:
@@ -298,8 +318,8 @@ def render_score(tracks, duration: float, output: Path, *, deadline: float, room
                         # trim after summing the room instead would round differently
                         # on a future replay. The extra render only runs on overload.
                         peak = perform(mix, range(len(parts)))
-                        if peak * master > PEAK + 1e-8:
-                            master = PEAK / peak
+                        if peak * master > ceiling + 1e-8:
+                            master = ceiling / peak
                 if protected and (master_gain - master) * peak > 1 / 32768:
                     raise ScoreBalanceConflict("Keeping the other players at this volume would overload the recording.")
             _write_pcm(mix, frames, ready, master, deadline, changed, legacy_gain)
