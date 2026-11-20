@@ -9,3 +9,5 @@ server/mvnw.cmd text eol=crlf
 *.pdf binary
 # The final blank line terminates an SSE frame; it is protocol data.
 fixtures/provider/melodyflow/*.sse text eol=lf whitespace=-blank-at-eof
+# Preserve verbatim upstream font licenses, including their original line endings.
+web/app/fonts/*-OFL.txt whitespace=-blank-at-eol
