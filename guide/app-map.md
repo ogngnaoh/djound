@@ -2,7 +2,7 @@
 
 A recording is the project. A take is a performance of that recording. A request belongs to the take it starts from and leads to a new take, a question or an error. The library helps a listener find their music. Opening a recording gives them one studio in which to listen and make decisions.
 
-## Proposed navigation
+## Navigation
 
 ```mermaid
 flowchart TD
@@ -36,7 +36,7 @@ flowchart TD
 | Trash | `/?view=trash` | A recoverable collection available from Library. Restore a recording and return to its saved takes. An old studio link to a trashed recording offers Restore in place. |
 | Other tools | Secondary navigation | Preserve access to existing mix and melody projects through their current editor URLs and a secondary project list. Give listeners a direct path back to the recording library. |
 
-The addresses above are implementation targets. The studio deep links already exist. Keep search in the library URL and scroll position and the focused row on its history entry. Browser Back and the studio’s collection link return to that view. A direct link from another app gets a plain Library link.
+The library stores its search in the URL and the focused recording and scroll position on its history entry. Browser Back and the studio’s collection link return to that view. A direct link from another app gets a plain Library link. The secondary project list lives at `/tools/library`. [Release walkthrough](../design-qa.md)
 
 ## Listener journeys
 

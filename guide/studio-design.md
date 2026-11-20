@@ -2,6 +2,10 @@
 
 Djound starts with a recording the listener knows. Success is hearing a new instrumental they would keep, asking for one more change in their own words, and coming back to the version they loved. The Final Fantasy listening sessions give this design a concrete test. After changing the band, could someone say “I like those piano replies. Let the accordion sing a little more,” hear the difference in the same phrase, and keep the result? [Product direction and listening sessions](product.md)
 
+## Selected design
+
+The selected studio puts take history on the left. The song, its current take and the export action share the top of the listening area. The waveform, comparison buttons and edit field follow in that order. Each request names the take it will change. On a phone the same controls stay in reading order, with history available in a disclosure. The library uses the same wordmark, graphite surfaces, lime accent and recording covers. [App map](app-map.md) · [Design verification](../design-qa.md)
+
 ## Two places to learn
 
 The [app map and page inventory](app-map.md) trace a first edit, a returning listener, a saved take and recovery through the proposed routes. They also specify where the browser Back button, an audition and a newly completed take should leave the listener.
@@ -11,7 +15,7 @@ The [app map and page inventory](app-map.md) trace a first edit, a returning lis
 | Library, at `/` | What can I listen to or work on? | Import a recording, search by title, see the recordings and their takes, open a favorite. Make Favorites a filter on the same collection. Put Trash in secondary library navigation. Keep the existing `/renditions` entry usable. Existing mix and melody editors stay reachable through secondary navigation. |
 | Studio, at `/renditions/:id` | What am I hearing, and what can I change? | Recording title, selected take, transport, a direction in the listener’s own words, and its history. A direct `?take=` link selects that playable take. Opening a recording from the library selects its favorite when available, otherwise Original. |
 
-The existing Library shows three project types and offers six ways into them between the rail and the page actions. Its search applies only to melody projects. The recording import page repeats a title-only library. In the first-take studio, the large filename and an almost empty history column occupy space that could establish the sound of the recording and invite the first edit. After generation, the request, result, player and history can each describe a different part of the operation. One library and one stable working take simplify these decisions. [Current navigation](../web/src/studio/StudioApp.tsx) · [Existing library](../web/src/studio/LibraryPage.tsx) · [Recording session](../web/src/renditions/RenditionStudio.tsx)
+The earlier home screen mixed three project types, searched only melody projects and repeated the recording list on a separate import page. The new Library opens directly onto recordings. Mix and melody projects remain available through Other tools. In the studio the listener can see which recording is playing and where the next edit will land. [Recording library](../web/src/renditions/RecordingLibrary.tsx) · [Recording session](../web/src/renditions/RenditionStudio.tsx)
 
 ## From the first listen to a favorite
 
