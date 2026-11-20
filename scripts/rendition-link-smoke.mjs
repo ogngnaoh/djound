@@ -66,7 +66,7 @@ try {
   await current(favorite.id);
   await expect(draft).toBeDisabled();
   await expect(button("Choose a passage")).toBeDisabled();
-  await expect(page.getByRole("button", { name: /^Jazz Trio/ })).toBeDisabled();
+  await expect(button("Make a take")).toBeDisabled();
   assert.equal(new URL(page.url()).searchParams.get("take"), "missing-take");
   await button("Use " + name(favorite)).click();
   await expect(message).toHaveCount(0);
@@ -89,6 +89,12 @@ try {
   await current("original");
   await expect(message).toHaveCount(0);
   await expect(draft).toBeEnabled();
+  await button("Solo Piano").click();
+  await expect(draft).toHaveValue("Solo Piano");
+  await expect(draft).toBeFocused();
+  await draft.fill("Solo piano, with a quieter ending.");
+  await expect(button("Make a take")).toBeEnabled();
+  assert.equal(sent.length, 1, "A style suggestion only fills the draft.");
   // The favorite might itself be missing. History still offers every playable take.
   snapshot = { ...project, favoriteId: "missing-favorite" };
   await open("missing-take");
@@ -111,8 +117,7 @@ try {
   await open(linked.id);
   await expect(message).toContainText("needs more direction");
   await page
-    .locator(".mix-takes article")
-    .filter({ has: page.getByText(name(linked), { exact: true }) })
+    .getByRole("article", { name: name(linked), exact: true })
     .getByRole("button", { name: "Revise request" })
     .click();
   await current("original");
@@ -155,6 +160,33 @@ try {
   await current(linked.id);
   await expect(message).toHaveCount(0);
   await expect(draft).toBeEnabled();
+  await page.setViewportSize({ width: 320, height: 700 });
+  const history = page.getByRole("button", { name: /Take history/ });
+  await history.click();
+  await button("Play original").click();
+  await current("original");
+  await expect(history).toHaveAttribute("aria-expanded", "false");
+  await expect(
+    page.getByRole("heading", { name: "Original", exact: true }),
+  ).toBeFocused();
+  await audio.evaluate((a) => a.pause());
+  const waveform = page.locator(".recording-wave-track");
+  const bounds = await waveform.boundingBox();
+  assert.ok(bounds);
+  await waveform.click({
+    position: { x: bounds.width * 0.65, y: bounds.height * 0.8 },
+  });
+  await expect
+    .poll(() =>
+      audio.evaluate((a) => Math.abs(a.currentTime / a.duration - 0.65) < 0.05),
+    )
+    .toBe(true);
+  assert.equal(
+    await page.evaluate(
+      () => document.documentElement.scrollWidth <= innerWidth,
+    ),
+    true,
+  );
   assert.equal(sent.length, 1);
   console.log(
     "Passed missing, unfinished, unplayable and explicit Original take links, confirmed edit parent and retained library return.",

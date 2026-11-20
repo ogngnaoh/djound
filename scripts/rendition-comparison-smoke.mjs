@@ -146,7 +146,8 @@ try {
   );
   if (question) {
     const entry = page
-      .locator(".mix-takes article")
+      .getByRole("complementary", { name: "Take history" })
+      .getByRole("article")
       .filter({ hasText: question.request })
       .first();
     await entry.getByRole("button", { name: "Revise request" }).click();

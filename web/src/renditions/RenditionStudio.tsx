@@ -1,11 +1,19 @@
 import { useEffect, useRef, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { Bookmark, Check, Download, Play } from "lucide-react";
+import {
+  ArrowLeftRight,
+  ChevronDown,
+  Play,
+  Scan,
+  Sparkles,
+  Star,
+  Upload,
+} from "lucide-react";
 import { useLocation, useParams, useSearchParams } from "react-router-dom";
 import { Button } from "../components/ui/button";
 import { readLocal, writeLocal } from "../recovery";
 import { useAudio, clock } from "../studio/Player";
-import { Failure, Loading } from "../studio/Views";
+import { Loading } from "../studio/Views";
 import {
   projectKey,
   recordingList,
@@ -21,6 +29,10 @@ import { useRecoverableRequest } from "./useRecoverableRequest";
 import { RestoreRecording } from "./RestoreRecording";
 import { LibraryReturnLink } from "./libraryNavigation";
 import { correspondingPosition, passageAuditionStart } from "./songTime";
+import { TakeHistory } from "./TakeHistory";
+import { TakeDetails } from "./TakeDetails";
+import { RecordingWaveform } from "./RecordingWaveform";
+import { RecordingArtwork, recordingName } from "./recordingPresentation";
 import "./renditions.css";
 
 const styles = [
@@ -102,10 +114,16 @@ export default function RenditionStudio() {
     return <RestoreRecording id={id} />;
   if (!query.data)
     return query.isError ? (
-      <Failure
-        message={query.error.message}
-        retry={() => void query.refetch()}
-      />
+      <section className="standalone">
+        <h1>
+          {query.error instanceof RenditionError && query.error.status === 404
+            ? "Recording unavailable"
+            : "Couldn’t open this recording"}
+        </h1>
+        <p role="alert">{query.error.message}</p>
+        <Button onClick={() => void query.refetch()}>Try again</Button>
+        <LibraryReturnLink />
+      </section>
     ) : (
       <Loading />
     );
@@ -141,6 +159,7 @@ function RecordingSession({
   const [params, setParams] = useSearchParams();
   const location = useLocation();
   const player = useRef<HTMLAudioElement>(null);
+  const takeTitle = useRef<HTMLHeadingElement>(null);
   const direction = useRef<HTMLTextAreaElement>(null);
   const seekOnLoad = useRef<number | null>(null);
   const lastPosition = useRef(new Map<string, number>());
@@ -422,7 +441,7 @@ function RecordingSession({
     setRevising(take);
     setText(saved?.text ?? take.request);
     setRange(next);
-    direction.current?.focus();
+    requestAnimationFrame(() => direction.current?.focus());
   }
   const start = Number(range?.start);
   const end = Number(range?.end);
@@ -491,401 +510,448 @@ function RecordingSession({
   }
   const locked = creation.busy || !!creation.pending || !!recovery;
   return (
-    <section
-      className="mix-editor rendition-studio"
-      data-working-take-id={activeId}
-    >
-      <header className="mix-heading">
-        <LibraryReturnLink />
-        <h1>{project.title}</h1>
-      </header>
-      <div className="mix-edit-grid">
-        <div className="mix-main">
-          {recovery && (
-            <div className="mix-reply">
-              <p role="status">
-                {linkStatus(linked, recovery.audioError)} You can listen to{" "}
-                {fallbackName}. Choose a take to edit.
-              </p>
-              <Button
-                variant="outline"
-                onClick={() => openFromLink(selected ?? null)}
-              >
-                Use {activeName}
-              </Button>
-              {linkedReady && (
-                <Button variant="outline" onClick={() => openFromLink(linked)}>
-                  {recovery.audioError ? "Retry" : "Open"} {label(linked.id)}
-                </Button>
-              )}
-            </div>
-          )}
-          <div className="mix-time">
-            <strong>
-              {label(heardId)}
-              {heardId !== activeId && " · Comparing"}
-            </strong>
-            <span>{clock(duration)}</span>
-          </div>
-          <audio
-            ref={player}
-            controls
-            preload="metadata"
-            aria-label={"Listen to " + label(heardId)}
-            data-take-id={heardId}
-            onError={(event) => mediaFailed(event.currentTarget)}
-            onTimeUpdate={(e) => {
-              if (
-                stopAt.current !== null &&
-                e.currentTarget.currentTime >= stopAt.current
-              ) {
-                e.currentTarget.pause();
-                stopAt.current = null;
-              }
-            }}
-            onLoadedMetadata={(e) => {
-              const position = seekOnLoad.current;
-              if (position !== null) {
-                const a = e.currentTarget;
-                a.currentTime = Math.max(
-                  0,
-                  Math.min(position, Math.max(0, a.duration - 0.1)),
-                );
-                seekOnLoad.current = null;
-              }
-            }}
+    <section className="take-explorer" data-working-take-id={activeId}>
+      <div className="explorer-main">
+        <header className="explorer-hero">
+          <RecordingArtwork
+            id={project.id}
+            title={project.title}
+            className="explorer-art"
           />
-          <div className="mix-save">
-            {comparisonTakes.map((take) => (
-              <Button
-                key={take.id}
-                size="sm"
-                variant="outline"
-                aria-pressed={heardId === take.id}
-                onClick={() => compare(take)}
-              >
-                <Play />{" "}
-                {heardId === take.id
-                  ? "Return to " + activeName
-                  : "Compare " + label(take.id)}
-              </Button>
-            ))}
-            {selected && (
-              <>
-                <Button
-                  size="sm"
-                  variant="outline"
-                  aria-pressed={heardId === "original"}
-                  onClick={() => compare(null)}
-                >
-                  <Play />{" "}
-                  {heardId === "original"
-                    ? "Return to " + activeName
-                    : "Compare original"}
-                </Button>
-                <Button
-                  size="sm"
-                  variant="outline"
-                  disabled={saving || project.favoriteId === activeId}
+          <div className="explorer-identity">
+            <h1>{recordingName(project.title)}</h1>
+            <div className="explorer-take-name">
+              <h2 ref={takeTitle} tabIndex={-1}>
+                {activeName}
+              </h2>
+              {selected && (
+                <button
+                  className="explorer-favorite"
+                  data-kept={activeId === project.favoriteId}
+                  disabled={saving || activeId === project.favoriteId}
+                  aria-label={
+                    activeId === project.favoriteId
+                      ? "Kept as favorite"
+                      : "Keep " + activeName + " as favorite"
+                  }
                   onClick={() => void favorite()}
                 >
-                  {project.favoriteId === activeId ? <Check /> : <Bookmark />}
-                  {project.favoriteId === activeId
-                    ? "Kept as favorite"
-                    : heardId !== activeId
-                      ? "Keep " + activeName + " as favorite"
-                      : "Keep as favorite"}
-                </Button>
-                {selected.exportUrl && (
-                  <Button asChild size="sm" variant="ghost">
-                    <a href={selected.exportUrl} download>
-                      <Download />{" "}
-                      {heardId !== activeId
-                        ? "Download " + activeName
-                        : "Download this take"}
-                    </a>
-                  </Button>
-                )}
-              </>
+                  <Star aria-hidden="true" />
+                  {activeId === project.favoriteId
+                    ? "Favorite"
+                    : "Keep favorite"}
+                </button>
+              )}
+            </div>
+            <p>
+              {selected?.request ??
+                project.title + " · " + clock(project.durationSeconds)}
+            </p>
+          </div>
+          <div className="explorer-hero-actions">
+            {selected?.exportUrl && (
+              <a
+                className="explorer-button"
+                href={selected.exportUrl}
+                download
+                aria-label={"Download " + activeName + " as WAV"}
+              >
+                <Upload aria-hidden="true" />
+                Export
+              </a>
+            )}
+            <TakeDetails
+              project={project}
+              take={selected}
+              parent={label(selected?.parentId ?? "original")}
+            />
+          </div>
+        </header>
+        {recovery && (
+          <div className="explorer-reply">
+            <p role="status">
+              {linkStatus(linked, recovery.audioError)} You can listen to{" "}
+              {fallbackName}. Choose a take to edit.
+            </p>
+            <Button
+              variant="outline"
+              onClick={() => openFromLink(selected ?? null)}
+            >
+              Use {activeName}
+            </Button>
+            {linkedReady && (
+              <Button variant="outline" onClick={() => openFromLink(linked)}>
+                {recovery.audioError ? "Retry" : "Open"} {label(linked.id)}
+              </Button>
             )}
           </div>
-          <section className="mix-conversation">
-            <h2>Make a version of {label(parentId)}</h2>
-            {revising && (
-              <div className="mix-reply">
-                <p>{revising.error}</p>
-                <button
-                  className="text-action"
-                  onClick={() => {
-                    setRevising(null);
-                    setRange(null);
-                    setText("");
-                  }}
-                >
-                  Start a new request
-                </button>
-              </div>
+        )}
+        <audio
+          ref={player}
+          controls
+          preload="metadata"
+          aria-label={"Listen to " + label(heardId)}
+          data-take-id={heardId}
+          onError={(event) => mediaFailed(event.currentTarget)}
+          onTimeUpdate={(e) => {
+            if (
+              stopAt.current !== null &&
+              e.currentTarget.currentTime >= stopAt.current
+            ) {
+              e.currentTarget.pause();
+              stopAt.current = null;
+            }
+          }}
+          onLoadedMetadata={(e) => {
+            const position = seekOnLoad.current;
+            if (position !== null) {
+              const a = e.currentTarget;
+              a.currentTime = Math.max(
+                0,
+                Math.min(position, Math.max(0, a.duration - 0.1)),
+              );
+              seekOnLoad.current = null;
+            }
+          }}
+        />
+        <RecordingWaveform
+          audioRef={player}
+          recordingId={project.id}
+          takeId={heardId}
+          audioUrl={heardUrl}
+          duration={duration}
+          label={label(heardId)}
+          onSeek={() => {
+            stopAt.current = null;
+          }}
+        />
+        {(selected || comparisonTakes.length > 0) && (
+          <div
+            className="explorer-comparison"
+            role="group"
+            aria-label="Compare takes"
+          >
+            <span className="explorer-compare-label">
+              <ArrowLeftRight aria-hidden="true" />
+              Compare
+            </span>
+            {selected && (
+              <button
+                type="button"
+                className="explorer-button"
+                aria-pressed={heardId === "original"}
+                aria-label={
+                  heardId === "original"
+                    ? "Return to " + activeName
+                    : "Compare original"
+                }
+                onClick={() => compare(null)}
+              >
+                <Play aria-hidden="true" />
+                Original
+              </button>
             )}
+            <button
+              type="button"
+              className="explorer-button"
+              aria-pressed={heardId === activeId}
+              aria-label={"Listen to working take " + activeName}
+              onClick={() => {
+                setAudition(null);
+                switchAudio(
+                  selected ?? null,
+                  positionIn(selected ?? null),
+                  player.current?.paused === false,
+                );
+              }}
+            >
+              <Play aria-hidden="true" />
+              {selected?.label ?? "Original"}
+            </button>
+            {comparisonTakes.map((take) => (
+              <button
+                type="button"
+                key={take.id}
+                className="explorer-compare-parent"
+                aria-pressed={heardId === take.id}
+                aria-label={
+                  heardId === take.id
+                    ? "Return to " + activeName
+                    : "Compare " + label(take.id)
+                }
+                onClick={() => compare(take)}
+              >
+                <ArrowLeftRight aria-hidden="true" />
+                <span>{take.label}</span>
+              </button>
+            ))}
+          </div>
+        )}
+        {heardId !== activeId && (
+          <p className="explorer-audition" role="status">
+            Listening to {label(heardId)} · Editing {activeName}
+          </p>
+        )}
+        <section className="explorer-composer">
+          <h2 aria-label={"Make a version of " + activeName}>
+            {selected ? "Edit " : "Reimagine "}
+            {activeName}
+          </h2>
+          {revising && (
+            <div className="explorer-reply">
+              <p>{revising.error}</p>
+              <button
+                className="text-action"
+                onClick={() => {
+                  setRevising(null);
+                  setRange(null);
+                  setText("");
+                }}
+              >
+                Start a new request
+              </button>
+            </div>
+          )}
+          {!selected && (
             <div
-              className="rendition-styles"
+              className="explorer-styles"
               role="group"
               aria-label="Suggested sounds"
             >
               {styles.map(([style, description]) => (
-                <Button
-                  key={style}
-                  variant="outline"
-                  disabled={locked}
-                  onClick={() => make(style)}
-                >
-                  <strong>{style}</strong>
-                  <span>{description}</span>
-                </Button>
-              ))}
-            </div>
-            <form
-              onSubmit={(e) => {
-                e.preventDefault();
-                make(text);
-              }}
-            >
-              <textarea
-                ref={direction}
-                maxLength={1000}
-                disabled={!!recovery}
-                aria-label="Describe a version or change"
-                placeholder={
-                  selected
-                    ? "What would you change about this take?"
-                    : "Describe the sound you want…"
-                }
-                value={text}
-                onChange={(e) => setText(e.target.value)}
-              />
-              <div>
                 <button
-                  className="text-action"
                   type="button"
-                  disabled={!!recovery}
-                  aria-expanded={!!range}
+                  className="explorer-button"
+                  key={style}
+                  title={description}
+                  disabled={locked}
+                  aria-pressed={text === style}
                   onClick={() => {
-                    if (range) setRange(null);
-                    else if (
-                      !revising &&
-                      !text.trim() &&
-                      latest?.state === "clarify" &&
-                      latest.parentId === activeId
-                    )
-                      resumeRevision(latest, true);
-                    else {
-                      setRange(
-                        passageAt(positionIn(parentTake), parentDuration),
-                      );
-                    }
+                    setText(style);
+                    direction.current?.focus();
                   }}
                 >
-                  {range ? "Use whole recording" : "Choose a passage"}
+                  {style}
                 </button>
-                <Button disabled={!text.trim() || locked}>Make a take</Button>
-              </div>
-              {range && (
-                <fieldset className="mix-range-fields">
-                  <legend className="sr-only">Selected passage</legend>
-                  <label>
-                    Start (s)
-                    <input
-                      aria-label="Passage start in seconds"
-                      type="number"
-                      min="0"
-                      max={parentDuration}
-                      step="any"
-                      value={range.start}
-                      onChange={(e) =>
-                        setRange({ ...range, start: e.target.value })
-                      }
-                    />
-                  </label>
-                  <label>
-                    End (s)
-                    <input
-                      aria-label="Passage end in seconds"
-                      type="number"
-                      min="0"
-                      max={parentDuration}
-                      step="any"
-                      value={range.end}
-                      onChange={(e) =>
-                        setRange({ ...range, end: e.target.value })
-                      }
-                    />
-                  </label>
-                  <Button
-                    type="button"
-                    variant="outline"
-                    size="sm"
-                    disabled={!validRange}
-                    onClick={() => {
-                      setAudition(null);
-                      switchAudio(parentTake, start);
-                      stopAt.current = end;
-                    }}
-                  >
-                    <Play /> Play passage
-                  </Button>
-                </fieldset>
-              )}
-            </form>
-            {creation.pending && !creation.busy && (
-              <Button
-                variant="outline"
-                onClick={() => void creation.submit(creation.pending!)}
-              >
-                Resume{" "}
-                {"questionId" in creation.pending
-                  ? "answer · " + answerLabels[creation.pending.choice]
-                  : "request · " + creation.pending.prompt}
-              </Button>
-            )}
-            {latest && latest.id !== revising?.id && (
-              <div className="mix-status" role="status">
-                {latest.state === "ready" ? (
-                  <Button
-                    variant="secondary"
-                    onClick={() =>
-                      chooseTake(
-                        latest,
-                        passageAuditionStart(
-                          latest.appliedStartSeconds ?? latest.startSeconds,
-                        ),
-                      )
-                    }
-                  >
-                    <Play /> Play new take · {latest.label}
-                  </Button>
-                ) : inProgress(latest) ? (
-                  latest.parentId === activeId ? (
-                    progressText(latest)
-                  ) : (
-                    progressText(latest) + " · From " + label(latest.parentId)
-                  )
-                ) : (
-                  <>
-                    <p>
-                      {latest.error ||
-                        latest.caption ||
-                        "Try another direction."}
-                    </p>
-                    {latest.state === "clarify" &&
-                      latest.clarificationKind === "retained_passage" && (
-                        <>
-                          <p>
-                            <q>{latest.request}</q>
-                            {latest.parentId !== activeId &&
-                              " · From " + label(latest.parentId)}
-                          </p>
-                          <PassageChoices
-                            question={latest}
-                            disabled={locked}
-                            onAnswer={answer}
-                          />
-                        </>
-                      )}
-                    {latest.state === "clarify" && (
-                      <button
-                        className="text-action"
-                        onClick={() => resumeRevision(latest)}
-                      >
-                        {latest.clarificationKind === "retained_passage"
-                          ? "Reword request"
-                          : "Continue this request"}
-                      </button>
-                    )}
-                  </>
-                )}
-              </div>
-            )}
-          </section>
-          {(notice || creation.error || refreshError) && (
-            <p role="alert" className="notice error">
-              {notice || creation.error || refreshError}{" "}
-              {refreshError && (
-                <button className="text-action" onClick={refresh}>
-                  Refresh
-                </button>
-              )}
-            </p>
+              ))}
+            </div>
           )}
-        </div>
-        <aside className="mix-takes">
-          <h2>Recordings</h2>
-          <article className={activeId === "original" ? "current" : ""}>
-            <button
-              onClick={() => chooseTake(null)}
-              aria-current={activeId === "original" ? "true" : undefined}
-              aria-label="Play original"
-            >
-              <Play size={16} /> Original
-            </button>
-          </article>
-          {project.takes.map((take) => (
-            <article
-              key={take.id}
-              className={activeId === take.id ? "current" : ""}
-            >
-              {take.audioUrl && take.state === "ready" ? (
-                <button
-                  onClick={() => chooseTake(take)}
-                  aria-current={activeId === take.id ? "true" : undefined}
-                  aria-label={"Play " + label(take.id)}
+          <form
+            onSubmit={(e) => {
+              e.preventDefault();
+              make(text);
+            }}
+          >
+            <textarea
+              ref={direction}
+              maxLength={1000}
+              disabled={!!recovery}
+              aria-label="Describe a version or change"
+              placeholder={
+                selected
+                  ? "What would you like to keep or change?"
+                  : "Describe the sound you want for this recording…"
+              }
+              value={text}
+              onChange={(e) => setText(e.target.value)}
+            />
+            <div className="explorer-composer-actions">
+              <button
+                className="explorer-button"
+                type="button"
+                disabled={!!recovery}
+                aria-expanded={!!range}
+                onClick={() => {
+                  if (range) setRange(null);
+                  else if (
+                    !revising &&
+                    !text.trim() &&
+                    latest?.state === "clarify" &&
+                    latest.parentId === activeId
+                  )
+                    resumeRevision(latest, true);
+                  else {
+                    setRange(passageAt(positionIn(parentTake), parentDuration));
+                  }
+                }}
+              >
+                <Scan aria-hidden="true" />
+                {range ? "Use whole recording" : "Choose a passage"}
+                <ChevronDown aria-hidden="true" />
+              </button>
+              <button
+                className="explorer-make"
+                aria-label="Make a take"
+                disabled={!text.trim() || locked}
+              >
+                <Sparkles aria-hidden="true" />
+                Make take
+              </button>
+            </div>
+            {range && (
+              <fieldset className="explorer-range">
+                <legend className="sr-only">Selected passage</legend>
+                <label>
+                  Start (s)
+                  <input
+                    aria-label="Passage start in seconds"
+                    type="number"
+                    min="0"
+                    max={parentDuration}
+                    step="any"
+                    value={range.start}
+                    onChange={(e) =>
+                      setRange({ ...range, start: e.target.value })
+                    }
+                  />
+                </label>
+                <label>
+                  End (s)
+                  <input
+                    aria-label="Passage end in seconds"
+                    type="number"
+                    min="0"
+                    max={parentDuration}
+                    step="any"
+                    value={range.end}
+                    onChange={(e) =>
+                      setRange({ ...range, end: e.target.value })
+                    }
+                  />
+                </label>
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  disabled={!validRange}
+                  onClick={() => {
+                    setAudition(null);
+                    switchAudio(parentTake, start);
+                    stopAt.current = end;
+                  }}
                 >
-                  <Play size={16} />
-                  <strong>{label(take.id)}</strong>
-                  {project.favoriteId === take.id && (
-                    <Bookmark size={15} aria-label="Favorite" />
-                  )}
-                </button>
+                  <Play /> Play passage
+                </Button>
+              </fieldset>
+            )}
+          </form>
+          {creation.pending && !creation.busy && (
+            <Button
+              variant="outline"
+              onClick={() => void creation.submit(creation.pending!)}
+            >
+              Resume{" "}
+              {"questionId" in creation.pending
+                ? "answer · " + answerLabels[creation.pending.choice]
+                : "request · " + creation.pending.prompt}
+            </Button>
+          )}
+          {latest && latest.id !== revising?.id && (
+            <div className="explorer-status" role="status">
+              {latest.state === "ready" ? (
+                <Button
+                  variant="secondary"
+                  onClick={() =>
+                    chooseTake(
+                      latest,
+                      passageAuditionStart(
+                        latest.appliedStartSeconds ?? latest.startSeconds,
+                      ),
+                    )
+                  }
+                >
+                  <Play /> Play new take · {latest.label}
+                </Button>
+              ) : inProgress(latest) ? (
+                latest.parentId === activeId ? (
+                  progressText(latest)
+                ) : (
+                  progressText(latest) + " · From " + label(latest.parentId)
+                )
               ) : (
-                <strong>{label(take.id)}</strong>
-              )}
-              <small>From {label(take.parentId)}</small>
-              <span>{take.request}</span>
-              {take.caption && <small>{take.caption}</small>}
-              {inProgress(take) && (
-                <small role="status">{progressText(take)}</small>
-              )}
-              {(take.state === "failed" || take.state === "clarify") && (
                 <>
-                  <small>
-                    {take.error ||
-                      (take.state === "clarify"
-                        ? "Try a more specific direction."
-                        : "Could not finish this take.")}
-                  </small>
-                  {take.clarificationKind === "retained_passage" &&
-                    (latest?.id !== take.id || latest.id === revising?.id) && (
-                      <details>
-                        <summary className="text-action">
-                          Answer question
-                        </summary>
+                  <p>
+                    {latest.error || latest.caption || "Try another direction."}
+                  </p>
+                  {latest.state === "clarify" &&
+                    latest.clarificationKind === "retained_passage" && (
+                      <>
+                        <p>
+                          <q>{latest.request}</q>
+                          {latest.parentId !== activeId &&
+                            " · From " + label(latest.parentId)}
+                        </p>
                         <PassageChoices
-                          question={take}
+                          question={latest}
                           disabled={locked}
                           onAnswer={answer}
                         />
-                      </details>
+                      </>
                     )}
-                  <button
-                    className="text-action"
-                    onClick={() => resumeRevision(take)}
-                  >
-                    Revise request
-                  </button>
+                  {latest.state === "clarify" && (
+                    <button
+                      className="text-action"
+                      onClick={() => resumeRevision(latest)}
+                    >
+                      {latest.clarificationKind === "retained_passage"
+                        ? "Reword request"
+                        : "Continue this request"}
+                    </button>
+                  )}
                 </>
               )}
-            </article>
-          ))}
-        </aside>
+            </div>
+          )}
+        </section>
+        {(notice || creation.error || refreshError) && (
+          <p role="alert" className="explorer-error">
+            {notice || creation.error || refreshError}{" "}
+            {refreshError && (
+              <button className="text-action" onClick={refresh}>
+                Refresh
+              </button>
+            )}
+          </p>
+        )}
       </div>
+      <TakeHistory
+        project={project}
+        activeId={activeId}
+        choose={(take) => {
+          chooseTake(take);
+          if (window.matchMedia("(max-width: 820px)").matches)
+            requestAnimationFrame(() => takeTitle.current?.focus());
+        }}
+        describe={label}
+        pendingActions={(take) => (
+          <>
+            <p>
+              {take.error ||
+                (take.state === "clarify"
+                  ? "Try a more specific direction."
+                  : "Could not finish this take.")}
+            </p>
+            {take.clarificationKind === "retained_passage" &&
+              (latest?.id !== take.id || latest.id === revising?.id) && (
+                <details>
+                  <summary>Answer question</summary>
+                  <PassageChoices
+                    question={take}
+                    disabled={locked}
+                    onAnswer={answer}
+                  />
+                </details>
+              )}
+            <button
+              type="button"
+              className="explorer-text-action"
+              onClick={() => resumeRevision(take)}
+            >
+              Revise request
+            </button>
+          </>
+        )}
+      />
     </section>
   );
 }
