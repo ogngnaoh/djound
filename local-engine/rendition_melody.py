@@ -20,7 +20,7 @@ MAX_FRAMES = 300 * RATE
 MODEL = Path("basic-pitch/basic_pitch/saved_models/icassp_2022/nmp.onnx")
 BANK = "FluidR3_GM.sf2"
 NO_LINE = 3
-MELODY_TRACE_VERSION = 3
+MELODY_TRACE_VERSION = 4
 TRACE_SOURCES = ("single", "mix", "separated_voice")
 
 
@@ -66,7 +66,7 @@ def transcribe_recording(source: Path, output: Path, *, deadline: float, trace_v
 
 def _extract_to_file(source, output, program, deadline, preserve_register, *, notes_only,
                      trace_version=MELODY_TRACE_VERSION, trace_source=None):
-    if type(trace_version) is not int or trace_version not in (1, 2, 3):
+    if type(trace_version) is not int or not 1 <= trace_version <= MELODY_TRACE_VERSION:
         raise ValueError("This saved take uses an unsupported melody transcription.")
     if trace_source is not None and (trace_version < 3 or trace_source not in TRACE_SOURCES):
         raise ValueError("This saved take has an unknown melody source.")
@@ -414,7 +414,7 @@ def _reliable(notes, duration):
     )
 
 
-def _singer_in_mix(source, work, events, duration, deadline):
+def _singer_in_mix(source, work, events, duration, deadline, *, require_foreground=False):
     """Use the estimated voice only while there is audible and pitched vocal evidence."""
     import numpy as np
     from rendition_sketch import SeparatorUnavailable, backing_available, vocal_reference
@@ -430,8 +430,18 @@ def _singer_in_mix(source, work, events, duration, deadline):
     # Require sustained energy relative to the actual recording as well as a coherent line.
     share = vocal_level / np.maximum(mix_level, .0005)
     present = (share >= .16) & (vocal_level >= .0008)
-    if np.count_nonzero(present) * .1 < min(1.5, duration * .35):
+    audible_time = np.count_nonzero(present) * .1
+    if audible_time < min(1.5, duration * .35):
         return []
+    if require_foreground:
+        # A genuine phrase can occur anywhere in a mostly instrumental recording.
+        # Isolated leaks should not establish a singer by accumulating across the track.
+        foreground = present & (share >= .5)
+        window = np.ones(min(15, len(present)), dtype=np.int16)
+        foreground_bins = np.convolve(foreground, window, "valid")
+        phrase = foreground_bins * 3 >= len(window) * 2
+        if not phrase.any():
+            return []
     times, pitch, confidence = _fundamental(stem)
     heard = (np.interp(times, centers, share) >= .16) & (np.interp(times, centers, vocal_level) >= .0008)
     confidence = np.where(heard, confidence, 0.)
@@ -445,11 +455,17 @@ def _singer_in_mix(source, work, events, duration, deadline):
             supported[lo:hi] |= abs(pitch[lo:hi] - key) <= 1
     if supported[voiced].mean() < .35:
         return []
+    if require_foreground:
+        # Loud unpitched sounds elsewhere cannot corroborate a weak pitched leak.
+        agreeing = np.interp(centers, times, voiced & supported) >= .5
+        agreed_bins = np.convolve(foreground & agreeing, window, "valid")
+        if not np.any(phrase & (agreed_bins >= .35 * foreground_bins)):
+            return []
     line = _voiced_notes(stem, times, pitch, confidence)
-    return line if _reliable(line, duration) else []
+    return line if _reliable(line, audible_time if require_foreground else duration) else []
 
 
-def _with_instrumental_phrases(voice, events, duration):
+def _with_instrumental_phrases(voice, events, duration, *, mix_line=None):
     """Return the lead to an instrument when it plays a distinct phrase in a vocal rest."""
     from bisect import bisect_left
     from statistics import median
@@ -463,7 +479,7 @@ def _with_instrumental_phrases(voice, events, duration):
             gaps.append((i, start, end))
     if not gaps:
         return voice
-    written = _select_polyphonic(events, duration, trace_version=2)
+    written = mix_line() if mix_line else _select_polyphonic(events, duration, trace_version=2)
     onsets = [note[0] for note in written]
     result = list(voice)
     for i, start, end in gaps:
@@ -498,19 +514,26 @@ def _with_instrumental_phrases(voice, events, duration):
 
 
 def _recorded_line(source, work, events, duration, trace_version, trace_source, deadline):
+    def mix_line():
+        if trace_version >= 4:
+            from rendition_foreground import foreground_notes
+            return foreground_notes(source, events, duration)
+        return _select_polyphonic(events, duration, trace_version=trace_version)
+
     if trace_source == "mix":
-        return _select_polyphonic(events, duration, trace_version=trace_version), "mix"
+        return mix_line(), "mix"
     if trace_source != "separated_voice":
         times, pitch, confidence = _fundamental(source)
         if trace_source == "single" or _single_voice(times, pitch, confidence, events):
             return _voiced_notes(source, times, pitch, confidence), "single"
     if trace_version >= 3:
-        voice = _singer_in_mix(source, work, events, duration, deadline)
+        voice = _singer_in_mix(source, work, events, duration, deadline, require_foreground=trace_version >= 4)
         if voice:
-            return _with_instrumental_phrases(voice, events, duration), "separated_voice"
+            return _with_instrumental_phrases(voice, events, duration,
+                                              mix_line=mix_line if trace_version >= 4 else None), "separated_voice"
         if trace_source == "separated_voice":
             raise ValueError("The saved vocal melody could not be recovered. Check the local separator installation.")
-    return _select_polyphonic(events, duration, trace_version=trace_version), "mix"
+    return mix_line(), "mix"
 
 
 def _synthesize(notes, path, program, frames, preserve_register=False):
