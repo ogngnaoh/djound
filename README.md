@@ -2,6 +2,10 @@
 
 Djound is an open-source music studio for reimagining a recording in your own words. Bring a song, choose a style or describe how you want it to sound, then listen and refine the edit you like. Your original, edit history and exported WAVs stay on your Mac. [Product vision](guide/product.md) · [API contract](contracts/openapi.yaml)
 
+[![Play After Hours Piano, a 33-second film showing Aerith’s Theme reimagined in Djound](showcase/release/after-hours-piano.jpg)](showcase/release/after-hours-piano.mp4)
+
+**[Watch After Hours Piano with sound](showcase/release/after-hours-piano.mp4)** · Listen for the brushes under the held piano note. At 0:16 the same phrase returns as a drumless piano duet. [Music credits](THIRD_PARTY_NOTICES.md#featured-film)
+
 ## run it locally
 
 for the local rendition studio, use an Apple Silicon Mac with Git, Apple Command Line Tools, CMake, Python 3.11, uv, FFmpeg, pnpm 11.5.0 and Docker with Compose. start Docker, then run these commands from the repo root.

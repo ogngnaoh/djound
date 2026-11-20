@@ -12,6 +12,8 @@ Original Djound code is distributed under the [MIT license](LICENSE). The compon
 
 ## Featured film
 
+*After Hours Piano* features *Aerith’s Theme* from *Final Fantasy VII*, composed by Nobuo Uematsu. The imported recording was rendered from [Donald C C’s piano sequence](https://www.vgmusic.com/file/c5b47a31aab776c16710e59a6fc00b61.html). The Warm Piano Study and After Hours Piano arrangements were performed by Djound's local rendition engine. The project's MIT license excludes the underlying composition and source arrangement. The portfolio film was edited in [Remotion 4.0.545](https://github.com/remotion-dev/remotion/blob/v4.0.545/LICENSE.md).
+
 The earlier Djound demonstration film contains an excerpt of *To Zanarkand* from *Final Fantasy X*, composed by Nobuo Uematsu. The uploaded piano phrase derives from [Nitayahisa’s MIDI sequence](https://www.vgmusic.com/file/49364e75d5e976e0c5e41e6283486541.html). Djound renders the electric-piano arrangement locally. The composition and source arrangement are excluded from the project’s MIT license.
 
 ## Downloaded during local engine setup
@@ -37,7 +39,7 @@ The native Metal backend builds the ACE-Step C++ implementation, copyright (c) 2
 
 ## Other software dependencies
 
-JavaScript, Java and Python dependencies retain their upstream licenses. Versions are recorded in the [web manifest](web/package.json), [Java manifest](server/pom.xml) and [engine requirements](local-engine/requirements.lock). The featured film was rendered with Remotion 4.0.541. [Remotion license](https://github.com/remotion-dev/remotion/blob/v4.0.541/LICENSE.md)
+JavaScript, Java and Python dependencies retain their upstream licenses. Versions are recorded in the [web manifest](web/package.json), [Java manifest](server/pom.xml) and [engine requirements](local-engine/requirements.lock). The earlier Zanarkand film was rendered with Remotion 4.0.541. [Remotion license](https://github.com/remotion-dev/remotion/blob/v4.0.541/LICENSE.md)
 
 ## Finished mix separation
 
