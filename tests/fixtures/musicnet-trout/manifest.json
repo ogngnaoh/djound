@@ -1,0 +1,45 @@
+{
+  "nonce": "2378b1555f3c28bfc5447adf8639247ae36ff4494df22aa6b36902d3ea1c2290",
+  "source": "Franz Schubert, Piano Quintet D.667/Op.114 in A major (Trout), Andantino — Allegretto, fourth movement. European Archive performance in MusicNet track 1729. Entire original source is a historical human ensemble recording. No instruments from isolated stems, no rebalancing, stretching, pan, denoising or generation. The native mono excerpt is encoded at original rate in PCM16. We make no stereo-specific claim.",
+  "repertoire_deconfliction": "Different movement/work/recorded performance from the TRIOS Schubert D.929 and Brahms Op.40 development, from all prior Djound first-session fixtures, and from unrelated Mozart K.375 control.",
+  "sources": [
+    "https://zenodo.org/records/5120004",
+    "https://huggingface.co/datasets/DreamyWanderer/MusicNet/blob/main/data/train/1729.wav",
+    "https://huggingface.co/datasets/DreamyWanderer/MusicNet/blob/main/data/train/1729.csv",
+    "https://www.hkphil.org/watch-and-listen/all-performances/schubert-s-trout-quintet",
+    "https://www.youtube.com/watch?v=SLpTZJXfUOk"
+  ],
+  "attribution": "Recording catalogued to European Archive (MusicNet lists CC and public domain performances). Song composed in 1817, quintet in 1819. MusicNet score alignment by John Thickstun, Zaid Harchaoui and Sham M. Kakade, CC BY 4.0. Score MIDI credited to http://tirolmusic.blogspot.com/ in official metadata. Artist-specific performance rights have not independently been established; local research and offer credit if exposed.",
+  "clip_frames_half_open": [
+    5026113,
+    5694942
+  ],
+  "sample_rate": 44100,
+  "source_hashes": {
+    "performance.wav": "e0aa5b321f0436e46be2a53607979070b7100f1f919d915c56f4dbfe36c86eeb",
+    "score.mid": "e0506c1afc0c41e633ebf437308126d44b079024e7e491d94c3394a67ea52a23",
+    "aligned.csv": "985cf618264ed62232989b377e9908340ab7c77b8c90eefe81be6368ebfc2234"
+  },
+  "ground_truth": "Two contiguous complete eight-quarter-note phrases from the start of Variation II. The viola sings the thematic line (track named Viola, single MIDI program 42 in alignment), while an independent high violin weaves faster figurations above it. The sung subject can be checked against the initial statement of the original song in the opening violin part 114 beats earlier. Supporting voices sometimes double the theme. HK Philharmonic programme notes describe the high violin figurations above lower strings and piano; Orchestra of Age of Enlightenment performance notes name the viola as the Variation II theme. MIDI Var.II marker at beat 118. The hand-selected boundaries include every annotated viola onset 118.5 <= beat < 134.5. Starts only 0.05s before pickup; no artificial intro/outro. The counterline is a musically plausible alternative, but is not the cited subject; evaluate how often it replaced the tune and disclose interpretive ambiguity.",
+  "phrases": [
+    {
+      "name": "opening statement",
+      "start_s": 0,
+      "end_s": 7.933174603174603,
+      "count": 14
+    },
+    {
+      "name": "answer with altered cadence",
+      "start_s": 7.933174603174603,
+      "end_s": 15.166190476190476,
+      "count": 16
+    }
+  ],
+  "scoring": {
+    "coordinates": "Source trace against native capture times. Render from actual selected part and export is checked against that trace separately using its documented timing/arrangement mapping. No oracle-based octave remapping, transposition or time warping for source trace.",
+    "matching": "Chronological one-to-one dynamic programming. Eligible if onset within 0.18 seconds and intervals overlap at least 0.04 seconds; alternatively at least half of the shorter interval overlaps and onset within 0.25 seconds. Maximize matched pair count, then exact pitches, then minimize combined onset/duration difference. Pitch must be within one MIDI semitone in the true octave; repeat with 0 semitone tolerance for exact metric. Each extracted/source note used once. Match independently within each source phrase; output assigned by onset, allowing up to 0.18s for the second-phrase pickup if near split and pitch fits; global calculation must never reuse an output or reference note. Report ratios by labels from global matching.",
+    "pass_gate": "Correct-octave distinct-note recall >=0.80 overall, >=0.70 in each distinct phrase. Non-silent complete waveform with reproducible, exported lead part matching kept trace, and actual requested instrumental edit. Report exact-note recall, precision of trace events, note-time coverage, same pitch-class wrong octave, repeated notes collapsed, and false switches. Higher tolerance or source-pitch equality following automatic transposition cannot rehabilitate a failed key gate.",
+    "coverage": "Center-sample every 20ms where the reference is active. At every tick, count |midi delta|<=1 with no re-registration of time; assign overlap to latest onset. Report full-run absolute exact versus +/-1, per phrase, rests precision and fraction erroneously placed on an annotated competing part (within 1 semitone and >1 away from the reference). A false switch is a continuous run >=120ms on an annotated competing voice, or a wrong octave of the melody, allowing one 20ms hole and coalescing the adjacent affected ticks. Report competing instruments and sample times. Leave ambiguous/unmatched errors counted as such.",
+    "feedback": "If a human preference conflicts with compositional role, report both conclusions. First holdout result must be retained, and this piece becomes development-only if used for repair."
+  }
+}
