@@ -5,6 +5,7 @@ import math
 
 import numpy as np
 
+from rendition_competing_player import veto_competing_attacks
 from rendition_foreground import FPS, KEYS, _harmonics
 from rendition_player_line import _roll, _trace
 
@@ -181,4 +182,4 @@ def select_voice_player(source, events, separated, mix, views, duration):
     path = _trace(np.column_stack((scores, np.full(frames, 0.6))))
     attacks = _attacks(separated, mix, players, proposals)
     notes = _write_line(path, attacks, np.maximum(acoustic, model), duration)
-    return notes or None
+    return veto_competing_attacks(notes, views, [{program: part} for part in players], frames) or None

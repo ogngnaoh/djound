@@ -140,7 +140,8 @@ def resolve_players(source, work, events, mix, duration, deadline, *, pinned=Fal
     from rendition_player_line import needs_player_analysis, select_player_line
 
     def select(path, left, right, views):
-        return select_player_line(path, _within(events, left, right), _within(mix, left, right), views, right - left)
+        return select_player_line(path, _within(events, left, right), _within(mix, left, right), views, right - left,
+                                  drop_competing=localized)
 
     def context_supported(left, right):
         return not localized or needs_player_analysis(_within(mix, left, right), _within(events, left, right), right - left)

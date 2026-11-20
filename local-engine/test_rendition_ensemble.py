@@ -77,7 +77,8 @@ class EnsemblePassageTest(unittest.TestCase):
             notes = [(i + .1, i + .9, 81 if 29 <= i < 43 else 60, .7) for i in range(60)]
             def disputed(mix, events, duration):
                 return any(k == 81 for _, _, k, _ in mix)
-            def revised(path, events, mix, views, duration):
+            def revised(path, events, mix, views, duration, *, drop_competing):
+                self.assertFalse(drop_competing)
                 self.assertLess(duration, 32)
                 self.assertAlmostEqual(sf.info(path).duration, duration)
                 return [(a, b, 62 if k == 81 else k, c) for a, b, k, c in mix]

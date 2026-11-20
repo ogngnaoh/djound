@@ -169,7 +169,7 @@ def _perform(events, mix_notes, anchors, path, strength, duration):
     return notes
 
 
-def select_player_line(source, events, mix_notes, views, duration):
+def select_player_line(source, events, mix_notes, views, duration, *, drop_competing=False):
     """Decode one source-local passage. None means the mixed-audio melody should stand."""
     if not views or not needs_player_analysis(mix_notes, events, duration):
         return None
@@ -179,7 +179,10 @@ def select_player_line(source, events, mix_notes, views, duration):
     if figuration is None:
         return None
     rapid, upper, border = figuration
-    anchors = [_anchors(view, parts, rapid, upper, frames) for view in views]
+    anchor_groups = [
+        {part: _anchors(view, (part,), rapid, upper, frames) for part in parts} for view in views
+    ]
+    anchors = [[note for group in grouped.values() for note in group] for grouped in anchor_groups]
     model = sum(_roll(notes, frames) for notes in anchors)
     if not model.any():
         return None
@@ -197,6 +200,10 @@ def select_player_line(source, events, mix_notes, views, duration):
     salience[~(supported & inside)] = -5.0
     path = _trace(np.column_stack((salience, np.full(frames, 0.65))))
     notes = _perform(events, mix_notes, anchors[0], path, np.maximum(mixed, np.minimum(1, model)), duration)
+    if drop_competing:
+        from rendition_competing_player import veto_competing_attacks
+
+        notes = veto_competing_attacks(notes, views, anchor_groups, frames)
     original_time = sum(end - start for start, end, *_ in mix_notes)
     new_time = sum(end - start for start, end, *_ in notes)
     if (
