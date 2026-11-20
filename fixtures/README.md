@@ -9,3 +9,7 @@ Reproduce with `python3 fixtures/generate.py`. `manifest.json` records the exact
 The Studio example, `audio/local-demo-source.wav`, is a separate authored fixture distributed under the [project license](../LICENSE). Its [note and source metadata](audio/local-demo-source.json) also drive regression tests.
 
 The small files in `provider/melodyflow/` are synthetic HTTP and event responses for testing recovery of older installations. They contain example identifiers and no user recordings.
+
+## Listening room example
+
+The home player calls the 12-second, project-authored C-minor melody in `audio/local-demo-source.wav` *Evening Study*. The note sequence and source provenance are in `audio/local-demo-source.json`. Djound's local rendition worker produced `audio/evening-study-jazz.wav` from that recording with the request “Jazz trio”. The packaged example preserves the worker's arrangement plan and musical timing landmarks in `server/src/main/resources/demo/evening-study.json`, so listeners can compare and refine the same performance they heard on the homepage.

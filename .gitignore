@@ -36,6 +36,7 @@
 *.sketch
 *.psd
 !/fixtures/audio/local-demo-source.wav
+!/fixtures/audio/evening-study-jazz.wav
 !/fixtures/audio/source-study.wav
 !/fixtures/audio/sample-pulse.wav
 !/fixtures/audio/sample-warm.wav

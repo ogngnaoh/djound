@@ -1,0 +1,189 @@
+{
+  "caption": "Acoustic grand piano carries the tune with acoustic bass and brushed drums at 72 BPM. The lead part calls for connected notes and a softer touch at phrase endings.",
+  "parentTimeMap": [
+    [
+      0,
+      0
+    ],
+    [
+      294000,
+      0
+    ],
+    [
+      753375,
+      467460
+    ],
+    [
+      808500,
+      529200
+    ],
+    [
+      1122345,
+      529200
+    ]
+  ],
+  "arrangementPlan": {
+    "version": 1,
+    "realization": "score",
+    "themeAnchors": [
+      0
+    ],
+    "bpm": 72.0,
+    "meter": 4,
+    "subdivision": "swing",
+    "phrasing": "flowing",
+    "leadTouch": {
+      "velocity": [
+        80,
+        85,
+        75
+      ],
+      "lengthPercent": 105,
+      "endOffsetMs": 10
+    },
+    "harmony": "sevenths",
+    "phraseDynamics": "arch",
+    "room": 0.44,
+    "introBars": 2,
+    "endingBars": 2,
+    "leadProgram": 0,
+    "roles": [
+      {
+        "kind": "arpeggio",
+        "program": 0,
+        "gesture": "answer",
+        "pattern": [
+          {
+            "beat": 2.5,
+            "duration": 0.4,
+            "degree": 0,
+            "velocity": 74
+          },
+          {
+            "beat": 3.0,
+            "duration": 0.4,
+            "degree": 1,
+            "velocity": 66
+          },
+          {
+            "beat": 3.5,
+            "duration": 0.45,
+            "degree": 2,
+            "velocity": 69
+          }
+        ]
+      },
+      {
+        "kind": "bass",
+        "program": 32,
+        "gesture": "walk",
+        "pattern": [
+          {
+            "beat": 0,
+            "duration": 0.89,
+            "degree": 0,
+            "velocity": 74
+          },
+          {
+            "beat": 1,
+            "duration": 0.89,
+            "degree": 1,
+            "velocity": 66
+          },
+          {
+            "beat": 2,
+            "duration": 0.89,
+            "degree": 2,
+            "velocity": 69
+          },
+          {
+            "beat": 3,
+            "duration": 0.89,
+            "degree": 3,
+            "velocity": 63
+          }
+        ]
+      },
+      {
+        "kind": "percussion",
+        "program": null,
+        "gesture": "ride",
+        "pattern": [
+          {
+            "beat": 0,
+            "duration": 0.18,
+            "degree": 0,
+            "velocity": 67,
+            "pitch": 51
+          },
+          {
+            "beat": 1,
+            "duration": 0.18,
+            "degree": 0,
+            "velocity": 74,
+            "pitch": 51
+          },
+          {
+            "beat": 1,
+            "duration": 0.12,
+            "degree": 0,
+            "velocity": 58,
+            "pitch": 44
+          },
+          {
+            "beat": 1.5,
+            "duration": 0.12,
+            "degree": 0,
+            "velocity": 54,
+            "pitch": 51
+          },
+          {
+            "beat": 2,
+            "duration": 0.18,
+            "degree": 0,
+            "velocity": 67,
+            "pitch": 51
+          },
+          {
+            "beat": 3,
+            "duration": 0.18,
+            "degree": 0,
+            "velocity": 74,
+            "pitch": 51
+          },
+          {
+            "beat": 3,
+            "duration": 0.12,
+            "degree": 0,
+            "velocity": 58,
+            "pitch": 44
+          },
+          {
+            "beat": 3.5,
+            "duration": 0.12,
+            "degree": 0,
+            "velocity": 54,
+            "pitch": 51
+          }
+        ],
+        "kit": 40
+      }
+    ],
+    "phraseInteraction": "steady",
+    "phraseInteractionVersion": 2,
+    "conductorCue": "**Tempo:** 72 BPM | **Meter:** 4/4 | **Feel:** Swung eighths *Piano* (hook): Expressive rephrasing of anchor pitches [60,63,67,70,67,65] in 4/4 with swing. *Upright bass*: Walking line in 4/4, walking 60\u201367, 60\u201363. *Brushed drums*: Gentle ride, syncopated accents. Chord color: Warm, walking 7ths (Dm7, G7, Cmaj7). All parts breathe\u2014piano leads, bass and drums support. Key: D minor.",
+    "director": "mlx-community/Qwen3-4B-Instruct-2507-4bit@50d427756c6b1b2fe0c0a10f67fbda1fc8e82c1b",
+    "fromUpload": true,
+    "melodyTraceVersion": 10,
+    "melodyTraceSource": "single",
+    "scoreMasterGain": 0.48466928208485105,
+    "scorePartGains": [
+      1.0,
+      1.0,
+      1.0,
+      1.0
+    ]
+  },
+  "sourceSha": "6e41121a1cd3cb48048ddc5ee216fd31231b3863b7d464ef39fb5a62925a3c58",
+  "editSha": "e1b614117687673d94f63c4bf1df010b3522123ca4173874e9b93a9fdba7fe81"
+}
