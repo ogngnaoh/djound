@@ -1,0 +1,112 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="theme-color" content="#191613" />
+    <meta name="color-scheme" content="dark" />
+    <title>Djound — A different side of your song</title>
+    <link rel="icon" href="media/wordmark.png" />
+    <link rel="stylesheet" href="home.css" />
+  </head>
+  <body>
+    <main>
+      <section class="hero" aria-labelledby="title">
+        <div class="room" aria-hidden="true">
+          <canvas id="turntable"></canvas>
+        </div>
+        <header class="mast wrap">
+          <a class="brand" href="./" aria-label="Djound home"
+            ><img src="media/wordmark.png" alt="Djound"
+          /></a>
+          <nav aria-label="Main navigation">
+            <a href="library.html">Library <span aria-hidden="true">↗</span></a>
+          </nav>
+        </header>
+        <div class="hero-copy wrap">
+          <div class="intro">
+            <h1 id="title">A different side <br />of your song.</h1>
+            <p>
+              Bring a recording you love. Describe how you’d like it to sound,
+              and hear it played another way.
+            </p>
+            <div class="actions">
+              <a class="cta" href="library.html#import"
+                >Bring a recording <span aria-hidden="true">↗</span></a
+              ><a
+                class="edit-link"
+                data-studio
+                href="studio.html?project=zanarkand&amp;edit=original&amp;at=0"
+                >Try an edit <span aria-hidden="true">→</span></a
+              >
+            </div>
+          </div>
+        </div>
+        <div class="player-wrap wrap">
+          <div id="player" class="player" data-playing="false">
+            <div class="track">
+              <button id="play" class="play" aria-label="Play To Zanarkand">
+                <span aria-hidden="true"></span>
+              </button>
+              <div>
+                <h2>To Zanarkand</h2>
+                <p>
+                  Final Fantasy X <span aria-hidden="true">·</span> Nobuo
+                  Uematsu
+                </p>
+              </div>
+            </div>
+            <div class="timeline">
+              <span id="elapsed">0:00</span
+              ><input
+                id="seek"
+                type="range"
+                aria-label="Seek through To Zanarkand"
+                min="0"
+                max="21"
+                value="0"
+                step="any"
+              /><span id="length">0:20</span>
+            </div>
+            <div
+              class="versions"
+              role="group"
+              aria-label="Choose a performance"
+            >
+              <button id="original" aria-pressed="true">Original</button
+              ><button id="edit" aria-pressed="false">Jazz trio</button>
+            </div>
+          </div>
+          <p id="error" role="alert" hidden></p>
+        </div>
+      </section>
+      <section class="example wrap" aria-labelledby="example-title">
+        <div>
+          <h2 id="example-title">
+            Start with a song. <br />Change it in your words.
+          </h2>
+        </div>
+        <div class="request">
+          <blockquote>
+            “Play it like a late-night jazz trio, with brushed drums and a
+            walking bass.”
+          </blockquote>
+          <button type="button" id="hear-request">
+            <span class="small-play" aria-hidden="true">▷</span> Hear the edit
+          </button>
+        </div>
+      </section>
+    </main>
+    <footer class="wrap">
+      <a class="brand foot-brand" href="./" aria-label="Djound home"
+        ><img src="media/wordmark.png" alt="Djound" /></a
+      ><a
+        href="https://github.com/ogngnaoh/djound"
+        target="_blank"
+        rel="noopener"
+        >Open source on GitHub <span aria-hidden="true">↗</span></a
+      >
+    </footer>
+    <script type="module" src="home.js"></script>
+  </body>
+</html>
