@@ -340,7 +340,9 @@ function RecordingSession({
       setText("");
       setRevising(null);
     }
-    setAudition(null);
+    // Keep a sounding reference stable while the router commits a different
+    // working take. Clearing it early briefly reloads the previous working WAV.
+    if (id === activeId) setAudition(null);
     setParams(
       (current) => {
         const next = new URLSearchParams(current);
