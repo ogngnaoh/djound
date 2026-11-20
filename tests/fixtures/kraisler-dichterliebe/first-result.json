@@ -1,0 +1,180 @@
+{
+  "trace_sha256": "91566a3602848180beba7d6782c504937d7c694928efb7f6a4fa880c0250cf72",
+  "counts": {
+    "reference": 31,
+    "output": 28,
+    "within_one": 24,
+    "exact": 24
+  },
+  "global_recall": 0.7742,
+  "global_precision": 0.8571,
+  "global_exact_recall": 0.7742,
+  "phrases": [
+    {
+      "name": "verse line 1",
+      "matched": 7,
+      "total": 8,
+      "recall": 0.875,
+      "exact": 7,
+      "voiced_frame_within_one": 0.6406
+    },
+    {
+      "name": "verse line 2",
+      "matched": 6,
+      "total": 9,
+      "recall": 0.6667,
+      "exact": 6,
+      "voiced_frame_within_one": 0.7375
+    },
+    {
+      "name": "verse line 3",
+      "matched": 5,
+      "total": 7,
+      "recall": 0.7143,
+      "exact": 5,
+      "voiced_frame_within_one": 0.8787
+    },
+    {
+      "name": "verse line 4",
+      "matched": 6,
+      "total": 7,
+      "recall": 0.8571,
+      "exact": 6,
+      "voiced_frame_within_one": 0.9056
+    }
+  ],
+  "passed_note_gate": false,
+  "frame_evidence": {
+    "window_s": 0.02,
+    "voiced_samples": 1012,
+    "reference_voiced_seconds": 20.24,
+    "within_one": 0.7826,
+    "exact": 0.7717,
+    "wrong_octave_same_pitch_class": 0.0494,
+    "attributable_competing": 0.0128,
+    "correct_silence_on_ref_rests": 0.5357,
+    "missed_voicing": 0.1374
+  },
+  "switches": [
+    {
+      "start_s": 0.98,
+      "end_s": 1.98,
+      "competing_program_seconds": {},
+      "wrong_octave_seconds": 1.0
+    }
+  ],
+  "adjacent_repeated_notes_merged": [
+    {
+      "ref_pair": [
+        18,
+        19
+      ],
+      "output_index": 17
+    },
+    {
+      "ref_pair": [
+        24,
+        25
+      ],
+      "output_index": 22
+    }
+  ],
+  "matched_reference_output_index_within_one": [
+    [
+      1,
+      0
+    ],
+    [
+      2,
+      2
+    ],
+    [
+      3,
+      3
+    ],
+    [
+      4,
+      4
+    ],
+    [
+      5,
+      5
+    ],
+    [
+      6,
+      6
+    ],
+    [
+      7,
+      8
+    ],
+    [
+      8,
+      11
+    ],
+    [
+      9,
+      12
+    ],
+    [
+      11,
+      13
+    ],
+    [
+      13,
+      14
+    ],
+    [
+      15,
+      15
+    ],
+    [
+      16,
+      16
+    ],
+    [
+      18,
+      17
+    ],
+    [
+      20,
+      18
+    ],
+    [
+      21,
+      19
+    ],
+    [
+      22,
+      20
+    ],
+    [
+      23,
+      21
+    ],
+    [
+      25,
+      22
+    ],
+    [
+      26,
+      23
+    ],
+    [
+      27,
+      24
+    ],
+    [
+      28,
+      25
+    ],
+    [
+      29,
+      26
+    ],
+    [
+      30,
+      27
+    ]
+  ]
+}

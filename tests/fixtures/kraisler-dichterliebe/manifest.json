@@ -1,0 +1,61 @@
+{
+  "nonce": "bd284cd288c9fdb1cb2ef459af3b253a70a11f721d8825954c87e8c734bb0bd5",
+  "source": "KRAISLER track 11, live violin and piano arrangement of Robert Schumann, Dichterliebe Op. 48, No. 1. Two isolated, synchronously played human instruments. Crop of the published unmodified mono dry ensemble mix; the independent violin microphone, human-refined violin annotation, arrangement score and piano Disklavier MIDI are evidence only.",
+  "attribution": "Hyemi Kim, Jiyun Park, Sein Lee, Taegyun Kwon, Sunjae Won and Juhan Nam; KAIST Music and Audio Computing Lab. Published 3 July 2026, Version 1.0. DOI 10.5281/zenodo.21082251, associated methods DOI 10.5334/tismir.338. The dataset advertises CC BY 4.0 and additionally asks for research-only, noncommercial use. Retain the music locally for this assessment and link to the source release and method.",
+  "source_independence": "New professional piano/violin sessions commissioned and recorded by the research authors for the post-publication KRAISLER research corpus, first publicly deposited July 2026. The original YourMT3+ pretrained checkpoint and named training corpora were published in 2024. Its unofficial 2026 ONNX translation re-exports the original fixed weights without retraining. KRAISLER is absent from the checkpoint training list; these specific project recordings are independently captured and have no reused archive mix. This establishes independence of the human performance, regardless of other recordings/arrangements of the composition.",
+  "sources": [
+    "https://zenodo.org/records/21082251",
+    "https://doi.org/10.5334/tismir.338",
+    "https://arxiv.org/html/2407.04822v2",
+    "https://huggingface.co/ONLY4DarkKnight/YourMT3-plus-onnx/blob/7f0d7c26a90ce1bcff74d3938f84db570a74abab/NOTICE.md"
+  ],
+  "release_archive_md5": "22f6f51e9c356c1ea8f591d85603fd73",
+  "source_hashes": {
+    "11_notes_VN.csv": "1470f2db128fbbed3e9c2ad1c9c4e2cc000adfba6cfee8d655c341b3655b5584",
+    "11_mix_dry.wav": "a9758ad26b851f46bd9b5a82e792bb587371e690c816cd565fe51c5b9da331d6",
+    "11_PF.mid": "dab009dc47d7eccda6b36675c41c7a0973018ea076c28e3a092c3dc8fe203071",
+    "11_VN.musicxml": "cf4d8801dd0ab9fc9a20e93188bd1dc8fa533f17675e99d74378df2807c1c937",
+    "11_beats.csv": "bd6e7795399707ca1d706dc7d4d7a2d771ff61e70245f3a8993c91dd763ccfb7",
+    "11_VN_dry.wav": "dfa0795e757d59c3b5db3af9b48dee4cdc5c54767fb4a3f3593ec4f444af23f5"
+  },
+  "clip_frames_half_open": [
+    624015,
+    1640520
+  ],
+  "sample_rate": 44100,
+  "reference_instrument": 41,
+  "ground_truth": "The violin sings the lied's original voice in the instrumental duet; the piano plays the accompanying figure. Selected the first complete verse, beginning with the violin's pickup after the piano introduction. Four lines separated by breathing gaps in the performance score form the four phrases. CSV overlaps near 34s are retained. Label offsets are less certain than pitches/onsets; source authors applied NoteEM alignment followed by trained-musician manual refinement. Direct isolated-stem autocorrelation at all note centers is frozen separately. Piano MIDI measures actual performed keys; sostenuto/sustain overlap or sympathetic resonance is a limitation of competing-part attribution.",
+  "phrases": [
+    {
+      "name": "verse line 1",
+      "start_s": 0,
+      "end_s": 6.617700000000001,
+      "count": 8
+    },
+    {
+      "name": "verse line 2",
+      "start_s": 6.617700000000001,
+      "end_s": 12.569799999999999,
+      "count": 9
+    },
+    {
+      "name": "verse line 3",
+      "start_s": 12.569799999999999,
+      "end_s": 18.169800000000002,
+      "count": 7
+    },
+    {
+      "name": "verse line 4",
+      "start_s": 18.169800000000002,
+      "end_s": 23.05,
+      "count": 7
+    }
+  ],
+  "scoring": {
+    "coordinates": "Source trace against native capture times. Render from actual selected part and export is checked against that trace separately using its documented timing/arrangement mapping. No oracle-based octave remapping, transposition or time warping for source trace.",
+    "matching": "Chronological one-to-one dynamic programming. Eligible if onset within 0.18 seconds and intervals overlap at least 0.04 seconds; alternatively at least half of the shorter interval overlaps and onset within 0.25 seconds. Maximize matched pair count, then exact pitches, then minimize combined onset/duration difference. Pitch must be within one MIDI semitone in the true octave; repeat with 0 semitone tolerance for exact metric. Each extracted/source note used once. Match independently within each source phrase; output assigned by onset, allowing up to 0.18s for a phrase pickup if near split and pitch fits; global calculation must never reuse an output or reference note. Report ratios by labels from global matching.",
+    "pass_gate": "Correct-octave distinct-note recall >=0.80 overall, >=0.70 in each distinct phrase. Non-silent complete waveform with reproducible, exported lead part matching kept trace, and actual requested instrumental edit. Report exact-note recall, precision of trace events, note-time coverage, same pitch-class wrong octave, repeated notes collapsed, and false switches. Higher tolerance or source-pitch equality following automatic transposition cannot rehabilitate a failed key gate.",
+    "coverage": "Center-sample every 20ms where the reference is active. At every tick, count |midi delta|<=1 with no re-registration of time; assign overlap to latest onset. Report full-run absolute exact versus +/-1, per phrase, rests precision and fraction erroneously placed on an annotated competing part (within 1 semitone and >1 away from the reference). A false switch is a continuous run >=120ms on an annotated competing voice, or a wrong octave of the melody, allowing one 20ms hole and coalescing the adjacent affected ticks. Report competing instruments and sample times. Leave ambiguous/unmatched errors counted as such.",
+    "feedback": "If a human preference conflicts with compositional role, report both conclusions. First holdout result must be retained, and this piece becomes development-only if used for repair."
+  }
+}
