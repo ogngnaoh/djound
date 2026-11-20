@@ -72,7 +72,15 @@ export default function StudioApp() {
     const explicit = new URLSearchParams(location.search).get("mode");
     if (explicit === "prototype" || explicit === "backend") return explicit;
     const section = location.pathname.split("/")[1];
-    if (section === "renditions" || section === "mixes") return "backend";
+    if (
+      section === "renditions" ||
+      section === "mixes" ||
+      section === "tools" ||
+      ["favorites", "trash"].includes(
+        new URLSearchParams(location.search).get("view") ?? "",
+      )
+    )
+      return "backend";
     return storage("djound.mode", "backend") === "prototype"
       ? "prototype"
       : "backend";
@@ -154,40 +162,35 @@ function Shell() {
           <span className="mobile-prototype-label">Prototype</span>
         )}
         <nav aria-label="Main navigation">
-          {mode === "backend" && (
-            <NavLink to="/renditions" end>
-              <Plus />
-              New project
-            </NavLink>
-          )}
-          {mode === "backend" && (
-            <NavLink to="/mixes">
-              <SlidersHorizontal />
-              Mix editor
-            </NavLink>
-          )}
           <NavLink to="/" end>
             <Folder />
             Library
           </NavLink>
+          {mode === "backend" && (
+            <NavLink to="/tools/library">
+              <SlidersHorizontal /> Other tools
+            </NavLink>
+          )}
           {mode === "prototype" && (
             <NavLink to="/remix/new">
               <Plus />
               New project
             </NavLink>
           )}
-          <Link
-            className={
-              location.pathname.startsWith("/remix/") &&
-              (mode === "backend" || location.pathname !== "/remix/new")
-                ? "active"
-                : ""
-            }
-            to={projectPath}
-          >
-            <SlidersHorizontal />
-            {mode === "backend" ? "Melody studio" : "Project Studio"}
-          </Link>
+          {mode === "prototype" && (
+            <Link
+              className={
+                location.pathname.startsWith("/remix/") &&
+                location.pathname !== "/remix/new"
+                  ? "active"
+                  : ""
+              }
+              to={projectPath}
+            >
+              <SlidersHorizontal />
+              Project Studio
+            </Link>
+          )}
         </nav>
         <div className="workspace-mode">
           <button onClick={() => setTools(true)}>
@@ -213,9 +216,21 @@ function Shell() {
       </header>
       <main id="workspace">
         <Routes>
-          <Route path="/" element={<LibraryPage />} />
+          <Route
+            path="/"
+            element={
+              mode === "prototype" ? (
+                <LibraryPage />
+              ) : (
+                <Suspense fallback={<Loading />}>
+                  <RecordingLibrary />
+                </Suspense>
+              )
+            }
+          />
           {mode === "backend" && (
             <>
+              <Route path="/tools/library" element={<LibraryPage />} />
               <Route
                 path="/renditions"
                 element={

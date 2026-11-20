@@ -1,5 +1,4 @@
 import { mixListQuery } from "../mixes/MixLibrary";
-import { recordingList } from "../renditions/api";
 import { useState } from "react";
 import { Link } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
@@ -27,11 +26,6 @@ export function LibraryPage() {
     enabled: mode === "backend",
     retry: false,
   });
-  const recordings = useQuery({
-    ...recordingList,
-    enabled: mode === "backend",
-    retry: false,
-  });
   const [search, setSearch] = useState(""),
     [selectedId, setSelectedId] = useState("");
   if (mode === "prototype" && q.isPending) return <Loading />;
@@ -49,16 +43,14 @@ export function LibraryPage() {
     <div className="page-grid">
       <section className="main-column library-page">
         <header className="project-header">
-          <span className="eyebrow">LIBRARY</span>
-          <h1>Library</h1>
-          <p>Recent projects and kept versions</p>
+          <h1>{mode === "backend" ? "Other tools" : "Library"}</h1>
+          <p>
+            {mode === "backend"
+              ? "Finished mixes and melody projects"
+              : "Recent projects and kept versions"}
+          </p>
           {mode === "backend" && (
             <div className="mix-choice">
-              <Button asChild>
-                <Link to="/renditions">
-                  <Music2 /> Reimagine a recording
-                </Link>
-              </Button>
               <Button asChild variant="outline">
                 <Link to="/mixes">Edit a finished mix</Link>
               </Button>
@@ -68,46 +60,19 @@ export function LibraryPage() {
             </div>
           )}
         </header>
-        {mode === "backend" &&
-          (recordings.isError || mixes.isError || q.isError) && (
-            <p role="alert" className="notice error">
-              Some projects could not be loaded.{" "}
-              <button
-                className="text-action"
-                onClick={() => {
-                  if (recordings.isError) void recordings.refetch();
-                  if (mixes.isError) void mixes.refetch();
-                  if (q.isError) void q.refetch();
-                }}
-              >
-                Try again
-              </button>
-            </p>
-          )}
-        {!!recordings.data?.length && (
-          <section className="recent-projects">
-            <h2>Reimagined recordings</h2>
-            {recordings.data.slice(0, 5).map((recording) => (
-              <article className="project-row" key={recording.id}>
-                <h3>
-                  <Link to={"/renditions/" + recording.id}>
-                    {recording.title}
-                  </Link>
-                </h3>
-                <Link
-                  className="text-action"
-                  to={"/renditions/" + recording.id}
-                >
-                  Open recording
-                </Link>
-              </article>
-            ))}
-            {recordings.data.length > 5 && (
-              <Link className="text-action" to="/renditions">
-                View all recordings
-              </Link>
-            )}
-          </section>
+        {mode === "backend" && (mixes.isError || q.isError) && (
+          <p role="alert" className="notice error">
+            Some projects could not be loaded.{" "}
+            <button
+              className="text-action"
+              onClick={() => {
+                if (mixes.isError) void mixes.refetch();
+                if (q.isError) void q.refetch();
+              }}
+            >
+              Try again
+            </button>
+          </p>
         )}
         {!!mixes.data?.items.length && (
           <section className="recent-projects">
@@ -251,13 +216,11 @@ export function LibraryPage() {
             </section>
           </>
         ) : mode === "backend" ? (
-          recordings.isSuccess &&
           mixes.isSuccess &&
           q.isSuccess &&
-          !recordings.data.length &&
           !mixes.data.items.length && (
             <p className="subtle">
-              Your recordings and saved takes will appear here.
+              Your mix and melody projects will appear here.
             </p>
           )
         ) : (
