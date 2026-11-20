@@ -1,4 +1,4 @@
-# <img src="web/public/brand/favicon.png" width="32" height="32" alt=""> Djound
+# Djound
 
 bring a recording you love and hear it played another way. the aim is a performance where you can hum along with the tune while the players surprise you. choose **Jazz Trio**, **Solo Piano**, **Lo-fi Hip-hop**, or **Cinematic Strings**, or type your own idea, such as “fingerpicked guitar and cello, with the tune on cello.” switch between the new take and the original, refine it, and download the one you want to share. [run it locally](#run-it-locally)
 
@@ -21,12 +21,6 @@ the separator estimates vocals and drums from the stereo recording. cymbals, gui
 
 ## arrange a melody
 
-https://github.com/user-attachments/assets/1cfd24dc-9335-4bde-b36a-2e2d5e50495b
-
-in this demo of the melody editor, i start with a piano phrase from *to zanarkand*, check the notes, and try it on electric piano with bass and drums. then i take the drums out and soften the bass. you can hear the original at 0:15 and the final take at 0:27. the film uses audio from the app and shortens the processing waits. [watch or download the film](showcase/release/zanarkand.mp4) · [music credits](THIRD_PARTY_NOTICES.md#featured-film)
-
-![studio with the original, its versions and the selected arrangement](showcase/local-studio/studio.png)
-
 start from the original or pick a version you like. try “make this soundtrack jazz like” or choose **try swing combo**. review the chords and tempo, then create a version with piano, walking bass and swing ride behind your recording. select that version and type “quieter drums” to lower just the drums by 3 dB.
 
 you can also change a single chord, set a track’s gain or pan, and preview a warmer or brighter tone in the full mix. keep the takes you like in your library.
@@ -34,7 +28,6 @@ you can also change a single chord, set a track’s gain or pan, and preview a w
 <details>
 <summary>see the library</summary>
 
-![library with a kept take ready to play](showcase/local-studio/library.png)
 
 </details>
 

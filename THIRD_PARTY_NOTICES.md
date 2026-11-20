@@ -13,7 +13,7 @@ Original Djound code is distributed under the [MIT license](LICENSE). The compon
 
 ## Featured film
 
-The [featured Djound film](showcase/release/zanarkand.mp4) contains an excerpt of *To Zanarkand* from *Final Fantasy X*, composed by Nobuo Uematsu. The uploaded piano phrase derives from [Nitayahisa’s MIDI sequence](https://www.vgmusic.com/file/49364e75d5e976e0c5e41e6283486541.html). Djound renders the electric-piano arrangement locally. The composition and source arrangement are excluded from the project’s MIT license.
+The earlier Djound demonstration film contains an excerpt of *To Zanarkand* from *Final Fantasy X*, composed by Nobuo Uematsu. The uploaded piano phrase derives from [Nitayahisa’s MIDI sequence](https://www.vgmusic.com/file/49364e75d5e976e0c5e41e6283486541.html). Djound renders the electric-piano arrangement locally. The composition and source arrangement are excluded from the project’s MIT license.
 
 ## Downloaded during local engine setup
 
