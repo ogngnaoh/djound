@@ -1,0 +1,5 @@
+--- assess.py
++++ assess.py
+@@ -75 +75 @@
+-        if r['instrument']=='42': continue
++        if r['instrument']==str(manifest['reference_instrument']): continue

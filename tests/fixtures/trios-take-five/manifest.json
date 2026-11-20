@@ -1,0 +1,52 @@
+{
+  "nonce": "c33b4cef535c28c88a32ffbe82f5051897ef02e8aec9557f632142b8b9833727",
+  "source": "Paul Desmond, Take Five. TRIOS research performance, recorded alto saxophone, piano and drums. Clip of the public ensemble mix with no changes of balance, timing or timbre. The downloaded corpus contains separate synthetic files, all excluded here.",
+  "attribution": "Joachim Fritsch, High Quality Musical Audio Source Separation, UPMC / IRCAM / Telecom ParisTech, 2012. TRIOS release licensed CC BY-NC-SA 2.0 UK, England and Wales, DOI 10.5281/zenodo.6797837. Composition by Paul Desmond, published native mix and resources retained for local research only. Each live part was recorded against synchronized playback and the MIDI scores were aligned by hand to separate tracks. The creator does not list individual performers.",
+  "sources": [
+    "https://zenodo.org/records/6797837",
+    "https://www.atiam.ircam.fr/Archives/Stages1112/FRITSCH.pdf",
+    "https://creativecommons.org/licenses/by-nc-sa/2.0/uk/"
+  ],
+  "recording_independence": "A new composition, ensemble, source take and lead from the three sealed challenges and two development excerpts. This 2012 collection was used for other development works. Its published Take Five recording is a separately recorded ensemble. YourMT3+ does not list TRIOS among its training corpora; no claim about every prior arrangement of the standard or the source of unspecified pretraining.",
+  "source_hashes": {
+    "piano.mid": "ca43b784b23eaf1b554a02d384ecf612be6085f0b7a0e9e0fba2f4f9209c3f1d",
+    "piano.wav": "45dc104f2da4d484da14a453bca6948d0144fb5ae128a0cea4a93003f3f44301",
+    "mix.wav": "fcb3d17591ebbf564e8191c02a6426ead8c7e1f93a6bbe6474b59a03c36576dd",
+    "kick.wav": "68629a230945285f11fe3f0aa8920eb0e5ae59aa0db58a0402b1440543fb8aa6",
+    "ride.wav": "5bf2cf95454c86a828932687301ac0ce3af3ed323633df7f0cbf1f2cfd4a756e",
+    "saxophone.wav": "f54c51b53401231911c162aa5eba56f3e3a6dec2cd34cced359b3996c0f0d509",
+    "snare.wav": "76b359d30c12caed740b55a9afbd59efa269e3fc122bc3c7ae56998440facc9f",
+    "kick.mid": "b57f51d68d6f49718adc42dc929e79e146f257d129f1c99e5442aaa887ce5207",
+    "ride.mid": "915b8b21d868cea75615c6fd8b442f1f6b4a625dfc4f07b48e84774c84eb27ec",
+    "saxophone.mid": "580e9b33231aa79e3bda93a909b2b97beedd162da11885eecd4fc4f9de5d65c8",
+    "snare.mid": "d7ec5ca13a2b9459e5c85ce40721b649e753ff1393b4d925a9680cb100e05a89"
+  },
+  "clip_frames_half_open": [
+    582120,
+    1195110
+  ],
+  "sample_rate": 44100,
+  "reference_instrument": 66,
+  "ground_truth": "The solo alto saxophone enters after the piano/drum introduction, stating an upward lick and lower cadence, then repeating the hook with an altered answer. Select both complete initial statements, including all marked fast ornament attacks. Manually aligned source saxophone MIDI in concert pitch checked against the isolated recorded saxophone, with overlapping note offsets retained as performed. Backing switches use only actual piano MIDI; unpitched drum MIDI notes are not note frequencies.",
+  "phrases": [
+    {
+      "name": "first hook and cadence",
+      "start_s": 0,
+      "end_s": 6.872916666666665,
+      "count": 23
+    },
+    {
+      "name": "second hook and altered cadence",
+      "start_s": 6.872916666666665,
+      "end_s": 13.900000000000002,
+      "count": 24
+    }
+  ],
+  "scoring": {
+    "coordinates": "Source trace against native capture times. Render from actual selected part and export is checked against that trace separately using its documented timing/arrangement mapping. No oracle-based octave remapping, transposition or time warping for source trace.",
+    "matching": "Chronological one-to-one dynamic programming. Eligible if onset within 0.18 seconds and intervals overlap at least 0.04 seconds; alternatively at least half of the shorter interval overlaps and onset within 0.25 seconds. Maximize matched pair count, then exact pitches, then minimize combined onset/duration difference. Pitch must be within one MIDI semitone in the true octave; repeat with 0 semitone tolerance for exact metric. Each extracted/source note used once. Match independently within each source phrase; output assigned by onset, allowing up to 0.18s for the second-phrase pickup if near split and pitch fits; global calculation must never reuse an output or reference note. Report ratios by labels from global matching.",
+    "pass_gate": "Correct-octave distinct-note recall >=0.80 overall, >=0.70 in each distinct phrase. Non-silent complete waveform with reproducible, exported lead part matching kept trace, and actual requested instrumental edit. Report exact-note recall, precision of trace events, note-time coverage, same pitch-class wrong octave, repeated notes collapsed, and false switches. Higher tolerance or source-pitch equality following automatic transposition cannot rehabilitate a failed key gate.",
+    "coverage": "Center-sample every 20ms where the reference is active. At every tick, count |midi delta|<=1 with no re-registration of time; assign overlap to latest onset. Report full-run absolute exact versus +/-1, per phrase, rests precision and fraction erroneously placed on an annotated competing part (within 1 semitone and >1 away from the reference). A false switch is a continuous run >=120ms on an annotated competing voice, or a wrong octave of the melody, allowing one 20ms hole and coalescing the adjacent affected ticks. Report competing instruments and sample times. Leave ambiguous/unmatched errors counted as such.",
+    "feedback": "If a human preference conflicts with compositional role, report both conclusions. First holdout result must be retained, and this piece becomes development-only if used for repair."
+  }
+}

@@ -42,14 +42,19 @@ CASES = {
 RATE = 44100
 
 
-def source_files(dataset, piece, case):
-    names = sorted([part + ".mid" for part in case["parts"]] + [part + ".wav" for part in case["audio"]])
+def release_members(dataset, piece, names):
     if dataset.is_file():
         with ZipFile(dataset) as archive:
             files = {name: archive.read(f"TRIOS Dataset/{piece}/{name}") for name in names}
     else:
         base = dataset / "TRIOS Dataset" if (dataset / "TRIOS Dataset").is_dir() else dataset
         files = {name: (base / piece / name).read_bytes() for name in names}
+    return files
+
+
+def source_files(dataset, piece, case):
+    names = sorted([part + ".mid" for part in case["parts"]] + [part + ".wav" for part in case["audio"]])
+    files = release_members(dataset, piece, names)
     digests = b"".join(hashlib.sha256(files[name]).digest() for name in names)
     if hashlib.sha256(digests).hexdigest() != case["members_sha256"]:
         raise ValueError(f"The published {piece} audio or MIDI files differ from the reference release.")
