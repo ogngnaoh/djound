@@ -18,6 +18,7 @@ import tools.jackson.databind.JsonNode;
 
 import java.io.*;
 import java.nio.file.*;
+import java.time.OffsetDateTime;
 import java.util.*;
 import java.util.concurrent.*;
 
@@ -35,7 +36,17 @@ public final class RenditionProjects implements AutoCloseable {
     private final BlockingQueue<Boolean> wake = new ArrayBlockingQueue<>(1);
     private volatile boolean closing;
 
-    public record Index(String id, String title) {}
+    public record Index(
+            String id,
+            String title,
+            double durationSeconds,
+            OffsetDateTime createdAt,
+            OffsetDateTime lastActivityAt,
+            long readyTakeCount,
+            long inFlightCount,
+            String favoriteId,
+            String favoriteLabel,
+            Double favoriteDurationSeconds) {}
 
     public record State(
             String id,
@@ -156,7 +167,24 @@ public final class RenditionProjects implements AutoCloseable {
     }
 
     public List<Index> list() {
-        return db.sql("SELECT id,title FROM rendition_project ORDER BY created_at DESC,id")
+        return db.sql(
+                        """
+                        SELECT p.id, p.title, p.frames / 44100.0 AS duration_seconds,
+                               p.created_at, p.last_activity_at,
+                               coalesce(t.ready_count, 0) AS ready_take_count,
+                               coalesce(t.working_count, 0) AS in_flight_count,
+                               f.id AS favorite_id, f.label AS favorite_label,
+                               f.frames / 44100.0 AS favorite_duration_seconds
+                        FROM rendition_project p
+                        LEFT JOIN (
+                            SELECT project_id,
+                                   count(*) FILTER (WHERE state = 'ready') AS ready_count,
+                                   count(*) FILTER (WHERE state IN ('queued', 'running')) AS working_count
+                            FROM rendition_take GROUP BY project_id
+                        ) t ON t.project_id = p.id
+                        LEFT JOIN rendition_take f ON f.project_id = p.id AND f.id = p.favorite_id
+                        ORDER BY p.last_activity_at DESC, p.id
+                        """)
                 .query(Index.class)
                 .list();
     }
@@ -474,7 +502,14 @@ public final class RenditionProjects implements AutoCloseable {
 
     public State favorite(String id, String takeId) {
         readyJob(id, takeId);
-        db.sql("UPDATE rendition_project SET favorite_id=? WHERE id=?").params(takeId, id).update();
+        db.sql(
+                        """
+                        UPDATE rendition_project SET favorite_id = ?,
+                            last_activity_at = greatest(last_activity_at, statement_timestamp())
+                        WHERE id = ? AND favorite_id IS DISTINCT FROM ?
+                        """)
+                .params(takeId, id, takeId)
+                .update();
         return state(id);
     }
 

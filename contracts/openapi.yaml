@@ -9,7 +9,7 @@ paths:
   /api/renditions:
     get:
       operationId: listRenditionProjects
-      description: List recording-led projects from newest to oldest.
+      description: List recording-led projects by most recent activity, including import, take status changes and a newly selected favorite.
       responses:
         '200':
           description: Recording library
@@ -765,10 +765,18 @@ components:
   schemas:
     RenditionIndex:
       type: object
-      required: [id, title]
+      required: [id, title, durationSeconds, createdAt, lastActivityAt, readyTakeCount, inFlightCount, favoriteId, favoriteLabel, favoriteDurationSeconds]
       properties:
         id: { type: string, format: uuid }
         title: { type: string }
+        durationSeconds: { type: number, exclusiveMinimum: 0, maximum: 300, description: Duration of the original recording. }
+        createdAt: { type: string, format: date-time }
+        lastActivityAt: { type: string, format: date-time }
+        readyTakeCount: { type: integer, minimum: 0, description: Playable generated takes, excluding the original. }
+        inFlightCount: { type: integer, minimum: 0, description: Queued and running requests. }
+        favoriteId: { type: [string, 'null'], format: uuid }
+        favoriteLabel: { type: [string, 'null'] }
+        favoriteDurationSeconds: { type: [number, 'null'], exclusiveMinimum: 0, maximum: 600 }
     RenditionProject:
       type: object
       required: [id, title, durationSeconds, originalUrl, favoriteId, takes]

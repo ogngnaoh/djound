@@ -144,6 +144,11 @@ class BackendIntegrationTest {
                 new MockMultipartFile("file", "memo.m4a", "audio/mp4", Files.readAllBytes(memo));
         var session = projects.create(upload, "import");
         String id = session.id();
+        var imported = projects.list().getFirst();
+        assertEquals(session.durationSeconds(), imported.durationSeconds());
+        assertEquals(imported.createdAt(), imported.lastActivityAt());
+        assertEquals(0, imported.readyTakeCount());
+        assertNull(imported.favoriteId());
         assertEquals(id, projects.create(upload, "import").id());
         assertEquals("original", session.originalUrl().split("/")[5]);
         assertEquals(2, session.durationSeconds(), .05);
@@ -217,6 +222,15 @@ class BackendIntegrationTest {
                         "same", take.id(), "unchanged", null, null));
         var unchanged = awaitRendition(projects, id, "same");
         assertEquals("failed", unchanged.state());
+        var summary = projects.list().getFirst();
+        assertEquals(2, summary.readyTakeCount());
+        assertEquals(0, summary.inFlightCount());
+        assertEquals(second.id(), summary.favoriteId());
+        assertEquals(second.label(), summary.favoriteLabel());
+        assertEquals(second.durationSeconds(), summary.favoriteDurationSeconds());
+        assertTrue(summary.lastActivityAt().isAfter(imported.createdAt()));
+        projects.favorite(id, second.id());
+        assertEquals(summary.lastActivityAt(), projects.list().getFirst().lastActivityAt());
         var db = app.getBean(JdbcClient.class);
         db.sql("UPDATE rendition_take SET state='running' WHERE project_id=? AND request_id='same'")
                 .param(id)
@@ -685,6 +699,10 @@ class BackendIntegrationTest {
                 db.sql("SELECT count(*) FROM rendition_take WHERE state='queued'")
                         .query(Integer.class)
                         .single());
+        assertEquals(
+                7,
+                projects.list().stream().mapToLong(RenditionProjects.Index::inFlightCount).sum());
+        assertTrue(projects.list().stream().allMatch(row -> row.readyTakeCount() == 0));
         app.close();
         assertFalse(Files.exists(stageFile));
         for (int i = 0;

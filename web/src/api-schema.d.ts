@@ -11,7 +11,7 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** @description List recording-led projects from newest to oldest. */
+        /** @description List recording-led projects by most recent activity, including import, take status changes and a newly selected favorite. */
         get: operations["listRenditionProjects"];
         put?: never;
         /** @description Import a 1–300 second mono or stereo AAC/ALAC M4A, PCM WAV or MP3, up to 64 MiB. Decode it synchronously to a 44.1 kHz stereo PCM16 recording. */
@@ -789,6 +789,20 @@ export interface components {
             /** Format: uuid */
             id: string;
             title: string;
+            /** @description Duration of the original recording. */
+            durationSeconds: number;
+            /** Format: date-time */
+            createdAt: string;
+            /** Format: date-time */
+            lastActivityAt: string;
+            /** @description Playable generated takes */
+            readyTakeCount: number;
+            /** @description Queued and running requests. */
+            inFlightCount: number;
+            /** Format: uuid */
+            favoriteId: string | null;
+            favoriteLabel: string | null;
+            favoriteDurationSeconds: number | null;
         };
         RenditionProject: {
             /** Format: uuid */
