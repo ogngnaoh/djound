@@ -246,6 +246,18 @@ def plan_take(request, duration):
             raise ValueError("This answer needs the saved passage and its original request.")
         passage_policy = answer
     selection = selected_range(request, duration)
+    parent_plan = request.get("parentPlan") or {}
+    if (request.get("supportsArrangedScore") and not selection and not has_passages and not passage_policy
+            and parent_plan.get("realization") == "score" and "leadProgram" in parent_plan
+            and (parent_plan.get("fromUpload") or request.get("parentScoreInput"))):
+        from rendition_score_plan import lead_note_edit
+        edit = lead_note_edit(prompt, parent_plan)
+        if edit:
+            quality = "Softer" if edit["db"] < 0 else "Louder"
+            position = "closing" if edit["edge"] == "ending" else "opening"
+            return {"state": "planned", "caption": prompt.strip(), "label": f"{quality} {position} notes",
+                    "planner": "score-note-dynamics", "leadNoteEdit": edit, "melodyReference": "parent",
+                    "keepEnsemble": False, "appliedStartSeconds": None, "appliedEndSeconds": None}
     edge = TIMED_EDGE.search(prompt)
     if edge:
         if TIMED_EDGE.search(prompt, edge.end()):
@@ -400,7 +412,7 @@ def run(request, plan_only=False):
                                          recover_original=reference is not None,
                                          scored_ancestor=request.get("scoredAncestor") if policy in ("keep", "develop") else None,
                                          parent_score_input=request.get("parentScoreInput") if policy != "fresh" else None,
-                                         passage_policy=policy)
+                                         passage_policy=policy, lead_note_edit=decision.get("leadNoteEdit"))
             except ArrangementClarification as choice:
                 return {"state": "clarify", "error": str(choice)}
             if metadata:

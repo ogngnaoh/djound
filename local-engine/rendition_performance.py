@@ -53,7 +53,15 @@ def _inherited_score_mix(previous, tracks, seconds, plan, parent_plan, recorded,
     used = set()
     for new, part in enumerate(tracks):
         for old, old_part in enumerate(old_tracks):
-            if (new == 0) == (old == 0) and old not in used and part == old_part and part["notes"]:
+            if (new == 0) != (old == 0) or old in used or not part["notes"]:
+                continue
+            # A note-level envelope is applied after the instrument's normalization.
+            # Reuse the recorded gain so that unity outside the envelope means unchanged PCM.
+            same = part == old_part
+            if not same and new == 0:
+                same = ({k: v for k, v in part.items() if k != "note_dynamics"} ==
+                        {k: v for k, v in old_part.items() if k != "note_dynamics"})
+            if same:
                 matches[new] = old
                 used.add(old)
                 break
@@ -117,16 +125,22 @@ def _score_caption(plan, tracks):
             elif end >= middle + 6:
                 closing = " and a stronger touch at phrase endings"
         caption += f" The lead part calls for {feel}{closing}."
+        for edge, change in plan.get("leadNoteDynamics", {}).items():
+            where = "first" if edge == "opening" else "last"
+            quality = "softer" if change["db"] < 0 else "stronger"
+            count = change["count"]
+            noun = "note" if count == 1 else "notes"
+            caption += f" The {where} {count} lead {noun} {'is' if count == 1 else 'are'} {quality}."
     return caption[0].upper() + caption[1:]
 
 
 def perform_score(parent, original, destination, work, *, direction, caption, parent_caption,
                   parent_plan, parent_map, recover_original, scored_ancestor=None, passage_policy=None,
-                  parent_score_input=None):
+                  parent_score_input=None, lead_note_edit=None):
     """Let a local arranger revise the playing decisions and render them against the source phrases."""
     from rendition_melody import MELODY_TRACE_VERSION, transcribe_recording
     from rendition_score import Timeline, analyze, arrange
-    from rendition_score_plan import plan_arrangement
+    from rendition_score_plan import apply_lead_note_edit, plan_arrangement
     from rendition_score_render import ScoreBalanceConflict, render_score, score_available
 
     inherit_input = parent_score_input is not None and not recover_original and parent_plan is not None
@@ -175,7 +189,8 @@ def perform_score(parent, original, destination, work, *, direction, caption, pa
     if parent_plan:
         analysis["parentPlan"] = parent_plan
     report_stage("arranging")
-    plan = plan_arrangement(analysis, direction, parent_caption, deadline=deadline)
+    plan = (apply_lead_note_edit(parent_plan, lead_note_edit) if lead_note_edit else
+            plan_arrangement(analysis, direction, parent_caption, deadline=deadline))
     previous_score = None
     if same_input and parent_plan.get("realization", "score") == "score":
         previous_score = arrange(notes, analysis, parent_plan)
@@ -189,6 +204,8 @@ def perform_score(parent, original, destination, work, *, direction, caption, pa
                     performed[:2] == previous_score[:2])
 
         if repeats_parent(plan, performance):
+            if lead_note_edit:
+                return {"state": "clarify", "error": "I couldn't find the lead notes to change in this take."}
             plan = plan_arrangement(analysis, direction, parent_caption, deadline=deadline, reconsider=True)
             if plan is not None:
                 performance = arrange(notes, analysis, plan)
@@ -217,6 +234,9 @@ def perform_score(parent, original, destination, work, *, direction, caption, pa
     score = work / "arrangement.wav"
     mix = _inherited_score_mix(previous_score, tracks, seconds, plan, parent_plan,
                                scored_ancestor["source"] if scored_ancestor else parent, work, deadline)
+    if lead_note_edit and 0 not in mix.get("protected_parts", []):
+        return {"state": "clarify", "error": "I couldn't recover the saved lead at its recorded volume. "
+                "Choose an earlier take to change those notes."}
     plan.pop("scoreMasterGain", None)
     plan.pop("scorePartGains", None)
     try:

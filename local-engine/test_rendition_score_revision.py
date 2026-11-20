@@ -133,6 +133,48 @@ class ScoreRevisionTest(unittest.TestCase):
                 self.assertTrue(self.output.is_file())
                 self.output.unlink()
 
+    @unittest.skipUnless(player.score_available(), "Run the local guide setup for soundfont tests")
+    def test_local_volume_edit_round_trips_with_the_heard_gain_and_an_immutable_parent(self):
+        import time
+        import wave
+
+        source, parent = self.root / "upload.wav", self.root / "parent.wav"
+        prior = dict(self.parent, leadProgram=42, roles=[{
+            "kind": "arpeggio", "program": 0, "pattern": planner._pattern("arpeggio", "wave", 4)}])
+        tracks, seconds, _ = arrange(self.notes, analyze(self.notes), prior)
+        player.render_score(tracks, seconds, parent, room=prior["room"], deadline=time.monotonic() + 30,
+                            master_gain=.65, part_gains=[.7, .9], protected_parts=[0, 1], receipt=prior)
+        original_audio = parent.read_bytes()
+        edit = {"edge": "ending", "count": 2, "db": -8}
+
+        def transcribe(_, path, **kwargs):
+            path.write_text(json.dumps(self.notes))
+            return True
+
+        def revise(heard, plan, out, change):
+            with (patch("rendition_performance.guide_available", return_value=True),
+                  patch("rendition_melody.transcribe_recording", side_effect=transcribe),
+                  patch.object(planner, "plan_arrangement", side_effect=AssertionError("Keep the rest of the band"))):
+                result = perform_score(heard, source, out, self.root, direction="Change the last two lead notes",
+                                       caption="Lead dynamics", parent_caption="Cello and piano", parent_plan=plan,
+                                       parent_map=None, recover_original=False, lead_note_edit=change)
+                return json.loads(json.dumps(result["arrangementPlan"]))
+
+        revised = revise(parent, prior, self.output, edit)
+        self.assertEqual(original_audio, parent.read_bytes())
+        self.assertEqual(prior["scorePartGains"], revised["scorePartGains"])
+        self.assertEqual(prior["scoreMasterGain"], revised["scoreMasterGain"])
+        self.assertNotIn("leadNoteDynamics", prior)
+        self.assertEqual({"ending": {"count": 2, "db": -8}}, revised["leadNoteDynamics"])
+        with wave.open(str(parent)) as a, wave.open(str(self.output)) as b:
+            early = round(tracks[0]["notes"][-2][0] * player.RATE)
+            self.assertEqual(a.readframes(early), b.readframes(early))
+            self.assertNotEqual(a.readframes(a.getnframes()), b.readframes(b.getnframes()))
+        undone = self.root / "undone.wav"
+        restored = revise(self.output, revised, undone, dict(edit, db=8))
+        self.assertNotIn("leadNoteDynamics", restored)
+        self.assertEqual(original_audio, undone.read_bytes())
+
     def test_explicit_register_follows_the_heard_lead_or_the_upload_through_revisions(self):
         role = {"program": 0, "kind": "arpeggio", "pattern": planner._pattern("arpeggio", "wave", 4)}
         trumpet = dict(self.parent, leadProgram=56, roles=[role])

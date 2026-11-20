@@ -216,6 +216,78 @@ def _liked_part(phrase):
         r"(?: (?:just |exactly )?(?:the way it (?:is|sounds)|as it is))?", _marked(phrase))
 
 
+def lead_note_edit(direction, old):
+    """Resolve dynamics on a named stretch of a saved melody, in played notes."""
+    if not re.search(r"\bnotes?\b", direction, re.I):
+        return None
+    counts = {"one": 1, "two": 2, "three": 3, "four": 4, "five": 5, "six": 6, "few": 4}
+    edge_count = (r"(?P<edge>first|opening|last|final|closing) "
+                  r"(?:(?P<count>\d{1,2}|" + "|".join(counts) + r") )?")
+    window = edge_count + "notes?"
+    subject = r"(?:the |its |that )?(?P<subject>@\d+@|lead|melody|tune|theme)"
+    level = r"(?:(?:a little|a bit|slightly) )?(?P<level>quieter|softer|louder|stronger)"
+    patterns = (
+        r"(?:let |make )?" + subject + r" (?:get |grow |be |play )?" + level +
+        r" (?:over|on|for|through) (?:its |the )?" + window,
+        r"(?:make |play )?(?:the )?" + window + r" (?:of |on )" + subject + r" " + level,
+        r"(?:make |play )?" + subject + r"(?: ?'s)? (?:the )?" + window + r" " + level,
+        r"(?:make |play )?(?:the )?" + edge_count + subject + r" notes? " + level,
+    )
+    edit = None
+    for clause in re.split(r"[.!?;]|,?\s+but\s+|,\s*(?=(?:keep|leave)\b)", direction, flags=re.I):
+        if not clause.strip():
+            continue
+        liked = _liked_part(clause.strip())
+        if liked:
+            if liked["part"] == f"@{old['leadProgram']}@" or MELODY_PART.fullmatch(liked["part"]):
+                return None
+            if liked["part"].startswith("@") and int(liked["part"].strip("@")) not in {
+                old["leadProgram"], *(r.get("program") for r in old.get("roles", []))
+            }:
+                return None
+            continue
+        words = _marked(clause.strip()).replace("’", "'")
+        if re.fullmatch(r"(?:keep|leave) (?:the rest|everything else) (?:as (?:it is|is)|the same|unchanged|alone)", words):
+            continue
+        words = re.sub(r"^(?:(?:could|can|would) you )?(?:please )?", "", words)
+        if words.startswith("soften "):
+            words = "make " + words[len("soften "):] + " softer"
+        match = next((m for pattern in patterns if (m := re.fullmatch(pattern, words))), None)
+        if edit or not match:
+            return None
+        if match["subject"].startswith("@") and int(match["subject"].strip("@")) != old["leadProgram"]:
+            return None
+        number = match["count"]
+        count = counts.get(number) or (int(number) if number else (1 if re.search(r"\bnote\b", words) else 4))
+        if not 1 <= count <= 32:
+            return None
+        edge = "ending" if match["edge"] in ("last", "final", "closing") else "opening"
+        db = 4 if re.search(r"\b(?:a little|a bit|slightly)\b", words) else 8
+        edit = {"edge": edge, "count": count, "db": -db if match["level"] in ("quieter", "softer") else db}
+    return edit
+
+
+def apply_lead_note_edit(parent, edit):
+    plan = copy.deepcopy(parent)
+    marks = plan.setdefault("leadNoteDynamics", {})
+    edge = edit["edge"]
+    previous = marks.get(edge)
+    if previous and previous["count"] != edit["count"]:
+        raise ArrangementClarification("This part already has a volume change over a different number of notes. "
+                                       "Use the same number, or start from the take before that change.")
+    db = edit["db"] + (previous["db"] if previous else 0)
+    if not -24 <= db <= 12:
+        raise ArrangementClarification("The lead is at the available volume limit for those notes. "
+                                       "Try a smaller change or start from an earlier take.")
+    if db:
+        marks[edge] = {"count": edit["count"], "db": db}
+    else:
+        del marks[edge]
+        if not marks:
+            del plan["leadNoteDynamics"]
+    return plan
+
+
 def _backing_additions(direction, old):
     """Resolve a directly requested supporting player without reassigning the protected lead."""
     if not old or not re.search(r"\b(?:add|bring in|layer in|introduce)\b", direction, re.I):

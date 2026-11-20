@@ -9,6 +9,36 @@ import rendition_worker as worker
 
 
 class RenditionPlannerTest(unittest.TestCase):
+    def test_lead_notes_use_the_saved_players_clock(self):
+        old = {"realization": "score", "leadProgram": 42, "fromUpload": True}
+        request = {"supportsArrangedScore": True, "parentPlan": old}
+        cases = [
+            ("Could you let the cello get quieter over its last few notes? I like the rest just the way it is.",
+             "ending", 4, -8),
+            ("Make the last three notes of the melody slightly softer.", "ending", 3, -4),
+            ("Play the cello’s first note louder.", "opening", 1, 8),
+            ("Soften the opening two cello notes.", "opening", 2, -8),
+        ]
+        with patch.object(worker, "infer_plan", side_effect=AssertionError("This edit has an exact note target")):
+            for words, edge, count, db in cases:
+                decision = worker.plan_take(dict(request, prompt=words), 30)
+                self.assertEqual({"edge": edge, "count": count, "db": db}, decision["leadNoteEdit"])
+                self.assertEqual(("parent", None, None), (decision["melodyReference"],
+                                 decision["appliedStartSeconds"], decision["appliedEndSeconds"]))
+        # Other targets, selected passages and compound instructions still need interpretation.
+        reply = {"scope": "whole", "label": "Variation", "caption": "Revise the music", "reference": "parent"}
+        with patch.object(worker, "infer_plan", return_value=(reply, "local model")):
+            for words in ("Let the bass get softer over its final notes.",
+                          "Do not make the final three cello notes softer.",
+                          "Make the final three cello notes softer and change the pace.",
+                          "Make the final three cello notes softer. I like the cello just the way it is."):
+                self.assertNotIn("leadNoteEdit", worker.plan_take(dict(request, prompt=words), 30))
+            words = cases[0][0]
+            for override in ({"startSeconds": 2, "endSeconds": 6}, {"parentPlan": None},
+                             {"parentPlan": dict(old, realization="produced")},
+                             {"scoredAncestor": {"frames": 1323000, "editedFrames": [[0, 1800]]}}):
+                self.assertNotIn("leadNoteEdit", worker.plan_take({**request, **override, "prompt": words}, 30))
+
     def test_arrangement_choices_return_to_the_listener_and_invalid_scores_still_fail(self):
         import rendition_score_plan as score
 
