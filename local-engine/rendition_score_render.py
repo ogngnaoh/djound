@@ -4,7 +4,6 @@ import math
 import numbers
 import os
 from pathlib import Path
-import shutil
 import subprocess
 import tempfile
 import time
@@ -151,18 +150,18 @@ def _apply_room(mix, frames, room, deadline):
     return peak
 
 
-def _lead_headroom(mix, lead, limit, deadline):
-    """Find the loudest constant lead gain that leaves the backing at its saved level."""
+def _headroom(mix, changed, limit, deadline, *, rounding_margin=0.):
+    """Find the loudest constant gain for edited parts that leaves the other players fixed."""
     import numpy as np
 
     lower, upper = 0., 1.
     while block := mix.read(BLOCK * 8):
         _remaining(deadline)
         full = np.frombuffer(block, "<f4").astype(float)
-        voice = np.frombuffer(lead.read(len(block)), "<f4").astype(float)
+        voice = np.frombuffer(changed.read(len(block)), "<f4").astype(float)
         backing = full - voice
         # If both endpoints fit, every gain from silence to the written lead fits too.
-        at_risk = (abs(full) > limit) | (abs(backing) > limit)
+        at_risk = (abs(full) > limit + rounding_margin) | (abs(backing) > limit + rounding_margin)
         if not at_risk.any():
             continue
         v, b = voice[at_risk], backing[at_risk]
@@ -176,47 +175,31 @@ def _lead_headroom(mix, lead, limit, deadline):
     return upper
 
 
-def _finish(mix, frames, room, ready, deadline, master_gain=None, lead=None):
+def _write_pcm(mix, frames, ready, master, deadline, legacy_lead=None, legacy_gain=1.):
     import numpy as np
 
-    peak = _apply_room(mix, frames, room, deadline)
-    if peak == 0:
-        raise ValueError("The score contains no audible performance.")
-    master = min(1., PEAK / peak) if master_gain is None else master_gain
-    lead_gain = 1.
-    if peak * master > PEAK + 1e-8:
-        # A new player can have hotter attacks. Give that player the available headroom.
-        # A backing that only fits by cancellation may require trimming the whole mix.
-        fit = None
-        if lead is not None:
-            _apply_room(lead, frames, room, deadline)
-            fit = _lead_headroom(mix, lead, PEAK / master, deadline)
-        if fit is None:
-            master = PEAK / peak
-        else:
-            lead_gain = fit
-            lead.seek(0)
-        mix.seek(0)
+    mix.seek(0)
+    if legacy_lead is not None:
+        legacy_lead.seek(0)
     with wave.open(str(ready), "wb") as wav:
         wav.setparams((2, 2, RATE, frames, "NONE", "not compressed"))
         while chunk := mix.read(BLOCK * 8):
             _remaining(deadline)
             wet = np.frombuffer(chunk, dtype="<f4")
-            if lead_gain < 1:
-                wet = wet - (1 - lead_gain) * np.frombuffer(lead.read(len(chunk)), "<f4")
+            if legacy_gain < 1:
+                wet = wet - (1 - legacy_gain) * np.frombuffer(legacy_lead.read(len(chunk)), "<f4")
             pcm = np.rint(wet * (master * 32768)).astype("<i2")
             wav.writeframesraw(pcm.tobytes())
-    return master
 
 
 def render_score(tracks, duration: float, output: Path, *, deadline: float, room: float = 1.0,
-                 master_gain: float | None = None) -> float:
-    """Render notes (start seconds, end seconds, MIDI pitch, velocity) with a fixed mix.
+                 master_gain: float | None = None, part_gains=None, protected_parts=None, receipt=None) -> float:
+    """Perform (start, end, pitch, velocity) notes at each part's gain, pan and optional RMS level.
 
-    Each part supplies a zero-based GM program, notes, optional percussion bank,
-    linear gain (default 1), stereo balance (−1 to +1), and optional whole-part
-    RMS level_db. A saved master gain fixes the level of the backing while track
-    zero plays a revised lead. Return the actual master gain used for this performance.
+    A new mix inherits the master and individual gains of protected parts. A score
+    with saved part gains and no protection list is a replay. Older master-only
+    scores retain their original lead-only headroom calculation and PCM rounding.
+    The optional receipt records the effective master and part gains for later edits.
     """
     _remaining(deadline)
     duration = _number(duration, 0, MAX_SECONDS, "score duration")
@@ -228,6 +211,19 @@ def render_score(tracks, duration: float, output: Path, *, deadline: float, room
     frames = round(duration * RATE)
     if not frames or not isinstance(tracks, (list, tuple)) or not 1 <= len(tracks) <= 32:
         raise ValueError("Supply a positive duration and one to 32 scored parts.")
+    if part_gains is not None and len(part_gains) != len(tracks):
+        raise ValueError("Supply one saved gain per scored part.")
+    gains = ([_number(value, 0, 1, "saved part gain") for value in part_gains]
+             if part_gains is not None else [1.] * len(tracks))
+    legacy = part_gains is None and protected_parts is None
+    # A legacy saved master protected every part except the first. Explicit gains
+    # replay as written unless the caller names the parts to protect on a new edit.
+    if protected_parts is None:
+        editable = [0] if legacy and len(tracks) > 1 else []
+    else:
+        protected = {_number(i, 0, len(tracks) - 1, "protected part", True) for i in protected_parts}
+        editable = [i for i in range(len(tracks)) if i not in protected]
+
     output = Path(output)
     if output.exists() or output.is_symlink():
         raise ValueError("Save the performance to a new WAV path.")
@@ -235,26 +231,64 @@ def render_score(tracks, duration: float, output: Path, *, deadline: float, room
         raise RuntimeError("Install the score performer with bash local-engine/renditions.sh setup.")
     with tempfile.TemporaryDirectory(prefix=".score-", dir=output.parent) as directory:
         work = Path(directory)
-        with tempfile.TemporaryFile(dir=work) as mix, tempfile.TemporaryFile(dir=work) as lead:
-            mix.truncate(frames * 8)
-            remaining_notes = MAX_NOTES
-            for index, track in enumerate(tracks):
-                _remaining(deadline)
-                schedule = work / "notes.txt"
-                count = _schedule(track, frames, schedule, remaining_notes)
-                remaining_notes -= count
-                gain = _number(track.get("gain", 1.), 0, 16, "part gain")
-                pan = _number(track.get("pan", 0.), -1, 1, "part pan")
-                level = track.get("level_db")
-                if level is not None:
-                    level = _number(level, -96, 0, "part RMS level")
-                if count and gain:
-                    _add_part(mix, work / "part.f32", schedule, frames, level, gain, pan, deadline)
-                if index == 0 and master_gain is not None and len(tracks) > 1:
-                    mix.seek(0)
-                    shutil.copyfileobj(mix, lead)
-            ready = work / "score.wav"
-            master = _finish(mix, frames, room, ready, deadline, master_gain, lead if len(tracks) > 1 else None)
+        parts = []
+        remaining_notes = MAX_NOTES
+        for i, track in enumerate(tracks):
+            _remaining(deadline)
+            schedule = work / f"part-{i}.txt"
+            count = _schedule(track, frames, schedule, remaining_notes)
+            remaining_notes -= count
+            gain = _number(track.get("gain", 1.), 0, 16, "part gain")
+            pan = _number(track.get("pan", 0.), -1, 1, "part pan")
+            level = track.get("level_db")
+            if level is not None:
+                level = _number(level, -96, 0, "part RMS level")
+            parts.append((schedule, count, gain, pan, level))
+
+        def perform(bus, indices):
+            bus.truncate(0)
+            bus.truncate(frames * 8)
+            for i in indices:
+                schedule, count, gain, pan, level = parts[i]
+                if count and gain and gains[i]:
+                    _add_part(bus, work / "part.f32", schedule, frames, level, gain * gains[i], pan, deadline)
+            return _apply_room(bus, frames, room, deadline)
+
+        ready = work / "score.wav"
+        with tempfile.TemporaryFile(dir=work) as mix, tempfile.TemporaryFile(dir=work) as changed:
+            peak = perform(mix, range(len(parts)))
+            if peak == 0:
+                raise ValueError("The score contains no audible performance.")
+            master = min(1., PEAK / peak) if master_gain is None else master_gain
+            legacy_gain = 1.
+            if master * peak > PEAK + 1e-8:
+                fit = None
+                if editable:
+                    perform(changed, editable)
+                    limit = PEAK / master
+                    # An old post-sum gain can put a preserved isolated sample a
+                    # few float32 rounding units above the equivalent new mix.
+                    fit = _headroom(mix, changed, limit, deadline,
+                                    rounding_margin=0. if legacy else limit * 2e-7)
+                if fit is None:
+                    # A standalone protected mix may itself exceed the limit, e.g.
+                    # when removing a player that partially cancelled it.
+                    master = PEAK / peak
+                else:
+                    for i in editable:
+                        gains[i] *= fit
+                    if legacy:
+                        legacy_gain = fit
+                    else:
+                        # Publish from the same per-part gains we save. Applying this
+                        # trim after summing the room instead would round differently
+                        # on a future replay. The extra render only runs on overload.
+                        peak = perform(mix, range(len(parts)))
+                        if peak * master > PEAK + 1e-8:
+                            master = PEAK / peak
+            _write_pcm(mix, frames, ready, master, deadline, changed, legacy_gain)
         _remaining(deadline)
         os.link(ready, output)
+        if receipt is not None:
+            receipt.update(scoreMasterGain=master, scorePartGains=gains)
         return master

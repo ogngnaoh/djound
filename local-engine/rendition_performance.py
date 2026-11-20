@@ -38,28 +38,48 @@ def _same_recorded_score(rebuilt, recorded, edited):
         return heard
 
 
-def _backing_master(previous, tracks, seconds, plan, parent_plan, recorded, work, deadline):
-    """Inherit the rendered backing level when the arrangement kept those actual parts."""
-    if previous is None or plan.get("realization") != "score" or len(tracks) < 2:
-        return None
+def _inherited_score_mix(previous, tracks, seconds, plan, parent_plan, recorded, work, deadline):
+    """Use the listener's heard level for each part whose score and room are unchanged."""
+    if previous is None or plan.get("realization") != "score":
+        return {}
     old_tracks, old_seconds, _ = previous
     room = plan.get("room", .44)
-    if old_seconds != seconds or old_tracks[1:] != tracks[1:] or room != parent_plan.get("room", .44):
-        return None
-    if "scoreMasterGain" in parent_plan:
-        return parent_plan["scoreMasterGain"]
+    if old_seconds != seconds or room != parent_plan.get("room", .44):
+        return {}
 
-    # Older scores saved their parts but no master gain. Verify the old render against
-    # the take the listener heard before using that gain in a new performance.
-    from rendition_score_render import render_score
-    old_wav = work / "earlier-score.wav"
-    try:
-        gain = render_score(old_tracks, old_seconds, old_wav, deadline=deadline, room=room)
-        if _same_recorded_score(old_wav, recorded, parent_plan.get("retainedPassageFrames", [])):
-            return gain
-    finally:
-        old_wav.unlink(missing_ok=True)
-    return None
+    # Track zero is the lead. Accompaniment can grow, shrink or move in the list;
+    # match each identical part once, including its actual notes, gain and pan.
+    matches = {}
+    used = set()
+    for new, part in enumerate(tracks):
+        for old, old_part in enumerate(old_tracks):
+            if (new == 0) == (old == 0) and old not in used and part == old_part and part["notes"]:
+                matches[new] = old
+                used.add(old)
+                break
+    if not matches:
+        return {}
+    master = parent_plan.get("scoreMasterGain")
+    gains = parent_plan.get("scorePartGains")
+    if gains is None:
+        gains = [1.] * len(old_tracks)
+        # A master-only receipt can imply a quieter lead. Replay the historical
+        # renderer when that lead survives, or when even the master is unknown.
+        if master is None or (0 in used and len(old_tracks) > 1):
+            from rendition_score_render import render_score
+            old_wav = work / "earlier-score.wav"
+            recovered = {}
+            try:
+                render_score(old_tracks, old_seconds, old_wav, deadline=deadline, room=room,
+                             master_gain=master, receipt=recovered)
+                if not _same_recorded_score(old_wav, recorded, parent_plan.get("retainedPassageFrames", [])):
+                    return {}
+            finally:
+                old_wav.unlink(missing_ok=True)
+            master, gains = recovered["scoreMasterGain"], recovered["scorePartGains"]
+    return {"master_gain": master,
+            "part_gains": [gains[matches[i]] if i in matches else 1. for i in range(len(tracks))],
+            "protected_parts": list(matches)}
 
 
 def _score_caption(plan, tracks):
@@ -190,13 +210,12 @@ def perform_score(parent, original, destination, work, *, direction, caption, pa
         mapping = relative_map(mapping, previous_score[2] if inherit_input else parent_map)
     report_stage("rendering")
     score = work / "arrangement.wav"
-    master = _backing_master(previous_score, tracks, seconds, plan, parent_plan,
-                             scored_ancestor["source"] if scored_ancestor else parent, work, deadline)
+    mix = _inherited_score_mix(previous_score, tracks, seconds, plan, parent_plan,
+                               scored_ancestor["source"] if scored_ancestor else parent, work, deadline)
     plan.pop("scoreMasterGain", None)
-    output_gain = render_score(tracks, seconds, score, deadline=deadline, room=plan.get("room", .44),
-                               master_gain=master)
-    if plan.get("realization") == "score":
-        plan["scoreMasterGain"] = output_gain
+    plan.pop("scorePartGains", None)
+    render_score(tracks, seconds, score, deadline=deadline, room=plan.get("room", .44), **mix,
+                 receipt=plan if plan.get("realization") == "score" else None)
     if scored_ancestor:
         intervals = scored_ancestor["editedFrames"]
         same_performance = all(plan.get(field) == parent_plan.get(field) for field in

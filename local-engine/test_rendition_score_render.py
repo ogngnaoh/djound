@@ -110,7 +110,7 @@ class ScoreRendererTest(unittest.TestCase):
 
     @unittest.skipUnless(player.score_available(), "Run the local guide setup for soundfont tests")
     def test_unchanged_backing_keeps_its_pcm_when_new_lead_is_quieter_or_hotter(self):
-        from rendition_performance import _backing_master
+        from rendition_performance import _inherited_score_mix
 
         lead = dict(program=0, pan=-1., level_db=-9, notes=[(.45,.85,60,105), (1.1,1.45,65,90)])
         backing = dict(program=32, pan=1., level_db=-30, notes=[(.12,.54,41,82), (.88,1.65,43,86)])
@@ -118,8 +118,8 @@ class ScoreRendererTest(unittest.TestCase):
         def samples(path):
             with wave.open(str(path), "rb") as wav:
                 return np.frombuffer(wav.readframes(wav.getnframes()), "<i2").reshape(-1, 2)
-        def perform(tracks, output, gain=None):
-            return player.render_score(tracks, 1.84, output, deadline=self.deadline, room=0., master_gain=gain)
+        def perform(tracks, output, **kwargs):
+            return player.render_score(tracks, 1.84, output, deadline=self.deadline, room=0., **kwargs)
         old_mix = perform([lead, backing], parent)
         self.assertLess(old_mix, 1.)
         baseline = samples(parent)
@@ -128,25 +128,69 @@ class ScoreRendererTest(unittest.TestCase):
         for amount in (.2, 4.):
             parts = [dict(lead, gain=amount), backing]
             new = self.work / f"new-{amount}.wav"
-            recovered = _backing_master(previous, parts, 1.84, plan, plan, parent, self.work, self.deadline)
-            self.assertEqual(recovered, old_mix)
-            chosen = perform(parts, new, recovered)
-            self.assertEqual(chosen, old_mix)
+            recovered = _inherited_score_mix(previous, parts, 1.84, plan, plan, parent, self.work, self.deadline)
+            self.assertEqual(recovered["master_gain"], old_mix)
+            self.assertEqual(recovered["protected_parts"], [1])
+            receipt = {}
+            chosen = perform(parts, new, receipt=receipt, **recovered)
+            self.assertAlmostEqual(chosen, old_mix, places=6)
             expected = samples(new)
             np.testing.assert_array_equal(expected[:,1], baseline[:,1])
             self.assertGreater(np.max(np.abs(expected[:,0])), 1000)
             self.assertLessEqual(np.max(np.abs(expected)) / 32768, player.PEAK + 1/32768)
-            # A following take can replay this exact mix from the one saved number.
             replay = self.work / f"replay-{amount}.wav"
-            self.assertEqual(chosen, perform(parts, replay, chosen))
+            perform(parts, replay, master_gain=chosen, part_gains=receipt["scorePartGains"])
             np.testing.assert_array_equal(samples(replay), expected)
         wrong_parent = self.work / "other.wav"
         perform([dict(lead, gain=.2), backing], wrong_parent)
-        self.assertIsNone(_backing_master(previous, [lead, backing], 1.84, plan, plan, wrong_parent,
-                                          self.work, self.deadline))
-        self.assertEqual(old_mix, _backing_master(previous, [lead, backing], 1.84, plan,
-                                                 dict(plan, scoreMasterGain=old_mix), parent,
-                                                 self.work, self.deadline))
+        self.assertFalse(_inherited_score_mix(previous, [lead, backing], 1.84, plan, plan, wrong_parent,
+                                              self.work, self.deadline))
+        self.assertEqual(old_mix, _inherited_score_mix(previous, [lead, backing], 1.84, plan,
+                                                       dict(plan, scoreMasterGain=old_mix), parent,
+                                                       self.work, self.deadline)["master_gain"])
+
+    @unittest.skipUnless(player.score_available(), "Run the local guide setup for soundfont tests")
+    def test_edit_backing_keeps_a_previously_attenuated_lead_and_replays_exactly(self):
+        from rendition_performance import _inherited_score_mix
+
+        # Each musician has a separate channel so the published mix exposes the
+        # actual preserved lead, even when both are playing simultaneously.
+        lead = dict(program=71, pan=-1., level_db=-13, notes=[(.4,.9,67,81), (1.1,1.4,64,78)])
+        old = dict(program=48, pan=1., level_db=-27, notes=[(.12,.32,57,72), (1.1,1.4,62,91)])
+        parts = [dict(lead, gain=4.), old]
+        edited = [parts[0], dict(old, program=11, gain=8.)]
+        plan = dict(realization="score", room=0.)
+        def render(tracks, name, **options):
+            path = self.work / (name + ".wav")
+            receipt = {}
+            player.render_score(tracks, 1.84, path, deadline=self.deadline, room=0., receipt=receipt, **options)
+            with wave.open(str(path)) as stream:
+                pcm = np.frombuffer(stream.readframes(stream.getnframes()), "<i2").reshape(-1, 2)
+            return path, receipt, pcm
+
+        for legacy in (False, True):
+            with self.subTest(legacy=legacy):
+                # Master-only ancestors used a different, post-sum rounding order.
+                options = {} if legacy else dict(protected_parts=[1], part_gains=[1.,1.])
+                path, received, heard = render(parts, f"louder-{legacy}", master_gain=.8, **options)
+                self.assertLess(received["scorePartGains"][0], .9)
+                parent = dict(plan, **received)
+                if legacy:
+                    parent.pop("scorePartGains")
+                keep = _inherited_score_mix((parts,1.84,[]), edited, 1.84, plan, parent, path,
+                                            self.work, self.deadline)
+                self.assertEqual(keep["protected_parts"], [0])
+                self.assertAlmostEqual(keep["part_gains"][0], received["scorePartGains"][0])
+                _, result, changed = render(edited, f"backing-{legacy}", **keep)
+                self.assertLess(result["scorePartGains"][1], 1.)
+                # Historical post-sum and current in-part multiplication can round
+                # one sample differently when migrating a master-only score.
+                np.testing.assert_allclose(changed[:,0], heard[:,0], atol=int(legacy))
+                self.assertGreater(np.sum(abs(changed[:,1].astype(int)-heard[:,1])>100), 1000)
+                self.assertLessEqual(abs(changed.astype(int)).max()/32768, player.PEAK+1/32768)
+                _, _, replay = render(edited, f"replay-cascade-{legacy}", master_gain=result["scoreMasterGain"],
+                                      part_gains=result["scorePartGains"])
+                np.testing.assert_array_equal(changed, replay)
 
 
 if __name__ == "__main__":
