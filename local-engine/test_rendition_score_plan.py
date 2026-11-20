@@ -306,5 +306,60 @@ class PhraseBackingTest(unittest.TestCase):
         self.assertNotEqual(old_tracks[3]["notes"], looping[3]["notes"])
 
 
+
+class ListeningPurposeTest(unittest.TestCase):
+    class Director(Musician):
+        def choose(self, question, options, *, context=None):
+            if context is not None and (question.startswith("Did the listener state") or question.startswith("What pulse")):
+                assert set(json.loads(context)) == {"listener"}
+            return super().choose(question, options)
+
+    def test_first_performance_can_play_a_nearby_free_tempo(self):
+        source = {"bpm": 112}
+        context = {"currentTake": "", "source": source, "listener": "A quiet nighttime study session."}
+        director = self.Director({"Did the listener state": "purpose", "What pulse": 72})
+        chart, director.new_chart_tempo = score._first_chart_context(director, context)
+        self.assertNotIn("bpm", chart["source"])
+        self.assertEqual(72, chart["tempoGuide"])
+        self.assertEqual(112, source["bpm"])
+        for cue, expected in [("77 BPM", 77), ("112 BPM", 72), ("a gentle tempo", 72)]:
+            with self.subTest(cue=cue):
+                director.brief = cue
+                self.assertEqual(expected, score._tempo(director, source, None, (None, set())))
+        self.assertEqual(123, score._tempo(director, source, None, (123, set())))
+
+    def test_first_pace_preservation_and_open_arrangements(self):
+        director = self.Director({"Did the listener state": "arrangement"}, brief="118 BPM")
+        context = {"currentTake": "", "source": {"bpm": 112}, "listener": "Keep the original tempo."}
+        chart, director.new_chart_tempo = score._first_chart_context(director, context)
+        self.assertEqual(112, chart["performanceTempo"])
+        self.assertEqual(112, score._tempo(director, context["source"], None, (None, set())))
+        for context in (dict(context, listener="Flute and guitar."), dict(context, currentTake="An earlier take"),
+                        dict(context, currentScore={"bpm": 96}), dict(context, listener="Play at 131 BPM.")):
+            with self.subTest(context=context):
+                self.assertEqual((context, None), score._first_chart_context(director, context))
+        director.new_chart_tempo = None
+        self.assertEqual(118, score._tempo(director, {"bpm": 112}, None, (None, set())))
+
+    def test_named_drum_hits_reach_the_performed_score(self):
+        notes = {"frames": 441000, "melody": [[i, i + .35, 60 + i, .8] for i in range(8)], "candidates": []}
+        from rendition_score import analyze
+        analysis = analyze(notes)
+        cases = [
+            ("Flute sings over drums.", "Drums: light kick/snare (no cymbals).", "sparse", {36, 38}),
+            ("Flute over kick and snare only.", "Add ride cymbal.", "ride", {36, 38}),
+            ("Flute and drums with a ride cymbal, no hi-hat.", "Use a ride and foot hi-hat.", "ride", {51}),
+            ("Flute and drums with hi-hat.", "Drums: kick and snare, no cymbals.", "backbeat", {36, 38, 42}),
+        ]
+        for direction, cue, gesture, expected in cases:
+            with self.subTest(direction=direction):
+                director = self.Director({"Choose the repeating percussion": gesture}, brief="88 BPM, 4/4. " + cue,
+                                         players="Flute, drums")
+                plan = score._arrange(analysis, direction, None, director)
+                tracks, _, _ = arrange(notes, analysis, plan)
+                self.assertEqual(expected, {note[2] for t in tracks if t.get("percussion") for note in t["notes"]})
+        self.assertTrue(score._excluded_player(score.KIT, "No drums."))
+
+
 if __name__ == "__main__":
     unittest.main()

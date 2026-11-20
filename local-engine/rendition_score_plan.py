@@ -127,6 +127,7 @@ def _marked(text):
     terms = r"\b(?:" + "|".join(re.escape(k) for k in sorted(INSTRUMENT_TERMS, key=len, reverse=True)) + r")\b"
     words = re.sub(terms, lambda m: f" @{INSTRUMENT_TERMS[m.group()]}@ ", words)
     marked = match.sub(mark, words)
+    marked = KICK_SNARE_ONLY.sub(f" @{KIT}@ ", marked)
     marked = DRUMS.sub(f" @{KIT}@ ", marked)
     return re.sub(r"\s+", " ", marked).strip()
 
@@ -197,8 +198,13 @@ def _part_kind(program, words):
 def _excluded_player(program, direction):
     for clause in re.split(r"[,;.!?]|\bbut\b", direction, flags=re.I):
         negative = re.search(r"\b(?:no|without|omit|remove|drop|avoid|instead of)\s+", clause, re.I)
-        if negative and program in _members(clause[negative.end():]):
-            return True
+        if negative:
+            target = clause[negative.end():]
+            # A ban on the hi-hat leaves the performer available to play other drum keys.
+            if program == KIT:
+                target = re.sub(KIT_COMPONENT, "", target, flags=re.I)
+            if program in _members(target):
+                return True
     return program != KIT and _excluded(program, direction)
 
 
@@ -230,7 +236,7 @@ def _backing_additions(direction, old):
 
 def _score_players(director, direction, old, additions=()):
     names = _catalog()[0]
-    named = list(additions) or [p for p in _members(direction) if not _excluded_player(p, direction)]
+    named = list(additions) or [p for p in _members(OMITTED_HITS.sub("", direction)) if not _excluded_player(p, direction)]
     explicit = _explicit(direction)
     solo = not additions and _size_hint(direction) is True
     old_players = [] if not old else [old["leadProgram"]] + [KIT if r["kind"] == "percussion" else r["program"] for r in old["roles"]]
@@ -362,6 +368,35 @@ def _pattern(kind, gesture, meter):
             for i, (t, length) in enumerate(zip(offsets, lengths))]
 
 
+HATS = {42, 44, 46}
+CYMBALS = HATS | {49, 51, 52, 53, 55, 57, 59}
+KIT_COMPONENT = r"\b(?:(?:ride |crash )?cymbals?|hi[ -]?hats?)\b"
+OMITTED_HITS = re.compile(r"\b(?:no|without|omit|skip|exclude|avoid|drop|remove)\s+"
+                          r"(?:(?:all|any|the)\s+)?(cymbals?|hi[ -]?hats?)\b", re.I)
+KICK_SNARE = r"\b(?:kick\s*(?:/|and|&)\s*snare|snare\s*(?:/|and|&)\s*kick)\b"
+KICK_SNARE_ONLY = re.compile(r"(?:\bonly\s+" + KICK_SNARE + "|" + KICK_SNARE + r"\s+only\b)", re.I)
+
+
+def _kit_parts(meter, direction, brief):
+    # A listener's positive or negative kit instruction supersedes a conflicting cue.
+    words = direction if re.search(KIT_COMPONENT + "|" + KICK_SNARE, direction, re.I) else brief
+    pair = re.search(KICK_SNARE, words, re.I)
+    omitted = OMITTED_HITS.search(words)
+    only_pair = KICK_SNARE_ONLY.search(words)
+    excluded = set()
+    if omitted:
+        clause = re.split(r"[.!?;:()]", words[omitted.end():], maxsplit=1)[0]
+        if not re.search(r"\b(?:until|except|during|in the (?:intro|verse|chorus|bridge|outro))\b", clause, re.I):
+            excluded = HATS if omitted[1].lower().startswith("hi") else CYMBALS
+    if only_pair or (pair and excluded == CYMBALS):
+        # This figure writes the named kick and snare on alternating beats.
+        hits = [hit for hit in _pattern("percussion", "backbeat", meter) if hit["pitch"] in (36, 38)]
+        return {"backbeat": hits}
+    patterns = {g: [hit for hit in _pattern("percussion", g, meter) if hit["pitch"] not in excluded]
+                for g in GESTURES["percussion"]}
+    return {g: hits for g, hits in patterns.items() if hits}
+
+
 def _roles(director, cast, meter, direction):
     roles = []
     names = _catalog()[0]
@@ -371,12 +406,18 @@ def _roles(director, cast, meter, direction):
         gestures = {"pulse": r"\b(?:pulse|pulsing|repeated)\b", "walk": r"\bwalking\b",
                     "backbeat": r"\bbackbeats?\b", "ride": r"\bride cymbal\b",
                     "hold": r"\b(?:sustained|held)\b", "offbeat": r"\boffbeats?\b"}
-        gesture = next((g for g, pattern in gestures.items() if g in GESTURES[kind] and re.search(pattern, words)), None)
+        patterns = _kit_parts(meter, direction, director.brief) if kind == "percussion" else None
+        available = {g: label for g, label in GESTURES[kind].items() if patterns is None or g in patterns}
+        if patterns is not None and all(h["pitch"] != 42 for h in patterns["backbeat"]):
+            available["backbeat"] = "kick and snare on alternating beats"
+        gesture = next((g for g, pattern in gestures.items() if g in available and re.search(pattern, words)), None)
+        if len(available) == 1:
+            gesture = next(iter(available))
         if gesture is None:
             gesture = director.choose(f"Choose the repeating {kind} figure for {player}. What does the direction sound like?",
-                                      GESTURES[kind])
+                                      available)
         role = {"kind": kind, "program": None if kind == "percussion" else program,
-                "gesture": gesture, "pattern": _pattern(kind, gesture, meter)}
+                "gesture": gesture, "pattern": patterns[gesture] if patterns is not None else _pattern(kind, gesture, meter)}
         if kind == "percussion":
             if re.search(r"\b(?:tr[ -]?)?808\b", direction, re.I):
                 role["kit"] = 25
@@ -514,7 +555,14 @@ def _tempo(director, analysis, old, instruction):
         return reference
     if isinstance(requested, (int, float)):
         return requested
+    initial = getattr(director, "new_chart_tempo", None)
     named = _single_tempo(director.brief)
+    if not old and initial is not None:
+        kind, anchor = initial
+        if kind == "anchor" and named is not None and named not in references:
+            if abs(named - anchor) == min(abs(named - pace) for pace in LISTENING_PACES):
+                return named
+        return anchor
     if named is not None and named not in references:
         return named
     tempos = {56: "very slow and spacious", 72: "gentle, unhurried", 88: "relaxed walking pace",
@@ -699,6 +747,61 @@ def director_weights():
     return directory, compact, 2 * 1024**3
 
 
+LISTENING_PACES = {
+    56: "spacious, very slow and widely separated pulses",
+    72: "unhurried, gentle and restful pulse",
+    88: "easygoing, measured relaxed motion",
+    100: "moderate, comfortably moving with no strong push",
+    120: "brisk, energetic steady motion",
+    144: "fast, vigorous strong forward drive",
+    172: "very fast, urgent high-intensity motion",
+}
+
+
+def _first_chart_context(director, context):
+    source = context["source"]
+    tempo = source.get("bpm")
+    if "currentScore" in context or context.get("currentTake") != "" or not _bounded_number(tempo, 40, 240):
+        return context, None
+    # Only the listener decides whether a new arrangement should inherit the
+    # upload's estimated pace. A request for a steady beat can have a new tempo.
+    listener = context["listener"]
+    if _tempo_marks(listener):
+        # The existing semantic resolver distinguishes exact targets from references and bounds.
+        return context, None
+    keep_tempo = re.search(r"\b(?:keep|retain|preserve|maintain|match)\s+(?:(?:the|its|this|that|same|"
+                           r"original|current|existing|exact|recording[’']s)\s+){0,4}(?:tempo|bpm|pace|speed|pulse|beat)\b",
+                           listener, re.I)
+    if keep_tempo and not re.search(r"\b(?:not|never|except|instead|faster|slower)\b|n[’']t\b", listener, re.I):
+        return {**context, "performanceTempo": tempo}, ("fixed", tempo)
+    listener_only = json.dumps({"listener": listener}, ensure_ascii=False)
+    goal = director.choose(
+        "Did the listener state a desired pace, feeling or use for this music? If their only request "
+        "is a genre, named players or instrumentation, the conductor is free to set any tempo.",
+        {"arrangement": "just a style, ensemble, instrument or production choice; pace is unconstrained",
+         "purpose": "an expressed listening situation, activity, mood or speed for the resulting music"},
+        context=listener_only)
+    if goal == "arrangement":
+        return context, None
+    # A style or instrument alone leaves every tempo open. The descriptive
+    # labels express energy, independently of any particular genre or activity.
+    options = {"open": "no particular pace expressed; arrange at any suitable tempo", **LISTENING_PACES}
+    if re.search(r"\b(?:keep|retain|preserve|maintain|unchanged|same|original|source|current|"
+                 r"match|relative|faster|slower|quicker|speed up|slow down|as is)\b", listener, re.I):
+        options.update({"preserve": "expressly keep the recording's speed",
+                        "relative": "choose a different speed by comparison to the recording"})
+    pace = director.choose(
+        "What pulse would actually serve this listener? When their activity, energy or pace is specified, "
+        "choose a useful basic pulse. A steady beat can be slow or fast. For a style or instrument alone, "
+        "leave the tempo open.", options, context=listener_only)
+    if pace in ("open", "relative"):
+        return context, None
+    if pace == "preserve":
+        return {**context, "performanceTempo": tempo}, ("fixed", tempo)
+    return {**context, "source": {k: v for k, v in source.items() if k != "bpm"}, "tempoGuide": pace,
+            "pulseInstruction": "Choose a nearby playing tempo in quarter-note BPM and a 2/4, 3/4, 4/4, 5/4 or 6/4 meter."}, ("anchor", pace)
+
+
 class _Director:
     def __init__(self, context):
         import mlx.core as mx
@@ -711,6 +814,7 @@ class _Director:
         mx.set_cache_limit(128 * 1024**2)
         self.model, self.tokenizer = load(str(weights), tokenizer_config={"trust_remote_code": False})
         self.generate, self.mx, self.greedy = generate, mx, make_sampler(temp=0)
+        context, self.new_chart_tempo = _first_chart_context(self, context)
         self.context = json.dumps(context, ensure_ascii=False, separators=(",", ":"))
         self.brief = self.write(
             "Write a practical chart for the requested music. Choose the tempo, meter, feel, instruments and each "
