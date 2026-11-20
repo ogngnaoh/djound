@@ -129,11 +129,11 @@
               <label class="sr" for="request">Describe your edit</label>
               <textarea
                 id="request"
-                maxlength="600"
+                maxlength="1000"
                 rows="2"
                 placeholder="How would you like this to sound?"
               ></textarea>
-              <details id="passage" hidden>
+              <details id="passage">
                 <summary>Edit a time range</summary>
                 <div class="passage-bounds">
                   <label
@@ -153,7 +153,7 @@
                 </div>
               </details>
               <div class="composer-foot">
-                <span id="preview-note"></span
+                <span>Local engine</span
                 ><button type="submit" id="generate" class="make">
                   <i data-icon="sliders"></i> Create edit
                 </button>

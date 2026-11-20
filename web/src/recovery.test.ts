@@ -6,13 +6,13 @@ test("simultaneous tabs cannot overwrite the first pending command", async () =>
   const slot = "concurrent";
   const first = {
     key: "first-key",
-    text: "Original command",
-    expectedSourceRevision: 1,
+    path: "/takes",
+    body: { parentId: "original", prompt: "Play it as a jazz trio" },
   };
   const second = {
     key: "second-key",
-    text: "Competing command",
-    expectedSourceRevision: 1,
+    path: "/takes",
+    body: { parentId: "original", prompt: "Make a study soundtrack" },
   };
   const results = await Promise.allSettled([
     pendingCommand(slot, first),
@@ -40,14 +40,18 @@ test("same-key retry keeps the exact originally stored payload", async () => {
   const slot = "same-key";
   const original = {
     key: "retry-key",
-    text: "Frozen direction",
-    expectedSourceRevision: 4,
+    path: "/takes",
+    body: {
+      parentId: "piano-duet",
+      prompt: "Keep the ending",
+      startSeconds: 10,
+      endSeconds: 20,
+    },
   };
   await pendingCommand(slot, original);
   await pendingCommand(slot, {
     ...original,
-    text: "Later typing",
-    expectedSourceRevision: 5,
+    body: { ...original.body, parentId: "original", prompt: "Later typing" },
   });
   assert.deepEqual(await pendingCommand(slot), original);
   await assert.rejects(pendingCommand(slot, null), /owner key/);
@@ -62,83 +66,27 @@ test("an old response cannot delete a newer pending command", async () => {
   assert.deepEqual(await pendingCommand(slot), { key: "new-key" });
 });
 
-test("uncertain retry owns the same admission slot as creation and preserves its exact request and predecessor", async () => {
-  const slot = "creation-retry-admission";
-  const retry = {
-    kind: "RETRY",
-    version: 1,
-    key: "retry-ack-lost",
-    explorationId: "exploration-a",
-    requestId: "immutable-request",
-    submittedText: "Original direction",
-    body: { expectedPreviousAttemptId: "failed-attempt" },
+test("a clarification answer and a new edit cannot claim the same recording while a request is unconfirmed", async () => {
+  const slot = "studio-edit.recording";
+  const answer = {
+    key: "answer-key",
+    path: "/takes/parent-take/answer",
+    body: { requestId: "answer-key", choice: "keep" },
   };
-  await pendingCommand(slot, retry);
+  await pendingCommand(slot, answer);
   await assert.rejects(
     pendingCommand(slot, {
-      kind: "CREATE",
-      key: "new-request",
-      body: { text: "Later notes" },
+      key: "new-key",
+      path: "/takes",
+      body: {
+        requestId: "new-key",
+        prompt: "Play it on piano",
+        parentId: "original",
+      },
     }),
     PendingCommandConflict,
   );
-  const recovered = await pendingCommand<typeof retry>(slot);
-  assert.deepEqual(recovered, retry);
-  await pendingCommand(slot, {
-    ...retry,
-    body: { expectedPreviousAttemptId: "new-active-attempt" },
-  });
-  assert.deepEqual(await pendingCommand(slot), retry);
-  await pendingCommand(slot, null, "new-request");
-  assert.deepEqual(await pendingCommand(slot), retry);
-  await pendingCommand(slot, null, retry.key);
+  assert.deepEqual(await pendingCommand(slot), answer);
+  await pendingCommand(slot, null, answer.key);
   assert.equal(await pendingCommand(slot), undefined);
-});
-
-import { captureAcknowledgement } from "./remix/commandPolicy.ts";
-test("a captured acknowledgement survives delayed draft save and exact uncertain replay", async () => {
-  let currentMarker = "unknown-at-click";
-  const body = {
-    text: "Frozen words",
-    expectedDraftRevision: 3,
-    ...captureAcknowledgement(currentMarker),
-  };
-  currentMarker = "different-unknown-after-click";
-  const command = {
-    kind: "CREATE",
-    key: "ack-captured",
-    body: { ...body, expectedDraftRevision: 4 },
-  };
-  await pendingCommand("ack-capture", command);
-  const recovered = await pendingCommand<typeof command>("ack-capture");
-  assert.equal(
-    recovered?.body.acknowledgedUnknownAttemptId,
-    "unknown-at-click",
-  );
-  assert.notEqual(recovered?.body.acknowledgedUnknownAttemptId, currentMarker);
-  assert.equal(recovered?.body.expectedDraftRevision, 4);
-  assert.deepEqual(recovered, command);
-});
-test("legacy pending create and retry bodies replay without adding a live acknowledgement", async () => {
-  for (const command of [
-    {
-      key: "legacy-create",
-      body: { text: "Old frozen words", expectedDraftRevision: 1 },
-    },
-    {
-      key: "legacy-retry",
-      kind: "RETRY",
-      body: { expectedPreviousAttemptId: "old-failed-attempt" },
-    },
-  ]) {
-    const slot = command.key;
-    await pendingCommand(slot, command);
-    const recovered = await pendingCommand<typeof command>(slot);
-    assert.deepEqual(recovered, command);
-    assert.equal(
-      Object.hasOwn(recovered!.body, "acknowledgedUnknownAttemptId"),
-      false,
-    );
-  }
-  assert.deepEqual(captureAcknowledgement(), {});
 });

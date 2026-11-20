@@ -364,10 +364,9 @@
 }
 .columns {
   display: grid;
-  grid-template-columns: minmax(155px, 1.6fr) minmax(55px, 0.3fr) minmax(
-      95px,
-      0.55fr
-    ) 24px;
+  grid-template-columns:
+    minmax(155px, 1.6fr) minmax(55px, 0.3fr) minmax(95px, 0.55fr)
+    24px;
   align-items: center;
   gap: 18px;
   padding: 0 10px;

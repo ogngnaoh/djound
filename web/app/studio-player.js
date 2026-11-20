@@ -5,7 +5,6 @@ const play = document.querySelector("#play");
 const elapsed = document.querySelector("#elapsed");
 const durationLabel = document.querySelector("#duration");
 const ruler = document.querySelector("#ruler");
-const waveCache = new Map();
 let peaks,
   generation = 0,
   pendingAt = null,
@@ -16,34 +15,6 @@ const fmt = (value) => {
   const t = Math.max(0, Math.floor(Number(value) || 0));
   return Math.floor(t / 60) + ":" + String(t % 60).padStart(2, "0");
 };
-async function envelope(url) {
-  if (waveCache.has(url)) return waveCache.get(url);
-  const res = await fetch(url);
-  if (!res.ok) throw Error("Audio unavailable");
-  const buffer = await new OfflineAudioContext(2, 1, 22050).decodeAudioData(
-    await res.arrayBuffer(),
-  );
-  const values = new Float32Array(850);
-  const channels = Array.from({ length: buffer.numberOfChannels }, (_, i) =>
-    buffer.getChannelData(i),
-  );
-  const span = buffer.length / values.length;
-  let max = 0;
-  for (let x = 0; x < values.length; x++) {
-    let peak = 0;
-    const end = Math.min(Math.floor((x + 1) * span), buffer.length);
-    const stride = Math.max(1, Math.floor(span / 220));
-    for (let i = Math.floor(x * span); i < end; i += stride) {
-      for (const ch of channels) peak = Math.max(peak, Math.abs(ch[i]));
-    }
-    values[x] = Math.sqrt(peak);
-    max = Math.max(values[x], max);
-  }
-  if (max) for (let i = 0; i < values.length; i++) values[i] /= max;
-  if (waveCache.size >= 8) waveCache.delete(waveCache.keys().next().value);
-  waveCache.set(url, values);
-  return values;
-}
 function paint() {
   const w = canvas.clientWidth,
     h = canvas.clientHeight;
@@ -121,21 +92,15 @@ function seek(t) {
   audio.currentTime = Math.min(audio.duration, Math.max(0, t));
   refresh();
 }
-export function createPlayer({
-  audioUrl,
-  getWaveform = envelope,
-  icon,
-  report,
-}) {
-  async function audition(key, at, autoPlay) {
+export function createPlayer({ getWaveform, icon, report }) {
+  async function audition(audioUrl, at, autoPlay) {
     const token = ++generation;
     pendingAt = at;
     shouldPlay = autoPlay;
     audio.pause();
     peaks = null;
     refresh();
-    const url = new URL(await audioUrl(key), location.href).href;
-    if (token !== generation) return;
+    const url = new URL(audioUrl, location.href).href;
     if (audio.src !== url || audio.error) {
       audio.src = url;
       audio.load();

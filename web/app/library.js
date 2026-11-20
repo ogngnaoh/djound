@@ -1,7 +1,4 @@
-import { live } from "./environment.js";
-const library = live
-  ? await import("./live-library.js")
-  : await import("./data.js");
+import * as library from "./live-library.js";
 
 const byId = (id) => document.getElementById(id);
 const player = byId("record-player");
@@ -100,14 +97,11 @@ function sleeveArt(project) {
   const canvas = document.createElement("canvas");
   canvas.width = canvas.height = 560;
   const c = canvas.getContext("2d");
-  const theme =
-    project.id === "zanarkand"
-      ? ["#ded4b5", "#264347", "#b76140"]
-      : [
-          ["#ede1c2", "#74504b", "#c68755"],
-          ["#d3d4c0", "#414e66", "#b2664c"],
-          ["#e6d5be", "#334c41", "#b17c4e"],
-        ][Math.floor(random() * 3)];
+  const theme = [
+    ["#ede1c2", "#74504b", "#c68755"],
+    ["#d3d4c0", "#414e66", "#b2664c"],
+    ["#e6d5be", "#334c41", "#b17c4e"],
+  ][Math.floor(random() * 3)];
   const [cream, ink, warm] = theme;
   c.fillStyle = cream;
   c.fillRect(0, 0, 560, 560);
@@ -187,9 +181,7 @@ function row(project, art, resume) {
   strong.textContent = project.title;
   title.append(image, strong);
   const count = document.createElement("span");
-  const total =
-    project.editCount ??
-    project.edits.filter((edit) => edit.id !== "original").length;
+  const total = project.editCount;
   count.textContent = String(total);
   count.setAttribute("aria-label", total + (total === 1 ? " edit" : " edits"));
   const when = document.createElement("span");
@@ -231,11 +223,7 @@ async function loadLibrary() {
     const featured =
       projects.find((project) => project.id === recent?.projectId) ||
       projects[0];
-    const position =
-      featured.id === recent?.projectId &&
-      (live || featured.edits.some((edit) => edit.id === recent.editId))
-        ? recent
-        : null;
+    const position = featured.id === recent?.projectId ? recent : null;
     byId("record-list").replaceChildren();
     for (const project of projects) {
       const art = sleeveArt(project);
@@ -257,28 +245,13 @@ async function loadLibrary() {
     }
     byId("record-count").textContent = projects.length;
     byId("feature-title").textContent = featured.title;
-    byId("feature-meta").textContent =
-      featured.id === "zanarkand"
-        ? "Final Fantasy X · Original recording"
-        : "Original recording";
+    byId("feature-meta").textContent = "Original recording";
     byId("feature-open").href = studioUrl(featured.id, false, position);
     byId("load-message").hidden = true;
     document.querySelector(".recordings").hidden = false;
     byId("feature").hidden = false;
     byId("preview-error").textContent = "";
-    try {
-      let url = featured.originalAudioUrl;
-      if (!url) {
-        const original =
-          featured.edits.find((edit) => edit.id === "original") ||
-          featured.edits[0];
-        url = await library.audioUrl(original.audioKey);
-      }
-      if (revision !== loadRevision) return;
-      player.src = url;
-    } catch {
-      byId("preview-error").textContent = "The original audio is unavailable.";
-    }
+    player.src = featured.originalAudioUrl;
   } catch {
     byId("load-message").hidden = false;
     byId("load-message").textContent =
@@ -315,18 +288,23 @@ function setFile(files) {
     byId("import-error").textContent = "Choose one recording at a time.";
     return;
   }
-  if (live && next.size > 64 * 1024 * 1024) {
+  if (next.size > 64 * 1024 * 1024) {
     byId("import-error").textContent =
       "Choose an audio file no larger than 64 MiB.";
     return;
   }
-  const supportedName =
-    /\.(wav|mp3|m4a|ogg|aac|aiff?|alac|flac|opus|oga|webm|caf|mp4)$/i.test(
-      next.name,
-    );
-  if (!next.size || (!next.type.startsWith("audio/") && !supportedName)) {
+  const supportedName = /\.(wav|mp3|m4a)$/i.test(next.name);
+  const supportedType = [
+    "audio/wav",
+    "audio/x-wav",
+    "audio/wave",
+    "audio/mpeg",
+    "audio/mp4",
+    "audio/x-m4a",
+  ].includes(next.type);
+  if (!next.size || (!supportedName && !supportedType)) {
     byId("import-error").textContent = next.size
-      ? "Choose an audio file, such as MP3, WAV or M4A."
+      ? "Choose an MP3, WAV, or M4A recording."
       : "This file is empty. Choose a recording with audio.";
     return;
   }
@@ -417,10 +395,5 @@ window.addEventListener("pagehide", () => {
   player.pause();
   candidate.pause();
 });
-if (live) {
-  byId("file-input").accept = ".wav,.mp3,.m4a,audio/wav,audio/mpeg,audio/mp4";
-  byId("import-description").textContent =
-    "Choose an MP3, WAV, or M4A recording, up to 5 minutes and 64 MiB.";
-}
 if (location.hash === "#import") showDialog();
 void loadLibrary();

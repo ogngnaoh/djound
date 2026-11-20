@@ -1,4 +1,4 @@
-import { requestRendition } from "./live-api.js";
+import { requestRendition } from "../src/renditions/api.ts";
 
 export async function listProjects() {
   const rows = await requestRendition();

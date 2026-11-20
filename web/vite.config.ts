@@ -9,8 +9,7 @@ const recordings = new Map([
   ["/media/edit.wav", path("../fixtures/audio/evening-study-jazz.wav")],
 ]);
 
-// The design preview can contain private listening material. Only these two
-// project-owned recordings are distributed or served by the live application.
+// The listening room uses the same project recordings in development and in the JAR.
 function exampleAudio(): Plugin {
   return {
     name: "djound-example-audio",
@@ -33,7 +32,7 @@ function exampleAudio(): Plugin {
         this.emitFile({
           type: "asset",
           fileName: "licenses/" + notice.split("/")[1],
-          source: readFileSync(path("../prototype/" + notice)),
+          source: readFileSync(path("./app/" + notice)),
         });
       }
       for (const [route, audio] of recordings) {
@@ -48,18 +47,17 @@ function exampleAudio(): Plugin {
 }
 
 export default defineConfig({
-  root: path("../prototype"),
+  root: path("./app"),
   publicDir: false,
   plugins: [exampleAudio()],
-  resolve: { alias: { "@": path("./src") } },
   build: {
     outDir: path("./dist"),
     emptyOutDir: true,
     rollupOptions: {
       input: [
-        path("../prototype/index.html"),
-        path("../prototype/library.html"),
-        path("../prototype/studio.html"),
+        path("./app/index.html"),
+        path("./app/library.html"),
+        path("./app/studio.html"),
       ],
     },
   },
@@ -67,7 +65,7 @@ export default defineConfig({
     host: "127.0.0.1",
     fs: {
       allow: [
-        path("../prototype"),
+        path("./app"),
         path("./src"),
         path("./node_modules"),
         path("../server/src/main/resources/demo"),

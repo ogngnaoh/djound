@@ -1,22 +1,3 @@
-// Versioned local recovery is never authoritative server state.
-export function readLocal<T>(key: string, fallback: T): T {
-  try {
-    const value = JSON.parse(
-      localStorage.getItem("djound.v1." + key) || "null",
-    );
-    return value ?? fallback;
-  } catch {
-    return fallback;
-  }
-}
-export function writeLocal(key: string, value: unknown) {
-  try {
-    localStorage.setItem("djound.v1." + key, JSON.stringify(value));
-  } catch {
-    /* Playback remains usable if local storage is full. */
-  }
-}
-export type PendingUpload = { key: string; file: File; text: string };
 function database(): Promise<IDBDatabase> {
   return new Promise((resolve, reject) => {
     const r = indexedDB.open("djound-upload-v1", 1);
@@ -29,7 +10,7 @@ export class PendingCommandConflict extends Error {
   command: unknown;
   constructor(command: unknown) {
     super(
-      "Another tab has a pending upload. Recover that command before starting another.",
+      "Another tab has a pending edit. Recover it before starting another.",
     );
     this.name = "PendingCommandConflict";
     this.command = command;
@@ -83,13 +64,7 @@ export async function pendingCommand<T extends { key: string }>(
     };
     tx.onabort = () => {
       db.close();
-      reject(tx.error || new Error("Upload recovery transaction aborted."));
+      reject(tx.error || new Error("Edit recovery transaction aborted."));
     };
   });
-}
-export function pendingUpload(
-  value?: PendingUpload | null,
-  expectedKey?: string,
-) {
-  return pendingCommand<PendingUpload>("new", value, expectedKey);
 }

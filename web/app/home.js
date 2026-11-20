@@ -1,10 +1,4 @@
-import { live } from "./environment.js";
-
-const { demoPosition } = live
-  ? await import("./live-demo.js")
-  : {
-      demoPosition: (seconds) => seconds,
-    };
+import { demoPosition } from "./live-demo.js";
 
 const byId = (id) => document.getElementById(id);
 const player = byId("player"),
@@ -14,10 +8,6 @@ const elapsed = byId("elapsed"),
   length = byId("length"),
   error = byId("error");
 const buttons = { original: byId("original"), edit: byId("edit") };
-if (!live) {
-  byId("track-title").textContent = "To Zanarkand";
-  byId("track-credit").textContent = "Final Fantasy X · Nobuo Uematsu";
-}
 const trackTitle = byId("track-title").textContent;
 seek.setAttribute("aria-label", "Seek through " + trackTitle);
 
@@ -64,9 +54,7 @@ function position(time = context?.currentTime ?? 0) {
 
 const studioLink = document.querySelector("[data-studio]");
 function updateStudioLink(t) {
-  const version = live
-    ? "demo=" + selected
-    : "project=zanarkand&edit=" + (selected === "edit" ? "jazz" : "original");
+  const version = "demo=" + selected;
   const at = demoPosition(t, heard, selected, remembered.get(selected));
   studioLink.href = "studio.html?" + version + "&at=" + at.toFixed(2);
 }
@@ -131,7 +119,7 @@ async function load(name) {
   if (buffers.has(name)) return buffers.get(name);
   if (loading.has(name)) return loading.get(name);
   const pending = (async () => {
-    const response = await fetch((live ? "/media/" : "media/") + name + ".wav");
+    const response = await fetch("/media/" + name + ".wav");
     if (!response.ok) throw new Error("Audio unavailable");
     decoder ??= new OfflineContextClass(2, 1, 44100);
     const buffer = await decoder.decodeAudioData(await response.arrayBuffer());
@@ -269,7 +257,7 @@ async function requestPlay(restart = false) {
     const unlock = context.state === "running" ? undefined : context.resume();
     await Promise.all([unlock, load(name)]);
     if (id !== command || !wantsPlay) return;
-    if (live && playing && !restart && heard !== name) {
+    if (playing && !restart && heard !== name) {
       // The new performance can have an intro, a coda and a different tempo.
       // Start its voice at the matching phrase; begin fades out the old voice.
       const t = position();

@@ -1,12 +1,4 @@
-import { queryOptions } from "@tanstack/react-query";
-import type { components } from "../api-schema";
-
-export type Recording = components["schemas"]["RenditionIndex"];
-export type Rendition = components["schemas"]["RenditionTake"];
-export type RecordingProject = components["schemas"]["RenditionProject"];
-export type RenditionCommand = components["schemas"]["RenditionCommand"];
-export type RenditionAnswer = components["schemas"]["RenditionAnswer"];
-export class RenditionError extends Error {
+class RenditionError extends Error {
   constructor(
     public status: number,
     message: string,
@@ -15,7 +7,7 @@ export class RenditionError extends Error {
     super(message);
   }
 }
-export async function renditionRequest(path: string, options?: RequestInit) {
+export async function requestRendition(path = "", options?: RequestInit) {
   const res = await fetch("/api/renditions" + path, options);
   if (!res.ok) {
     const details = await res.json().catch(() => ({}));
@@ -25,23 +17,5 @@ export async function renditionRequest(path: string, options?: RequestInit) {
       details.code,
     );
   }
-  return res;
+  return res.status === 204 ? undefined : res.json();
 }
-export const recordingList = queryOptions({
-  queryKey: ["renditions"],
-  queryFn: async ({ signal }: { signal: AbortSignal }): Promise<Recording[]> =>
-    (await renditionRequest("", { signal })).json(),
-  refetchInterval: ({ state }) =>
-    state.data?.some((recording) => recording.inFlightCount > 0) ? 1500 : false,
-});
-export const trashedRecordings = queryOptions({
-  queryKey: [...recordingList.queryKey, "trash"],
-  queryFn: async ({ signal }): Promise<Recording[]> =>
-    (await renditionRequest("?view=trash", { signal })).json(),
-});
-export const projectKey = (id: string) => ["rendition-project", id];
-export const readProject = async (
-  id: string,
-  signal?: AbortSignal,
-): Promise<RecordingProject> =>
-  (await renditionRequest("/" + id, { signal })).json();

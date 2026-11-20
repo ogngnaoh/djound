@@ -1,8 +1,5 @@
-import { live } from "./environment.js";
+import * as engine from "./live-studio.js";
 import { createPlayer, currentTime } from "./studio-player.js";
-
-const engine = live ? await import("./live-studio.js") : null;
-const preview = live ? null : await import("./data.js");
 
 const $ = (id) => document.getElementById(id);
 const paths = {
@@ -55,8 +52,7 @@ let connection,
   undoAction,
   renameId,
   session,
-  drafts = {},
-  saving = Promise.resolve();
+  drafts = {};
 const item = (id) => project?.edits.find((e) => e.id === id);
 const original = () =>
   project.edits.find((e) => e.id === "original") || project.edits[0];
@@ -65,8 +61,7 @@ const tell = (msg) => {
   $("message").textContent = msg;
 };
 const player = createPlayer({
-  audioUrl: live ? (url) => url : preview.audioUrl,
-  getWaveform: engine?.waveform,
+  getWaveform: engine.waveform,
   icon,
   report: tell,
 });
@@ -117,20 +112,6 @@ function repairSelections() {
     $("job").hidden = true;
   }
 }
-function persist() {
-  saving = saving
-    .then(async () => {
-      await preview.saveProject(project);
-      repairSelections();
-    })
-    .catch((err) => {
-      tell(err?.message || "This change could not be saved in the browser.");
-      throw err;
-    });
-  const operation = saving;
-  saving = saving.catch(() => {});
-  return operation;
-}
 function syncUI() {
   const focused = document.activeElement;
   repairSelections();
@@ -139,7 +120,7 @@ function syncUI() {
   $("heard-name").textContent = item(heard).name;
   $("export-top").disabled = false;
   const favorite = $("favorite");
-  favorite.hidden = live && isOriginal(heard);
+  favorite.hidden = isOriginal(heard);
   favorite.setAttribute("aria-pressed", String(!!item(heard).favorite));
   favorite.setAttribute(
     "aria-label",
@@ -229,29 +210,17 @@ function syncUI() {
     lineage.innerHTML = icon("quote");
     lineage.append(textElement("span", item(heard).prompt));
   }
-  const proposals = live
-    ? isOriginal(parent)
-      ? [
-          "Play it as a jazz trio",
-          "Make a study soundtrack",
-          "Turn it into synth-pop",
-        ]
-      : [
-          "Keep the groove and give the melody to a cello",
-          "Make the ending quieter",
-          "Give it a warmer feel",
-        ]
-    : canJazz()
-      ? [
-          "Play it as a jazz trio",
-          "Soften it for studying",
-          "Give it a warmer tone",
-        ]
-      : [
-          "Soften it for studying",
-          "Give it a warmer tone",
-          "Keep the groove, soften the highs",
-        ];
+  const proposals = isOriginal(parent)
+    ? [
+        "Play it as a jazz trio",
+        "Make a study soundtrack",
+        "Turn it into synth-pop",
+      ]
+    : [
+        "Keep the groove and give the melody to a cello",
+        "Make the ending quieter",
+        "Give it a warmer feel",
+      ];
   $("suggestions").replaceChildren(
     ...proposals.map((p) => {
       const b = textElement("button", p);
@@ -274,14 +243,12 @@ async function listen(id, autoPlay, keepPair = false, startAt) {
   positions.set(heard, currentTime());
   const at =
     startAt ??
-    (live
-      ? engine.correspondingPosition(
-          currentTime(),
-          item(heard)?.songTimeMap,
-          item(id).songTimeMap,
-          positions.get(id),
-        )
-      : currentTime());
+    engine.correspondingPosition(
+      currentTime(),
+      item(heard)?.songTimeMap,
+      item(id).songTimeMap,
+      positions.get(id),
+    );
   if (!keepPair) {
     if (!isOriginal(id)) compareTo = id;
     else if (item(comparisonChild()?.parentId)?.id !== original().id) {
@@ -298,13 +265,11 @@ async function listen(id, autoPlay, keepPair = false, startAt) {
     }
   }
   syncUI();
-  if (live) {
-    const url = new URL(location.href);
-    url.searchParams.set("edit", heard);
-    url.searchParams.delete("resume");
-    url.searchParams.delete("at");
-    history.replaceState({ ...history.state, studioOpened: true }, "", url);
-  }
+  const url = new URL(location.href);
+  url.searchParams.set("edit", heard);
+  url.searchParams.delete("resume");
+  url.searchParams.delete("at");
+  history.replaceState({ ...history.state, studioOpened: true }, "", url);
   storeSession();
 }
 function setDraft(value) {
@@ -323,25 +288,6 @@ function setParent(id) {
   restoreRange();
   syncUI();
   storeSession();
-}
-function canJazz() {
-  return project.id === "zanarkand" && item(parent)?.audioKey === "original";
-}
-function treatment(prompt) {
-  const q = prompt.toLowerCase();
-  if (/\bjazz(?:y)?\b|walking bass|brushed drums/.test(q) && canJazz())
-    return { effect: "jazz", name: "Jazz trio" };
-  if (/study|studying|focus|soften|softer|quiet|gentle|mellow|calm/.test(q))
-    return { effect: "focus", name: "Study mix" };
-  if (/warm|warmth|coz[yi]|deeper tone/.test(q))
-    return { effect: "warm", name: "Warm mix" };
-}
-const wait = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
-function stage(value, detail) {
-  $("progress").value = value;
-  $("progress").textContent = value + "%";
-  $("percentage").textContent = value + "%";
-  $("job-detail").textContent = detail;
 }
 function updateProject(next) {
   const previous = project;
@@ -383,7 +329,6 @@ function updateProject(next) {
 }
 
 function restoreRange() {
-  if (!live) return;
   const range = ranges[parent];
   $("passage").open = !!range?.open;
   $("range-start").value = range?.start ?? "";
@@ -410,7 +355,7 @@ function readRange() {
   return { startSeconds: start.valueAsNumber, endSeconds: end.valueAsNumber };
 }
 function storeRange() {
-  if (!live || !parent) return;
+  if (!parent) return;
   $("range-start").setCustomValidity("");
   $("range-end").setCustomValidity("");
   for (const id of ["range-start", "range-end"])
@@ -558,93 +503,9 @@ async function generate(event) {
   if (busy) return;
   const prompt = $("request").value.trim();
   if (!prompt) return;
-  if (live) {
-    const bounds = readRange();
-    if (!bounds) return;
-    await connection.create({ parentId: parent, prompt, ...bounds });
-    return;
-  }
-  const chosen = treatment(prompt);
-  if (!chosen) {
-    tell(
-      "This preview can play " +
-        (canJazz() ? "a prepared jazz trio, " : "") +
-        "a softer study mix, or a warmer mix. Choose a suggestion to hear an example.",
-    );
-    return;
-  }
-  const source = { ...item(parent) };
-  busy = true;
-  ready = null;
-  tell("");
-  syncSubmit();
-  $("job").hidden = false;
-  $("hear-result").hidden = true;
-  $("progress").hidden = false;
-  $("percentage").hidden = false;
-  $("job-glyph").innerHTML = icon("sliders");
-  $("job-title").textContent = "Generating edit · preview";
-  stage(12, "Preparing " + source.name);
-  try {
-    await wait(440);
-    stage(
-      43,
-      chosen.effect === "jazz"
-        ? "Loading the prepared arrangement"
-        : "Processing the selected performance",
-    );
-    const [audioKey] = await Promise.all([
-      chosen.effect === "jazz"
-        ? Promise.resolve("jazz")
-        : preview.renderPreview(source.audioKey, chosen.effect),
-      wait(740),
-    ]);
-    stage(85, "Preparing playback and saving the edit");
-    await wait(430);
-    let name = chosen.name;
-    let n = 2;
-    while (project.edits.some((e) => e.name === name))
-      name = chosen.name + " " + n++;
-    const edit = {
-      id: crypto.randomUUID(),
-      name,
-      parentId: source.id,
-      parentName: source.name,
-      prompt,
-      favorite: false,
-      audioKey,
-      createdAt: new Date().toISOString(),
-    };
-    project.edits.push(edit);
-    try {
-      await persist();
-    } catch (err) {
-      project.edits = project.edits.filter((e) => e.id !== edit.id);
-      throw err;
-    }
-    ready = edit.id;
-    if (drafts[source.id] === prompt) {
-      delete drafts[source.id];
-      if (parent === source.id) $("request").value = "";
-    }
-    $("job-glyph").innerHTML = icon("check");
-    $("job-title").textContent = name + " is ready";
-    $("job-detail").textContent = "Saved to Edits · from " + source.name;
-    $("progress").hidden = true;
-    $("percentage").hidden = true;
-    $("hear-result").hidden = false;
-    syncUI();
-    storeSession();
-  } catch (err) {
-    $("job-glyph").innerHTML = icon("close");
-    $("job-title").textContent = "Couldn’t finish this edit";
-    $("job-detail").textContent = err?.message || "Try the request again.";
-    $("progress").hidden = true;
-    $("percentage").hidden = true;
-  } finally {
-    busy = false;
-    syncSubmit();
-  }
+  const bounds = readRange();
+  if (!bounds) return;
+  await connection.create({ parentId: parent, prompt, ...bounds });
 }
 function toast(message, undo) {
   $("toast-text").textContent = message;
@@ -655,31 +516,18 @@ function toast(message, undo) {
 async function favorite(id) {
   const edit = item(id);
   if (!edit) return;
-  if (live) {
-    if (!isOriginal(id)) await connection.favorite(edit.favorite ? null : id);
-    return;
-  }
-  edit.favorite = !edit.favorite;
-  await persist();
-  syncUI();
+  if (!isOriginal(id)) await connection.favorite(edit.favorite ? null : id);
 }
 async function exportEdit(id) {
   const edit = item(id);
   if (!edit) return;
   const a = document.createElement("a");
-  if (live) {
-    // Let the browser stream the WAV and use the server's filename, which
-    // includes the edit number and honors any later rename.
-    const response = await fetch(edit.exportUrl, { method: "HEAD" });
-    if (!response.ok) throw new Error("The audio could not be exported.");
-    a.href = edit.exportUrl;
-    a.download = "";
-  } else {
-    a.href = await preview.audioUrl(edit.audioKey);
-    a.download =
-      (project.title + " - " + edit.name).replace(/[\\/:*?"<>|]/g, "-") +
-      ".wav";
-  }
+  // Let the browser stream the WAV and use the server's filename, which
+  // includes the edit number and honors any later rename.
+  const response = await fetch(edit.exportUrl, { method: "HEAD" });
+  if (!response.ok) throw new Error("The audio could not be exported.");
+  a.href = edit.exportUrl;
+  a.download = "";
   document.body.append(a);
   a.click();
   a.remove();
@@ -687,43 +535,11 @@ async function exportEdit(id) {
 }
 async function remove(id) {
   if (isOriginal(id)) return;
-  const index = project.edits.findIndex((e) => e.id === id),
-    deleted = item(id);
+  const deleted = item(id);
   if (!deleted) return;
-  if (live) {
-    await connection.trash(id);
-    toast("Deleted " + deleted.name, async () => {
-      await connection.restore(id);
-      toast("Restored " + deleted.name);
-    });
-    return;
-  }
-  const children = project.edits.filter((e) => e.parentId === id);
-  for (const e of children) e.parentName = deleted.name;
-  const fallback = item(deleted.parentId)?.id || original().id;
-  const wasHeard = heard === id,
-    wasParent = parent === id,
-    at = currentTime(),
-    wasPlaying = player.isPlaying();
-  project.edits.splice(index, 1);
-  if (wasParent) {
-    parent = fallback;
-    $("request").value = drafts[parent] || "";
-  }
-  if (wasHeard) heard = fallback;
-  if (compareTo === id) compareTo = heard;
-  await persist();
-  if (wasHeard) await player.audition(item(heard).audioKey, at, wasPlaying);
-  if (ready === id) {
-    ready = null;
-    $("job").hidden = true;
-  }
-  syncUI();
-  storeSession();
+  await connection.trash(id);
   toast("Deleted " + deleted.name, async () => {
-    project.edits.splice(Math.min(index, project.edits.length), 0, deleted);
-    await persist();
-    syncUI();
+    await connection.restore(id);
     toast("Restored " + deleted.name);
   });
 }
@@ -764,7 +580,7 @@ function openMenu(anchor, id) {
     );
   menu.replaceChildren();
   for (const [glyph, label, action] of actions) {
-    if (live && isOriginal(id) && glyph === "star") continue;
+    if (isOriginal(id) && glyph === "star") continue;
     const b = document.createElement("button");
     b.type = "button";
     b.innerHTML = icon(glyph);
@@ -847,7 +663,7 @@ $("hear-result").addEventListener("click", () => {
       ready,
       true,
       false,
-      engine?.passageAuditionStart(item(ready).appliedStartSeconds),
+      engine.passageAuditionStart(item(ready).appliedStartSeconds),
     );
   }
 });
@@ -869,11 +685,7 @@ $("rename-form").addEventListener("submit", async (event) => {
   const e = item(renameId);
   if (!e) return;
   try {
-    if (live) await connection.rename(e.id, name);
-    else {
-      e.name = name;
-      await persist();
-    }
+    await connection.rename(e.id, name);
     $("rename").close();
     syncUI();
     if (ready === e.id) $("job-title").textContent = name + " is ready";
@@ -911,22 +723,13 @@ window.addEventListener("pagehide", () => {
   }
 });
 try {
-  if (live) {
-    if (params.has("demo")) await engine.resolveDemo(params);
-    if (!params.get("project"))
-      throw new Error("Choose a recording to open in Studio.");
-    connection = engine.connect(params.get("project"), updateProject, showJob);
-    await connection.load();
-    $("preview-note").textContent = "Local engine";
-    $("passage").hidden = false;
-    $("request").maxLength = 1000;
-  } else {
-    $("preview-note").textContent =
-      "Interactive preview · simulated generation";
-    project = await preview.getProject(params.get("project") || "zanarkand");
-  }
+  if (params.has("demo")) await engine.resolveDemo(params);
+  if (!params.get("project"))
+    throw new Error("Choose a recording to open in Studio.");
+  connection = engine.connect(params.get("project"), updateProject, showJob);
+  await connection.load();
   if (!project?.edits.length)
-    throw new Error("This recording isn’t in this browser’s Library.");
+    throw new Error("This recording isn’t in the Library.");
   try {
     session = JSON.parse(sessionStorage.getItem(sessionKey()) || "{}") || {};
   } catch {
@@ -940,15 +743,10 @@ try {
     session.heard &&
     (params.get("resume") === "1" || history.state?.studioOpened);
   const requested = resumeSession ? null : params.get("edit");
-  const canonicalJazz =
-    requested === "jazz" && project.id === "zanarkand" && !item(requested)
-      ? project.edits.find((e) => e.audioKey === "jazz")?.id
-      : null;
   heard =
     item(requested)?.id ||
-    canonicalJazz ||
     (requested ? original().id : item(session.heard)?.id) ||
-    (live && project.edits.find((edit) => edit.favorite)?.id) ||
+    project.edits.find((edit) => edit.favorite)?.id ||
     original().id;
   parent = requested ? heard : item(session.parent)?.id || heard;
   restoreRange();
@@ -965,14 +763,12 @@ try {
     ) || 0;
   history.replaceState({ ...history.state, studioOpened: true }, "");
   await player.audition(item(heard).audioKey, Math.max(0, pos), false);
-  if (live) {
-    try {
-      await connection.resume(session.trackedJob);
-    } catch (err) {
-      tell(err.message || "The previous request could not be recovered.");
-    }
+  try {
+    await connection.resume(session.trackedJob);
+  } catch (err) {
+    tell(err.message || "The previous request could not be recovered.");
   }
-  if (requested && !item(requested) && !canonicalJazz)
+  if (requested && !item(requested))
     tell(
       "That edit was removed. Listening to Original. You can create another edit from it.",
     );

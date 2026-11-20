@@ -1,9 +1,9 @@
-import { requestRendition } from "./live-api.js";
-import { pendingCommand, PendingCommandConflict } from "../web/src/recovery.ts";
+import { requestRendition } from "../src/renditions/api.ts";
+import { pendingCommand, PendingCommandConflict } from "../src/recovery.ts";
 export {
   correspondingPosition,
   passageAuditionStart,
-} from "../web/src/renditions/songTime.ts";
+} from "../src/renditions/songTime.ts";
 
 const segment = encodeURIComponent;
 const json = (method, body) => ({
