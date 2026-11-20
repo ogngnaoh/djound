@@ -34,6 +34,11 @@ export const recordingList = queryOptions({
   refetchInterval: ({ state }) =>
     state.data?.some((recording) => recording.inFlightCount > 0) ? 1500 : false,
 });
+export const trashedRecordings = queryOptions({
+  queryKey: [...recordingList.queryKey, "trash"],
+  queryFn: async ({ signal }): Promise<Recording[]> =>
+    (await renditionRequest("?view=trash", { signal })).json(),
+});
 export const projectKey = (id: string) => ["rendition-project", id];
 export const readProject = async (
   id: string,

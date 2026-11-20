@@ -1,7 +1,7 @@
 import { useMutation, useQueryClient } from "@tanstack/react-query";
-import { Link } from "react-router-dom";
 import { Button } from "../components/ui/button";
 import { projectKey, recordingList, renditionRequest } from "./api";
+import { LibraryReturnLink } from "./libraryNavigation";
 
 export function RestoreRecording({ id }: { id: string }) {
   const client = useQueryClient();
@@ -21,9 +21,7 @@ export function RestoreRecording({ id }: { id: string }) {
       <Button onClick={() => restore.mutate()} disabled={restore.isPending}>
         {restore.isPending ? "Restoring…" : "Restore recording"}
       </Button>
-      <Link className="text-action" to="/">
-        Back to Library
-      </Link>
+      <LibraryReturnLink />
     </section>
   );
 }
