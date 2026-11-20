@@ -7,7 +7,7 @@ from pathlib import Path
 
 import soundfile as sf
 
-from melody_acceptance import evaluate, prepare_fixture, verify
+from melody_acceptance import evaluate, prepare_fixture, trace_options, verify
 
 
 MUSICNET = {
@@ -53,12 +53,12 @@ def main():
     parser.add_argument("labels", type=Path, help="Original performance-aligned MusicNet CSV")
     parser.add_argument("output", type=Path, help="Local parent directory for the reconstructed fixture")
     parser.add_argument("--piece", choices=MUSICNET, default="trout")
-    parser.add_argument("--trace", type=Path, help="A saved source-notes.json from this recording")
+    trace_options(parser)
     args = parser.parse_args()
     name, commitment, instrument, first, last = MUSICNET[args.piece]
     source = partial(read_sources, args.recording, args.labels)
     build = partial(write_musicnet, instrument=instrument, first_beat=first, last_beat=last)
-    return evaluate(prepare_fixture(name, commitment, args.output, source, build), args.trace)
+    return evaluate(prepare_fixture(name, commitment, args.output, source, build), args.trace, transcribe=args.transcribe)
 
 
 if __name__ == "__main__":

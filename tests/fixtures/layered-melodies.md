@@ -33,3 +33,13 @@ A separate check uses recorded gestures from the Schubert stems to make a short 
 ```sh
 .runtime/local-engine/venv/bin/python tests/octave_excursion_acceptance.py /path/to/TRIOS.zip
 ```
+
+## Recheck previously blind recordings
+
+The MusicNet, KRAISLER and TRIOS fixture commands accept `--transcribe` to evaluate the installed worker from the original recording. This option decodes the excerpt to the studio's stereo PCM format and scores the result against the sealed note timings. To check an existing studio take, pass its saved source trace with `--trace`. For example, the following command runs the complete saxophone transcription locally.
+
+```sh
+.runtime/local-engine/venv/bin/python tests/trios_melody_acceptance.py /path/to/TRIOS.zip /tmp/djound-layered --transcribe
+```
+
+[Trout Quintet](musicnet-trout/README.md) · [American Quartet](musicnet-american/README.md) · [Violin and piano](kraisler-dichterliebe/README.md) · [Take Five](trios-take-five/README.md)

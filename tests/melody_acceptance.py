@@ -7,6 +7,7 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import time
 
 
 FIXTURES = Path(__file__).resolve().parent / "fixtures"
@@ -60,11 +61,33 @@ def prepare_fixture(name, commitment, output, read_sources, build):
     return destination
 
 
-def evaluate(fixture, trace):
-    if trace is None:
-        print(fixture / "recording.wav")
-        return 0
+def trace_options(parser):
+    options = parser.add_mutually_exclusive_group()
+    options.add_argument("--trace", type=Path, help="Score an existing worker trace on the upload's clock")
+    options.add_argument("--transcribe", action="store_true", help="Run the installed local transcriber and score its output")
+
+
+def score_trace(fixture, trace):
     result = subprocess.run([sys.executable, fixture / "origin" / "assess.py", trace],
                             text=True, stdout=subprocess.PIPE, check=True)
     sys.stdout.write(result.stdout)
     return 0 if json.loads(result.stdout)["passed_note_gate"] else 1
+
+
+def evaluate(fixture, trace=None, *, transcribe=False):
+    if transcribe:
+        sys.path.insert(0, str(FIXTURES.parents[1] / "local-engine"))
+        from rendition_melody import transcribe_recording
+
+        with tempfile.TemporaryDirectory() as scratch:
+            audio, result = Path(scratch) / "upload.wav", Path(scratch) / "notes.json"
+            subprocess.run(["ffmpeg", "-nostdin", "-loglevel", "error", "-protocol_whitelist", "file,pipe",
+                            "-i", fixture / "recording.wav", "-map", "0:a:0", "-vn", "-ar", "44100", "-ac", "2",
+                            "-c:a", "pcm_s16le", audio], check=True)
+            if not transcribe_recording(audio, result, deadline=time.monotonic() + 240):
+                raise SystemExit("The transcriber could not recover a reliable tune.")
+            return score_trace(fixture, result)
+    if trace is not None:
+        return score_trace(fixture, trace)
+    print(fixture / "recording.wav")
+    return 0

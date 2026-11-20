@@ -14,7 +14,7 @@ from scipy.signal import correlate, find_peaks
 import soundfile as sf
 
 from layered_melody_acceptance import release_members
-from melody_acceptance import evaluate, prepare_fixture
+from melody_acceptance import evaluate, prepare_fixture, trace_options
 
 
 NAME = "trios-take-five"
@@ -84,10 +84,10 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("dataset", type=Path, help="Original TRIOS Dataset.zip or its extracted folder")
     parser.add_argument("output", type=Path, help="Local directory for the reconstructed fixture")
-    parser.add_argument("--trace", type=Path, help="Selected source-notes.json in the uploaded recording's time")
+    trace_options(parser)
     args = parser.parse_args()
     folder = prepare_fixture(NAME, COMMITMENT, args.output, partial(source_files, args.dataset), build)
-    return evaluate(folder, args.trace)
+    return evaluate(folder, args.trace, transcribe=args.transcribe)
 
 
 if __name__ == "__main__":

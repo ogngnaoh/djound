@@ -13,7 +13,7 @@ import pretty_midi
 from scipy.signal import correlate, find_peaks
 import soundfile as sf
 
-from melody_acceptance import evaluate, prepare_fixture
+from melody_acceptance import evaluate, prepare_fixture, trace_options
 
 
 NAME = "kraisler-dichterliebe"
@@ -96,10 +96,10 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("dataset", type=Path, help="Published KRAISLER.zip or its extracted directory")
     parser.add_argument("output", type=Path, help="Local parent directory for the reconstructed fixture")
-    parser.add_argument("--trace", type=Path, help="An actual saved worker melody trace in the source clock")
+    trace_options(parser)
     args = parser.parse_args()
     source = partial(read_sources, args.dataset)
-    return evaluate(prepare_fixture(NAME, COMMITMENT, args.output, source, write_fixture), args.trace)
+    return evaluate(prepare_fixture(NAME, COMMITMENT, args.output, source, write_fixture), args.trace, transcribe=args.transcribe)
 
 
 if __name__ == "__main__":
