@@ -1,0 +1,181 @@
+audio[data-waveform-controls],
+.rendition-studio audio[data-waveform-controls] {
+  display: none;
+}
+
+.recording-waveform {
+  --wave-accent: var(--desk-accent, #d4f690);
+  --wave-ink: var(--desk-ink, #f4f4f5);
+  --wave-muted: var(--desk-muted, #a1a1aa);
+  --wave-line: var(--desk-line, #34363c);
+  color: var(--wave-ink);
+  min-width: 0;
+  border-block: 1px solid var(--wave-line);
+}
+
+.recording-wave-ruler {
+  position: relative;
+  height: 2.35rem;
+  margin: 0.65rem 0.3rem 0;
+  color: var(--wave-muted);
+  font:
+    0.73rem/1.2 ui-monospace,
+    monospace;
+}
+
+.recording-wave-ruler span {
+  position: absolute;
+  top: 0.45rem;
+  transform: translateX(-50%);
+}
+
+.recording-wave-ruler span:first-child {
+  transform: none;
+}
+.recording-wave-ruler span:last-child {
+  transform: translateX(-100%);
+}
+.recording-wave-ruler span::after {
+  content: "";
+  display: block;
+  margin: 0.4rem auto 0;
+  width: 1px;
+  height: 0.38rem;
+  background: var(--wave-line);
+}
+
+.recording-wave-track {
+  position: relative;
+  display: grid;
+  place-items: center;
+  height: clamp(4.2rem, 10vw, 7rem);
+  margin: 0 0.3rem 0.8rem;
+}
+
+.recording-wave-track::before {
+  content: "";
+  position: absolute;
+  inset: 50% 0 auto;
+  border-top: 1px solid var(--wave-line);
+}
+
+.recording-wave-track svg {
+  width: 100%;
+  height: 100%;
+  position: relative;
+}
+.recording-wave-played {
+  stop-color: var(--wave-accent);
+}
+.recording-wave-unplayed {
+  stop-color: var(--wave-muted);
+}
+.recording-wave-placeholder {
+  position: relative;
+  padding: 0.2rem 0.5rem;
+  background: var(--desk-bg, #141519);
+  color: var(--wave-muted);
+  font-size: 0.8rem;
+}
+
+.recording-wave-head {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  border-left: 2px solid var(--wave-ink);
+  transform: translateX(-50%);
+}
+.recording-wave-head::before {
+  position: absolute;
+  content: "";
+  width: 0.46rem;
+  height: 0.46rem;
+  top: 0;
+  left: -1px;
+  transform: translateX(-50%);
+  border-radius: 50%;
+  background: var(--wave-ink);
+}
+.recording-wave-track input {
+  position: absolute;
+  inset: 0;
+  height: 100%;
+  width: 100%;
+  padding: 0;
+  margin: 0;
+  opacity: 0;
+  cursor: pointer;
+  touch-action: pan-y;
+}
+.recording-wave-track:has(input:focus-visible) {
+  outline: 2px solid var(--wave-accent);
+  outline-offset: 4px;
+}
+.recording-wave-controls {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 0.5rem 1rem;
+  padding-block: 0.58rem;
+  border-top: 1px solid var(--wave-line);
+}
+.recording-wave-controls button {
+  min-width: 44px;
+  min-height: 44px;
+}
+.recording-wave-play,
+.recording-wave-volume button {
+  display: inline-grid;
+  place-items: center;
+  border: none;
+  border-radius: 0.55rem;
+  cursor: pointer;
+}
+.recording-wave-play {
+  background: var(--wave-accent);
+  color: #17200b;
+}
+.recording-wave-play svg {
+  width: 1.2rem;
+  height: 1.2rem;
+  fill: currentColor;
+}
+.recording-wave-volume {
+  display: flex;
+  align-items: center;
+  gap: 0.25rem;
+  margin-inline-start: auto;
+}
+.recording-wave-volume button {
+  background: transparent;
+  color: var(--wave-ink);
+}
+.recording-wave-volume svg {
+  width: 1.25rem;
+  height: 1.25rem;
+}
+.recording-wave-volume input {
+  width: clamp(3.25rem, 8vw, 6rem);
+  min-height: 44px;
+  accent-color: var(--wave-accent);
+}
+.recording-wave-controls :focus-visible {
+  outline: 2px solid var(--wave-accent);
+  outline-offset: 2px;
+}
+.recording-wave-time {
+  font:
+    0.86rem/1.4 ui-monospace,
+    monospace;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+@media (forced-colors: active) {
+  .recording-wave-played,
+  .recording-wave-unplayed {
+    stop-color: CanvasText;
+  }
+  .recording-wave-head {
+    border-color: Highlight;
+  }
+}
