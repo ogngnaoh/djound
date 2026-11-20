@@ -107,6 +107,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/renditions/{id}/takes/{takeId}/waveform": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** @description Peak absolute PCM16 amplitude across both channels in equal time intervals of the saved WAV. */
+        get: operations["getRenditionWaveform"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/renditions/{id}/takes/{takeId}/export": {
         parameters: {
             query?: never;
@@ -1494,6 +1511,31 @@ export interface operations {
         responses: {
             200: components["responses"]["RenditionAudio"];
             206: components["responses"]["RenditionAudio"];
+            default: components["responses"]["Problem"];
+        };
+    };
+    getRenditionWaveform: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: components["parameters"]["ResourceId"];
+                /** @description A ready take ID or original. */
+                takeId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Ordered peak values from the start to the end of the recording. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": number[];
+                };
+            };
             default: components["responses"]["Problem"];
         };
     };

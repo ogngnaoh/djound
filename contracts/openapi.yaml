@@ -86,6 +86,18 @@ paths:
         '200': { $ref: '#/components/responses/RenditionAudio' }
         '206': { $ref: '#/components/responses/RenditionAudio' }
         default: { $ref: '#/components/responses/Problem' }
+  /api/renditions/{id}/takes/{takeId}/waveform:
+    get:
+      operationId: getRenditionWaveform
+      description: Peak absolute PCM16 amplitude across both channels in equal time intervals of the saved WAV.
+      parameters:
+        - { $ref: '#/components/parameters/ResourceId' }
+        - { name: takeId, in: path, required: true, schema: { type: string }, description: A ready take ID or original. }
+      responses:
+        '200':
+          description: Ordered peak values from the start to the end of the recording.
+          content: { application/json: { schema: { type: array, minItems: 1, maxItems: 512, items: { type: integer, minimum: 0, maximum: 32768 } } } }
+        default: { $ref: '#/components/responses/Problem' }
   /api/renditions/{id}/takes/{takeId}/export:
     get:
       operationId: exportRenditionAudio

@@ -64,6 +64,15 @@ final class RenditionController {
         return projects.favorite(id, body.takeId());
     }
 
+    @GetMapping("/{id}/takes/{takeId}/waveform")
+    ResponseEntity<int[]> waveform(@PathVariable String id, @PathVariable String takeId)
+            throws IOException {
+        var peaks = RenditionWaveform.peaks(projects.path(id, takeId));
+        return ResponseEntity.ok()
+                .header("Cache-Control", "private, max-age=31536000, immutable")
+                .body(peaks);
+    }
+
     @GetMapping("/{id}/takes/{takeId}/{operation:audio|export}")
     ResponseEntity<FileSystemResource> audio(
             @PathVariable String id, @PathVariable String takeId, @PathVariable String operation)
