@@ -127,7 +127,7 @@ def _marked(text):
     terms = r"\b(?:" + "|".join(re.escape(k) for k in sorted(INSTRUMENT_TERMS, key=len, reverse=True)) + r")\b"
     words = re.sub(terms, lambda m: f" @{INSTRUMENT_TERMS[m.group()]}@ ", words)
     marked = match.sub(mark, words)
-    marked = KICK_SNARE_ONLY.sub(f" @{KIT}@ ", marked)
+    marked = re.sub(KICK_SNARE, f" @{KIT}@ ", OMITTED_PAIR.sub("", marked), flags=re.I)
     marked = DRUMS.sub(f" @{KIT}@ ", marked)
     return re.sub(r"\s+", " ", marked).strip()
 
@@ -202,7 +202,7 @@ def _excluded_player(program, direction):
             target = clause[negative.end():]
             # A ban on the hi-hat leaves the performer available to play other drum keys.
             if program == KIT:
-                target = re.sub(KIT_COMPONENT, "", target, flags=re.I)
+                target = re.sub(KIT_COMPONENT + "|" + KICK_SNARE, "", target, flags=re.I)
             if program in _members(target):
                 return True
     return program != KIT and _excluded(program, direction)
@@ -258,6 +258,14 @@ def _score_players(director, direction, old, additions=()):
         # A fully specified cast does not need the model to supply extra names.
         exact = len(named) >= 2 and not old and not re.search(r"\b(?:add|including|plus others|among others)\b", direction, re.I)
         players = named if exact else list(dict.fromkeys(named + proposed))
+        # A new, open arrangement may have a written backbeat which its second,
+        # abbreviated cast list omitted. Never enlarge a specified ensemble.
+        if (not old and not named and KIT not in players and len(players) < 4
+                and _size_hint(direction) is None and not LIMITED_CAST.search(direction)
+                and not _excluded_player(KIT, direction) and not OMITTED_PAIR.search(direction)
+                and re.search(KICK_SNARE, OMITTED_PAIR.sub("", director.brief), re.I)
+                and not _excluded_player(KIT, director.brief)):
+            players.append(KIT)
     if not players and old_players:
         players = [p for p in dict.fromkeys(old_players) if not _excluded_player(p, direction)]
     melodic = [p for p in players if p != KIT]
@@ -373,28 +381,41 @@ CYMBALS = HATS | {49, 51, 52, 53, 55, 57, 59}
 KIT_COMPONENT = r"\b(?:(?:ride |crash )?cymbals?|hi[ -]?hats?)\b"
 OMITTED_HITS = re.compile(r"\b(?:no|without|omit|skip|exclude|avoid|drop|remove)\s+"
                           r"(?:(?:all|any|the)\s+)?(cymbals?|hi[ -]?hats?)\b", re.I)
-KICK_SNARE = r"\b(?:kick\s*(?:/|and|&)\s*snare|snare\s*(?:/|and|&)\s*kick)\b"
+
+
+def _drum_pair(conjunctions):
+    join = rf"\s*(?:{conjunctions})\s*(?:the |a )?"
+    return rf"\b(?:kick(?: drum)?{join}snare(?: drum)?|snare(?: drum)?{join}kick(?: drum)?)\b"
+
+
+KICK_SNARE = _drum_pair("/|and|&")
+OMITTED_PAIR = re.compile(r"\b(?:no|without|omit|skip|exclude|avoid|drop|remove|(?:do not|don['’]t) (?:use|add|play))\s+"
+                          r"(?:(?:the|a|any)\s+)?" + _drum_pair("/|and|or|&"), re.I)
+LIMITED_CAST = re.compile(r"\b(?:only|alone|solely|exclusively|nothing but|limited to|restricted to|solo|"
+                          r"just (?:one|two|three|four)|(?:\d+|one|two|three|four)[ -](?:piece|players?|instruments?|musicians?|performers?))\b", re.I)
 KICK_SNARE_ONLY = re.compile(r"(?:\bonly\s+" + KICK_SNARE + "|" + KICK_SNARE + r"\s+only\b)", re.I)
 
 
 def _kit_parts(meter, direction, brief):
     # A listener's positive or negative kit instruction supersedes a conflicting cue.
-    words = direction if re.search(KIT_COMPONENT + "|" + KICK_SNARE, direction, re.I) else brief
-    pair = re.search(KICK_SNARE, words, re.I)
+    specified = OMITTED_PAIR.search(direction) or re.search(KIT_COMPONENT + "|" + KICK_SNARE, direction, re.I)
+    words = direction if specified else brief
+    pair = re.search(KICK_SNARE, OMITTED_PAIR.sub("", words), re.I)
     omitted = OMITTED_HITS.search(words)
     only_pair = KICK_SNARE_ONLY.search(words)
-    excluded = set()
+    excluded = {35, 36, 38, 40} if OMITTED_PAIR.search(words) else set()
     if omitted:
         clause = re.split(r"[.!?;:()]", words[omitted.end():], maxsplit=1)[0]
         if not re.search(r"\b(?:until|except|during|in the (?:intro|verse|chorus|bridge|outro))\b", clause, re.I):
-            excluded = HATS if omitted[1].lower().startswith("hi") else CYMBALS
-    if only_pair or (pair and excluded == CYMBALS):
+            excluded.update(HATS if omitted[1].lower().startswith("hi") else CYMBALS)
+    if pair and (only_pair or excluded == CYMBALS):
         # This figure writes the named kick and snare on alternating beats.
         hits = [hit for hit in _pattern("percussion", "backbeat", meter) if hit["pitch"] in (36, 38)]
         return {"backbeat": hits}
     patterns = {g: [hit for hit in _pattern("percussion", g, meter) if hit["pitch"] not in excluded]
                 for g in GESTURES["percussion"]}
-    return {g: hits for g, hits in patterns.items() if hits}
+    return {g: hits for g, hits in patterns.items() if hits and
+            (not pair or {36, 38} <= {hit["pitch"] for hit in hits})}
 
 
 def _roles(director, cast, meter, direction):
@@ -408,7 +429,7 @@ def _roles(director, cast, meter, direction):
                     "hold": r"\b(?:sustained|held)\b", "offbeat": r"\boffbeats?\b"}
         patterns = _kit_parts(meter, direction, director.brief) if kind == "percussion" else None
         available = {g: label for g, label in GESTURES[kind].items() if patterns is None or g in patterns}
-        if patterns is not None and all(h["pitch"] != 42 for h in patterns["backbeat"]):
+        if patterns is not None and "backbeat" in patterns and {h["pitch"] for h in patterns["backbeat"]} == {36, 38}:
             available["backbeat"] = "kick and snare on alternating beats"
         gesture = next((g for g, pattern in gestures.items() if g in available and re.search(pattern, words)), None)
         if len(available) == 1:

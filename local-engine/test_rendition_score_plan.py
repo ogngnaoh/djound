@@ -75,6 +75,45 @@ class ScorePlanTest(unittest.TestCase):
         self.assertEqual(25, score._roles(m, [("percussion", score.KIT)], 4, "A TR-808")[0]["kit"])
         self.assertEqual(40, score._roles(m, [("percussion", score.KIT)], 4, "brushed snare")[0]["kit"])
 
+    def test_a_written_backbeat_and_an_explicit_pair_reach_the_finished_parts(self):
+        cue = ("120 BPM, 4/4, straight eighths. Snare and kick drive the beat; upright bass walks. "
+               "Trumpet plays the hook. Snare hits on 2 and 4.")
+        chart = Musician({"Which listed player": 56}, brief=cue, players="Trumpet, upright bass")
+        for direction in ("Make a steady, energetic beat for a brisk walk.",
+                          "Trumpet, upright bass, kick and snare.",
+                          "Trumpet and upright bass with snare and kick."):
+            with self.subTest(direction=direction):
+                plan = self.plan(direction, chart)
+                drums = next(r for r in plan["roles"] if r["kind"] == "percussion")
+                hits = {(h["beat"], h["pitch"]) for h in drums["pattern"]}
+                self.assertTrue({(0, 36), (1, 38), (2, 36), (3, 38)} <= hits)
+        for direction in ("Only trumpet and bass.", "A woodwind duet.", "Use two musicians.",
+                          "No snare or kick. Give me an energetic beat.", "No drums."):
+            self.assertFalse(any(r["kind"] == "percussion" for r in self.plan(direction, chart)["roles"]))
+        figurative = Musician(brief="Kick off with an energetic beat.", players="Trumpet, upright bass")
+        self.assertFalse(any(r["kind"] == "percussion" for r in self.plan("Give it a kick.", figurative)["roles"]))
+        self.assertEqual([], score._members("Kick off the tune."))
+        self.assertEqual([], score._members("No snare and kick."))
+
+    def test_excluded_hits_and_saved_backing_survive_players_in_the_chart(self):
+        chart = Musician(brief="Snare and kick drive the beat.", players="Trumpet, upright bass")
+        prior = self.plan("Only trumpet and upright bass.", chart)
+        kept = self.plan("Give the melody to a cello. Keep the backing exactly.",
+                         Musician({"What is the listener": "revoice", "Which performer": 42},
+                                  brief=chart.brief, players=chart.players), prior)
+        self.assertEqual(prior["roles"], kept["roles"])
+        # A component ban can leave the drummer playing other pieces of the kit.
+        sparse = self.plan("Trumpet and drums, no snare or kick.", chart)
+        kit = next(r for r in sparse["roles"] if r["kind"] == "percussion")
+        self.assertTrue(kit["pattern"])
+        self.assertFalse({35, 36, 38, 40} & {h["pitch"] for h in kit["pattern"]})
+        add = "Add kick and snare behind the tune. Keep the melody."
+        self.assertEqual([score.KIT], score._backing_additions(add, prior))
+        expanded = self.plan(add, chart, prior)
+        self.assertEqual(prior["leadProgram"], expanded["leadProgram"])
+        self.assertEqual(prior["roles"], expanded["roles"][:-1])
+        self.assertEqual("percussion", expanded["roles"][-1]["kind"])
+
     def test_solo_can_play_its_own_accompaniment(self):
         m = Musician({"How does the melody player": "arpeggio"})
         piano = self.plan("Solo piano", m)
