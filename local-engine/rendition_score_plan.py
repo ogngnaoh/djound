@@ -16,6 +16,7 @@ import sys
 import time
 
 from common import HERE, HOME
+from rendition_score_render import MAX_TRACKS
 from rendition_voicing import _catalog, _excluded, _explicit, _role_names, _size_hint
 
 
@@ -246,12 +247,19 @@ def _score_players(director, direction, old):
         lead = director.choose("Which listed player carries the recognizable main tune?", {p: names[p] for p in melodic[:12]})
     if solo:
         players = [lead]
-    remaining = [p for p in players if p != lead][:3]
+    remaining = [p for p in players if p != lead]
+    if edit not in ("add", "remove", "roles") and len(named) <= 4:
+        remaining = remaining[:3]
     cast = []
     # A pianist, guitarist or other polyphonic lead can accompany their own tune.
     # Avoid manufacturing a second performer in a solo.
     existing = {} if not old or edit not in ("add", "remove") else {r["program"]: r["kind"] for r in old["roles"]}
-    if lead == (old or {}).get("leadProgram") and edit in ("add", "remove"):
+    if old and lead == old["leadProgram"] and edit == "add":
+        # A new performer joins the saved parts in place, including a player's
+        # second part. Only the new instruments need a role from the director.
+        cast = [(r["kind"], KIT if r["kind"] == "percussion" else r["program"]) for r in old["roles"]]
+        remaining = [p for p in remaining if p not in old_players]
+    elif lead == (old or {}).get("leadProgram") and edit == "remove":
         if lead in existing:
             cast.append((existing[lead], lead))
     elif lead in POLYPHONIC:
@@ -260,6 +268,9 @@ def _score_players(director, direction, old):
                                     {"none": "melody only", "chords": "chord voicings", "arpeggio": "broken chords", "pedal": "pedal notes"})
         if self_part != "none":
             cast.append((self_part, lead))
+    if 1 + len(cast) + len(remaining) > MAX_TRACKS:
+        raise ArrangementClarification(f"This take has room for {MAX_TRACKS} parts including the melody. "
+                                       "Choose a part to replace before adding another player.")
     for p in remaining:
         kind = "percussion" if p == KIT else _part_kind(p, _part_words(_marked(direction), p)) or existing.get(p)
         if kind is None:

@@ -16,6 +16,7 @@ RATE = 44100
 MAX_SECONDS = 600
 BLOCK = 32768
 MAX_NOTES = 65536
+MAX_TRACKS = 32
 PEAK = 0.91
 REFLECTIONS = tuple((round(ms * RATE / 1000), gain) for ms, gain in
                     ((19, .09), (34, .067), (53, .053), (89, .038), (133, .024), (211, .014)))
@@ -213,8 +214,8 @@ def render_score(tracks, duration: float, output: Path, *, deadline: float, room
         if master_gain == 0:
             raise ValueError("A saved master gain must be positive.")
     frames = round(duration * RATE)
-    if not frames or not isinstance(tracks, (list, tuple)) or not 1 <= len(tracks) <= 32:
-        raise ValueError("Supply a positive duration and one to 32 scored parts.")
+    if not frames or not isinstance(tracks, (list, tuple)) or not 1 <= len(tracks) <= MAX_TRACKS:
+        raise ValueError(f"Supply a positive duration and one to {MAX_TRACKS} scored parts.")
     if part_gains is not None and len(part_gains) != len(tracks):
         raise ValueError("Supply one saved gain per scored part.")
     gains = ([_number(value, 0, 1, "saved part gain") for value in part_gains]

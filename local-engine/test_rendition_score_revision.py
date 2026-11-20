@@ -180,6 +180,39 @@ class ScoreRevisionTest(unittest.TestCase):
             self.assertIsNone(planner._lead_register(words, lead, director), words)
         director.choose.assert_not_called()
 
+    def test_adding_players_to_a_full_quartet_keeps_its_actual_parts_across_reloads(self):
+        from unittest.mock import Mock
+
+        analysis = analyze(self.notes)
+        def role(kind, program):
+            return {"kind": kind, "program": program, "gesture": "pulse",
+                    "pattern": planner._pattern(kind, "pulse", 4)}
+
+        prior = dict(self.parent, leadProgram=56, roles=[role("bass", 32), role("chords", 0), role("percussion", None)])
+        for instrument, program in (("acoustic guitar", 25), ("electric guitar", 27)):
+            previous, _, _ = arrange(self.notes, analysis, prior)
+            words = f"Keep the trumpet melody exactly. Add {instrument} chords to the accompaniment."
+            director = Mock()
+            director.choose.side_effect = lambda question, options: "add" if "add" in options else next(iter(options))
+            with patch.object(planner, "_changes", return_value={"players"}):
+                revised = planner._arrange(analysis, words, prior, director)
+            tracks, _, _ = arrange(self.notes, analysis, revised)
+            self.assertEqual(previous, tracks[:-1])
+            self.assertEqual(program, tracks[-1]["program"])
+            self.assertTrue(tracks[-1]["notes"])
+            prior = planner._prior({"parentPlan": json.loads(json.dumps(revised))})
+
+        # A player can supply both lead and backing; the limit is on sounding parts.
+        roles = [role("chords", p) for p in range(player.MAX_TRACKS-2)]
+        old = dict(self.parent, leadProgram=0, roles=roles)
+        with patch.object(planner, "_changes", return_value={"players"}):
+            at_limit = planner._arrange(analysis, "Add flute chords.", old, director)
+            self.assertEqual(player.MAX_TRACKS, len(arrange(self.notes, analysis, at_limit)[0]))
+            self.assertLess(len(json.dumps(at_limit).encode()), 48 * 1024)
+            restored = planner._prior({"parentPlan": json.loads(json.dumps(at_limit))})
+            with self.assertRaisesRegex(planner.ArrangementClarification, "Choose a part to replace"):
+                planner._arrange(analysis, "Add violin chords.", restored, director)
+
     def test_upload_octave_uses_the_recording_actually_selected_for_transcription(self):
         from unittest.mock import Mock
 
