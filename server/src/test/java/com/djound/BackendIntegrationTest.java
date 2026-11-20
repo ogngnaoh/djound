@@ -620,7 +620,9 @@ class BackendIntegrationTest {
                 if request['prompt']=='block':
                     report_stage('melody')
                     child=subprocess.Popen([sys.executable,'-c','import time; time.sleep(45)'])
-                    Path(__file__).with_name('worker-child').write_text(str(child.pid))
+                    marker=Path(__file__).with_name('worker-child.tmp')
+                    marker.write_text(str(child.pid))
+                    marker.replace(marker.with_suffix(''))
                     while not Path(__file__).with_name('arrange').exists():
                         time.sleep(.02)
                     report_stage('arranging')
