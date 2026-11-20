@@ -93,7 +93,42 @@ def _schedule(track, frames, path, remaining_notes):
     return len(notes)
 
 
-def _add_part(mix, raw, schedule, frames, level, gain, pan, deadline):
+def _edge_envelopes(track):
+    """Locate opening and closing gain changes on the actual played attacks."""
+    dynamics = track.get("note_dynamics", {})
+    if not isinstance(dynamics, dict) or dynamics.keys() - {"opening", "ending"}:
+        raise ValueError("Choose opening or ending for the lead note dynamics.")
+    if not dynamics:
+        return []
+    # Simultaneous pitches share an attack. A revision can also mute this entire
+    # part for an isolated backing render while retaining its score settings.
+    ends = {}
+    for a, b, _, _ in track["notes"]:
+        start = round(a * RATE)
+        ends[start] = max(ends.get(start, start), round(b * RATE))
+    onsets = sorted(ends)
+    curves = []
+    for edge, settings in dynamics.items():
+        if not isinstance(settings, dict) or settings.keys() != {"count", "db"}:
+            raise ValueError("Lead note dynamics need a note count and a decibel change.")
+        count = _number(settings["count"], 1, 32, "number of lead attacks", True)
+        db = _number(settings["db"], -24, 12, "lead dynamic in decibels")
+        if not onsets or db == 0:
+            continue
+        opening = edge == "opening"
+        selected = onsets[:count] if opening else onsets[-count:]
+        if len(selected) == 1:
+            start = selected[0]
+            # Change a single note without introducing a step at its boundary.
+            end = min(ends[start], onsets[1]) if opening and len(onsets) > 1 else ends[start]
+            ramp = min(round(.008 * RATE), end - start)
+            selected = [end - ramp, end] if opening else [start, start + ramp]
+        levels = [db * i / (len(selected) - 1) for i in range(len(selected))]
+        curves.append((selected, levels[::-1] if opening else levels))
+    return curves
+
+
+def _add_part(mix, raw, schedule, frames, level, gain, pan, deadline, curves):
     import numpy as np
 
     try:
@@ -119,7 +154,14 @@ def _add_part(mix, raw, schedule, frames, level, gain, pan, deadline):
             mix.seek(frame * 8)
             previous = np.frombuffer(mix.read(size), dtype="<f4").reshape(-1, 2)
             mix.seek(frame * 8)
-            mix.write(np.asarray(previous + part * balance, dtype="<f4").tobytes())
+            balanced = part * balance
+            if curves:
+                # Dynamics follow the original player's RMS normalization, so
+                # quieting a few attacks never lifts their unaffected neighbors.
+                sample = np.arange(frame, frame + len(part))
+                db = sum(np.interp(sample, at, levels) for at, levels in curves)
+                balanced *= np.power(10., db / 20).astype(np.float32)[:, None]
+            mix.write(np.asarray(previous + balanced, dtype="<f4").tobytes())
     raw.unlink()
 
 
@@ -252,15 +294,15 @@ def render_score(tracks, duration: float, output: Path, *, deadline: float, room
             level = track.get("level_db")
             if level is not None:
                 level = _number(level, -96, 0, "part RMS level")
-            parts.append((schedule, count, gain, pan, level))
+            parts.append((schedule, count, gain, pan, level, _edge_envelopes(track)))
 
         def perform(bus, indices):
             bus.truncate(0)
             bus.truncate(frames * 8)
             for i in indices:
-                schedule, count, gain, pan, level = parts[i]
+                schedule, count, gain, pan, level, curves = parts[i]
                 if count and gain and gains[i]:
-                    _add_part(bus, work / "part.f32", schedule, frames, level, gain * gains[i], pan, deadline)
+                    _add_part(bus, work / "part.f32", schedule, frames, level, gain * gains[i], pan, deadline, curves)
             return _apply_room(bus, frames, room, deadline)
 
         ready = work / "score.wav"

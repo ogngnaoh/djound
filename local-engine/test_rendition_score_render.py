@@ -35,6 +35,94 @@ class ScoreRendererTest(unittest.TestCase):
         self.assertEqual(events[-1][1:], [0, 60, 0])
         self.assertEqual(events[2][0], events[3][0])
 
+    def test_note_edges_follow_distinct_attacks_including_a_short_or_muted_lead(self):
+        dynamics = {"ending": {"count": 8, "db": -9}, "opening": {"count": 1, "db": 6}}
+        notes = [(.2, .3, 62, 90), (.2, .5, 66, 80), (.7, .8, 64, 75)]
+        ending, opening = player._edge_envelopes({"note_dynamics": dynamics, "notes": notes})
+        a, b = (round(s * player.RATE) for s in (.2, .7))
+        self.assertEqual(ending, ([a, b], [0, -9]))
+        self.assertEqual(opening, ([round(.5 * player.RATE) - round(.008 * player.RATE),
+                                    round(.5 * player.RATE)], [6, 0]))
+        self.assertEqual(player._edge_envelopes({"note_dynamics": dynamics, "notes": []}), [])
+        for invalid in ({"count": 0, "db": -6}, {"count": True, "db": -6}, {"count": 4, "db": float("nan")}):
+            with self.subTest(invalid=invalid), self.assertRaises(ValueError):
+                player._edge_envelopes({"note_dynamics": {"ending": invalid}, "notes": notes})
+
+    def test_arrangement_attaches_note_dynamics_only_to_the_existing_lead(self):
+        from rendition_score import analyze, arrange
+
+        melody = [(.1, .4, 60, .8), (.6, 1., 62, .9), (1.2, 1.8, 64, .8)]
+        source = {"frames": 88200, "melody": melody, "candidates": melody}
+        plan = dict(bpm=90, meter=4, introBars=1, endingBars=1, leadProgram=42, subdivision="straight", themeAnchors=[0],
+                    phrasing="flowing", phraseDynamics="steady", harmony="triads",
+                    roles=[{"kind": "bass", "program": 32,
+                            "pattern": [{"beat": 0, "duration": 1, "degree": 0, "velocity": 70}]}])
+        analysis = analyze(source)
+        tracks, duration, mapping = arrange(source, analysis, plan)
+        settings = {"ending": {"count": 2, "db": -8.}}
+        revised, length, clock = arrange(source, analysis, dict(plan, leadNoteDynamics=settings))
+        self.assertEqual((revised, length, clock), ([dict(tracks[0], note_dynamics=settings), *tracks[1:]],
+                                                    duration, mapping))
+
+    @unittest.skipUnless(player.score_available(), "Install the local score performer")
+    def test_taper_leaves_the_kept_intro_cello_and_backing_unchanged_through_the_outro(self):
+        # With the two players panned apart, the actual saved recording exposes
+        # both the edited cello and the backing that must stay unchanged.
+        lead = dict(program=42, pan=-1., level_db=-21.,
+                    notes=[(.2 + .2*i, .35 + .2*i, 50 + i, 88) for i in range(7)])
+        bass = dict(program=32, pan=1., level_db=-25., notes=[(0., 1.78, 43, 70)])
+        parent = self.work / "parent.wav"
+        receipt = {}
+        player.render_score([lead, bass], 1.84, parent, deadline=self.deadline, room=0., receipt=receipt)
+
+        def replay(name, edited):
+            path = self.work / name
+            player.render_score([edited, bass], 1.84, path, deadline=self.deadline, room=0.,
+                                master_gain=receipt["scoreMasterGain"], part_gains=receipt["scorePartGains"],
+                                protected_parts=[0, 1])
+            return read(path)
+
+        def read(path):
+            with wave.open(str(path)) as wav:
+                return np.frombuffer(wav.readframes(wav.getnframes()), dtype="<i2").reshape(-1, 2)
+
+        before = read(parent)
+        closing = dict(lead, note_dynamics={"ending": {"count": 3, "db": -8}})
+        after = replay("ending.wav", closing)
+        np.testing.assert_array_equal(after[:, 1], before[:, 1])
+        np.testing.assert_array_equal(after[:player.RATE], before[:player.RATE])
+        self.assertGreater(np.max(abs(before[-4000:, 1])), 10)
+        for start, stop, low, high in [(1.07, 1.11, -2.3, -1.), (1.24, 1.28, -5.7, -4.4),
+                                       (1.43, 1.5, -8.03, -7.97)]:
+            window = slice(round(start * player.RATE), round(stop * player.RATE))
+            change_db = 20 * np.log10(np.linalg.norm(after[window, 0].astype(float))
+                                      / np.linalg.norm(before[window, 0].astype(float)))
+            self.assertTrue(low < change_db < high, (start, change_db))
+        neutral = dict(lead, note_dynamics={"opening": {"count": 1, "db": 0}})
+        np.testing.assert_array_equal(replay("neutral.wav", neutral), before)
+        opening = dict(lead, note_dynamics={"opening": {"count": 2, "db": -6}})
+        soft_start = replay("opening.wav", opening)
+        np.testing.assert_array_equal(soft_start[round(.4 * player.RATE):], before[round(.4 * player.RATE):])
+        np.testing.assert_array_equal(soft_start[:, 1], before[:, 1])
+        window = slice(round(.21 * player.RATE), round(.25 * player.RATE))
+        self.assertLess(np.linalg.norm(soft_start[window, 0].astype(float)),
+                        .65 * np.linalg.norm(before[window, 0].astype(float)))
+
+    @unittest.skipUnless(player.score_available(), "Install the local score performer")
+    def test_overloaded_note_boost_cannot_lower_a_protected_solo(self):
+        lead = dict(program=42, level_db=-6, notes=[(.1, .6, 55, 90), (.85, 1.4, 55, 90)])
+        receipt = {}
+        parent = self.work / "solo.wav"
+        player.render_score([lead], 1.84, parent, deadline=self.deadline, room=0, receipt=receipt)
+        old = parent.read_bytes()
+        boosted = dict(lead, note_dynamics={"ending": {"count": 1, "db": 12}})
+        path = self.work / "louder.wav"
+        with self.assertRaises(player.ScoreBalanceConflict):
+            player.render_score([boosted], 1.84, path, deadline=self.deadline, room=0, protected_parts=[0],
+                                master_gain=receipt["scoreMasterGain"], part_gains=receipt["scorePartGains"])
+        self.assertEqual(parent.read_bytes(), old)
+        self.assertFalse(path.exists())
+
     def test_invalid_duration_deadline_or_existing_output(self):
         path = self.work / "previous.wav"
         path.write_bytes(b"keep")

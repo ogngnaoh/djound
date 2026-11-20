@@ -343,6 +343,8 @@ def arrange(notes, analysis, plan):
     timeline = Timeline(analysis, plan)
     palette = _chord_palette(notes, timeline, plan)
     lead = _lead_track(notes, timeline, plan)
+    if plan.get("leadNoteDynamics"):
+        lead["note_dynamics"] = plan["leadNoteDynamics"]
     cue = lead
     if timing := plan.get("backingTiming"):
         cue = _lead_track(notes, timeline, dict(plan, phrasing=timing["phrasing"], leadTouch=timing.get("leadTouch")))
