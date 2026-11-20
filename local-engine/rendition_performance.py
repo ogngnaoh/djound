@@ -41,6 +41,8 @@ def _same_recorded_score(rebuilt, recorded, edited):
 
 def _inherited_score_mix(previous, tracks, seconds, plan, parent_plan, recorded, work, deadline):
     """Use the listener's heard level for each part whose score and room are unchanged."""
+    from rendition_score_plan import balance_marks
+
     if previous is None or plan.get("realization") != "score":
         return {}
     old_tracks, old_seconds, old_map = previous
@@ -52,6 +54,7 @@ def _inherited_score_mix(previous, tracks, seconds, plan, parent_plan, recorded,
     # match each identical part once, including its actual notes, gain and pan.
     matches = {}
     used = set()
+    balance_edit = balance_marks(plan) != balance_marks(parent_plan)
     for new, part in enumerate(tracks):
         for old, old_part in enumerate(old_tracks):
             if (new == 0) != (old == 0) or old in used or not part["notes"]:
@@ -59,8 +62,12 @@ def _inherited_score_mix(previous, tracks, seconds, plan, parent_plan, recorded,
             # A balance or envelope edit is relative to the previously heard level.
             # The original normalization and headroom correction still belong to the part.
             same = part == old_part
-            if not same and (new == 0 or "gain" in part or "gain" in old_part):
-                controls = ("gain", "note_dynamics")
+            if not same and (new == 0 or balance_edit):
+                # A musician's new playing level can change the mix. Only a
+                # written balance edit is explicitly relative to the heard gain.
+                controls = {"note_dynamics"} if new == 0 else set()
+                if balance_edit:
+                    controls.add("gain")
                 same = ({k: v for k, v in part.items() if k not in controls} ==
                         {k: v for k, v in old_part.items() if k not in controls})
             if same:
