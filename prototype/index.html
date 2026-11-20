@@ -36,7 +36,7 @@
               ><a
                 class="edit-link"
                 data-studio
-                href="studio.html?project=zanarkand&amp;edit=original&amp;at=0"
+                href="studio.html?demo=original&amp;at=0"
                 >Try an edit <span aria-hidden="true">→</span></a
               >
             </div>
@@ -45,15 +45,12 @@
         <div class="player-wrap wrap">
           <div id="player" class="player" data-playing="false">
             <div class="track">
-              <button id="play" class="play" aria-label="Play To Zanarkand">
+              <button id="play" class="play" aria-label="Play recording">
                 <span aria-hidden="true"></span>
               </button>
               <div>
-                <h2>To Zanarkand</h2>
-                <p>
-                  Final Fantasy X <span aria-hidden="true">·</span> Nobuo
-                  Uematsu
-                </p>
+                <h2 id="track-title">Evening Study</h2>
+                <p id="track-credit">Djound · Original piano melody</p>
               </div>
             </div>
             <div class="timeline">
@@ -61,12 +58,13 @@
               ><input
                 id="seek"
                 type="range"
-                aria-label="Seek through To Zanarkand"
+                aria-label="Seek through recording"
                 min="0"
-                max="21"
+                max="1"
                 value="0"
                 step="any"
-              /><span id="length">0:20</span>
+                disabled
+              /><span id="length">–:––</span>
             </div>
             <div
               class="versions"

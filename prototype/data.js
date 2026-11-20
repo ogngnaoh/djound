@@ -143,7 +143,7 @@ export async function saveProject(project) {
 
 export async function audioUrl(key) {
   if (Object.hasOwn(assets, key))
-    return new URL("./media/" + assets[key] + ".wav", import.meta.url).href;
+    return new URL("./media/" + assets[key] + ".wav", document.baseURI).href;
   if (objectUrls.has(key)) return objectUrls.get(key);
   const audio = await read("audio", key);
   if (!audio)

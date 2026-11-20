@@ -1,4 +1,7 @@
-import { listProjects, importRecording, audioUrl } from "./data.js";
+import { live } from "./environment.js";
+const library = live
+  ? await import("./live-library.js")
+  : await import("./data.js");
 
 const byId = (id) => document.getElementById(id);
 const player = byId("record-player");
@@ -184,7 +187,9 @@ function row(project, art, resume) {
   strong.textContent = project.title;
   title.append(image, strong);
   const count = document.createElement("span");
-  const total = project.edits.filter((edit) => edit.id !== "original").length;
+  const total =
+    project.editCount ??
+    project.edits.filter((edit) => edit.id !== "original").length;
   count.textContent = String(total);
   count.setAttribute("aria-label", total + (total === 1 ? " edit" : " edits"));
   const when = document.createElement("span");
@@ -208,7 +213,7 @@ function row(project, art, resume) {
 async function loadLibrary() {
   const revision = ++loadRevision;
   try {
-    const projects = (await listProjects()).sort(
+    const projects = (await library.listProjects()).sort(
       (a, b) =>
         new Date(b.updatedAt || b.createdAt) -
         new Date(a.updatedAt || a.createdAt),
@@ -228,7 +233,7 @@ async function loadLibrary() {
       projects[0];
     const position =
       featured.id === recent?.projectId &&
-      featured.edits.some((edit) => edit.id === recent.editId)
+      (live || featured.edits.some((edit) => edit.id === recent.editId))
         ? recent
         : null;
     byId("record-list").replaceChildren();
@@ -261,11 +266,14 @@ async function loadLibrary() {
     document.querySelector(".recordings").hidden = false;
     byId("feature").hidden = false;
     byId("preview-error").textContent = "";
-    const original =
-      featured.edits.find((edit) => edit.id === "original") ||
-      featured.edits[0];
     try {
-      const url = await audioUrl(original.audioKey);
+      let url = featured.originalAudioUrl;
+      if (!url) {
+        const original =
+          featured.edits.find((edit) => edit.id === "original") ||
+          featured.edits[0];
+        url = await library.audioUrl(original.audioKey);
+      }
       if (revision !== loadRevision) return;
       player.src = url;
     } catch {
@@ -307,6 +315,11 @@ function setFile(files) {
     byId("import-error").textContent = "Choose one recording at a time.";
     return;
   }
+  if (live && next.size > 64 * 1024 * 1024) {
+    byId("import-error").textContent =
+      "Choose an audio file no larger than 64 MiB.";
+    return;
+  }
   const supportedName =
     /\.(wav|mp3|m4a|ogg|aac|aiff?|alac|flac|opus|oga|webm|caf|mp4)$/i.test(
       next.name,
@@ -343,7 +356,7 @@ byId("confirm-import").addEventListener("click", async () => {
   candidate.pause();
   byId("import-error").textContent = "";
   try {
-    const project = await importRecording(file);
+    const project = await library.importRecording(file);
     // Returning from the Studio should show the updated Library.
     if (location.hash === "#import")
       history.replaceState(null, "", location.pathname + location.search);
@@ -404,5 +417,10 @@ window.addEventListener("pagehide", () => {
   player.pause();
   candidate.pause();
 });
+if (live) {
+  byId("file-input").accept = ".wav,.mp3,.m4a,audio/wav,audio/mpeg,audio/mp4";
+  byId("import-description").textContent =
+    "Choose an MP3, WAV, or M4A recording, up to 5 minutes and 64 MiB.";
+}
 if (location.hash === "#import") showDialog();
 void loadLibrary();

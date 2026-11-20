@@ -1,3 +1,11 @@
+import { live } from "./environment.js";
+
+const { demoPosition } = live
+  ? await import("./live-demo.js")
+  : {
+      demoPosition: (seconds) => seconds,
+    };
+
 const byId = (id) => document.getElementById(id);
 const player = byId("player"),
   play = byId("play"),
@@ -6,6 +14,12 @@ const elapsed = byId("elapsed"),
   length = byId("length"),
   error = byId("error");
 const buttons = { original: byId("original"), edit: byId("edit") };
+if (!live) {
+  byId("track-title").textContent = "To Zanarkand";
+  byId("track-credit").textContent = "Final Fantasy X · Nobuo Uematsu";
+}
+const trackTitle = byId("track-title").textContent;
+seek.setAttribute("aria-label", "Seek through " + trackTitle);
 
 const AudioContextClass = window.AudioContext || window.webkitAudioContext;
 const OfflineContextClass =
@@ -13,6 +27,7 @@ const OfflineContextClass =
 const buffers = new Map();
 const loading = new Map();
 const voices = new Map();
+const remembered = new Map();
 const crossfadeTime = 0.032;
 let selected =
   buttons.edit.getAttribute("aria-pressed") === "true" ? "edit" : "original";
@@ -40,6 +55,7 @@ function clock(t) {
 }
 
 function position(time = context?.currentTime ?? 0) {
+  if (!duration) return offset;
   return Math.max(
     0,
     Math.min(duration, offset + (playing ? time - startedAt : 0)),
@@ -48,9 +64,11 @@ function position(time = context?.currentTime ?? 0) {
 
 const studioLink = document.querySelector("[data-studio]");
 function updateStudioLink(t) {
-  const edit = selected === "edit" ? "jazz" : "original";
-  studioLink.href =
-    "studio.html?project=zanarkand&edit=" + edit + "&at=" + t.toFixed(2);
+  const version = live
+    ? "demo=" + selected
+    : "project=zanarkand&edit=" + (selected === "edit" ? "jazz" : "original");
+  const at = demoPosition(t, heard, selected, remembered.get(selected));
+  studioLink.href = "studio.html?" + version + "&at=" + at.toFixed(2);
 }
 function showTime() {
   const t = position();
@@ -87,7 +105,7 @@ function reflectState() {
       ? "Pause playback"
       : wantsPlay
         ? "Cancel playback"
-        : "Play To Zanarkand",
+        : "Play " + trackTitle,
   );
   for (const [name, button] of Object.entries(buttons))
     button.setAttribute("aria-pressed", String(name === selected));
@@ -113,13 +131,12 @@ async function load(name) {
   if (buffers.has(name)) return buffers.get(name);
   if (loading.has(name)) return loading.get(name);
   const pending = (async () => {
-    const response = await fetch("media/" + name + ".wav");
+    const response = await fetch((live ? "/media/" : "media/") + name + ".wav");
     if (!response.ok) throw new Error("Audio unavailable");
-    // These two aligned, stereo 44.1 kHz excerpts stay on the same sample clock.
     decoder ??= new OfflineContextClass(2, 1, 44100);
     const buffer = await decoder.decodeAudioData(await response.arrayBuffer());
     buffers.set(name, buffer);
-    if (selected === name) {
+    if (heard === name) {
       duration = buffer.duration;
       showTime();
     }
@@ -252,9 +269,16 @@ async function requestPlay(restart = false) {
     const unlock = context.state === "running" ? undefined : context.resume();
     await Promise.all([unlock, load(name)]);
     if (id !== command || !wantsPlay) return;
-    if (!playing || restart)
-      begin(name, restart || offset >= duration ? 0 : offset);
-    else if (heard !== name) crossfade(name);
+    if (live && playing && !restart && heard !== name) {
+      // The new performance can have an intro, a coda and a different tempo.
+      // Start its voice at the matching phrase; begin fades out the old voice.
+      const t = position();
+      remembered.set(heard, t);
+      begin(name, demoPosition(t, heard, name, remembered.get(name)));
+    } else if (!playing || restart) {
+      const at = demoPosition(offset, heard, name, remembered.get(name));
+      begin(name, restart || at >= buffers.get(name).duration ? 0 : at);
+    } else if (heard !== name) crossfade(name);
   } catch (ex) {
     if (id !== command) return;
     pause();
@@ -275,6 +299,11 @@ function choose(name) {
     void requestPlay();
     return;
   }
+  const t = position();
+  remembered.set(heard, t);
+  offset = demoPosition(t, heard, name, remembered.get(name));
+  heard = name;
+  duration = buffers.get(name)?.duration ?? 0;
   reflectState();
   load(name).catch(() => {
     if (id === command)

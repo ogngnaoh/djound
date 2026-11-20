@@ -8,8 +8,8 @@
     "generate": "openapi-typescript ../contracts/openapi.yaml -o src/api-schema.d.ts",
     "typecheck": "tsc --noEmit",
     "build": "pnpm generate && tsc --noEmit && vite build",
-    "format": "prettier --write src vite.config.ts tsconfig.json package.json index.html pnpm-workspace.yaml",
-    "format:check": "prettier --check src vite.config.ts tsconfig.json package.json index.html pnpm-workspace.yaml",
+    "format": "prettier --write src vite.config.ts tsconfig.json package.json pnpm-workspace.yaml",
+    "format:check": "prettier --check src vite.config.ts tsconfig.json package.json pnpm-workspace.yaml",
     "test": "node --experimental-strip-types --test src/recovery.test.ts src/remix/commandPolicy.test.ts src/remix/localPolicy.test.ts src/studio/service.test.ts src/studio/grooveTiming.test.ts src/renditions/songTime.test.ts",
     "test:entry": "node ../scripts/web-entry-smoke.mjs"
   },
