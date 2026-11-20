@@ -24,6 +24,6 @@ bash scripts/verify-local.sh planner
 
 ## Working on the interface or API
 
-Use `source scripts/env.sh` to select the project toolchain, then `pnpm --dir web dev` to serve the listening room, library and Studio. Start the backend on port 8080 so Vite can proxy API requests. The same pages in `prototype/` can also be served directly for an isolated browser-only design preview.
+Use `source scripts/env.sh` to select the project toolchain, then `pnpm --dir web dev` to serve the listening room, library and Studio. Start the backend on port 8080 so Vite can proxy API requests. The three entry pages and their controllers live in [web/app](web/app).
 
 Edit [the OpenAPI contract](contracts/openapi.yaml) before changing a public API shape, then run `pnpm --dir web generate`. In a pull request, describe the user-visible change and which checks you ran. Include a screenshot for interface changes or a small attributable fixture for an audio regression. Keep recordings from your own library, model downloads and local credentials on your machine.

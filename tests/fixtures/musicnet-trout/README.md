@@ -6,7 +6,7 @@ This check uses two complete phrases from Variation II of Schubert’s *Trout* Q
 
 Use the local engine’s Python 3.11 environment. MusicNet distributes licensed and public-domain performances and supplies its aligned note labels under CC BY 4.0. The project credits this recording to European Archive, the original score MIDI to the transcriber at tirolmusic.blogspot.com, and the alignments to John Thickstun, Zaid Harchaoui and Sham M. Kakade. The dataset authors describe their alignment and its limitations in the release. Obtain the audio and annotations from the release or a byte-identical mirror and keep them in a local working directory. [MusicNet data and license](https://zenodo.org/records/5120004) · [Aligned label license](https://creativecommons.org/licenses/by/4.0/)
 
-From the extension worktree, fetch the two upstream files once. The WAV download is about 78 MB. The runner verifies both source hashes, extracts the original mono frames at 44.1 kHz as PCM16 and reconstructs the note times. Variation II’s viola is program 42 in the MusicNet CSV. The two phrases cover score beats 118.5 through 134.5, with the latter endpoint excluded. The excerpt starts 50 ms before the first note and lasts 15.166 seconds.
+From the repository root, fetch the two upstream files once. The WAV download is about 78 MB. The runner verifies both source hashes, extracts the original mono frames at 44.1 kHz as PCM16 and reconstructs the note times. Variation II’s viola is program 42 in the MusicNet CSV. The two phrases cover score beats 118.5 through 134.5, with the latter endpoint excluded. The excerpt starts 50 ms before the first note and lasts 15.166 seconds.
 
 ```sh
 musicnet_work=$(mktemp -d)
@@ -22,15 +22,3 @@ The command prints the path to the verified WAV. Its SHA-256 is `136453c9d7f4dfc
 ```
 
 The command scores chronological one-to-one notes in their original octave. At least 80% of the references must match within one semitone overall, and at least 70% in each phrase. It prints the full report and exits with status 1 when a threshold is missed. It also reports exact pitches, precision, pitched and rest-frame coverage and sustained switches onto other scored parts. Supporting parts sometimes double the same pitch, so timing and pitch alone cannot identify which performer supplied an event. Listening preference is a separate judgment.
-
-## First blind result
-
-The source, labels and scoring rules were sealed before Djound processed the recording. The SHA-256 of SHA256SUMS is `12ff6b3653171c65cae7f70a653cf60a0d34ff29e36d09fb0db8e1de1733ac3a`. The byte-preserved evaluator’s SHA-256 is `abf555185accdfb54c2092c848efc680fec723cd10d74b86bb3ff18944654da7`.
-
-At commit `4f8f20f72eb3db8484a961be7571606df6d80d71`, take `0f4e7735-20d9-45be-9b6e-bd5d9766b87e` recovered 11 of 30 distinct notes, all exact. The two phrases scored 6/14 and 5/16. Across voiced reference frames, the selected line followed the subject for 38.64% and a competing scored part for 52.24%. All 46 output events reached the rendered piano. The transcription’s candidate pool contained 27/30 target notes. The original report is preserved in first-result.json, SHA-256 `a6c6b10f8dcabb10a8a3193803251234b6246c4fb3c54e57da6054f13c3f7c04`. Subsequent results on this performance measure a known regression.
-
-## Replaying the known failure
-
-At commit `ea894d95f07ea28ed8937262a8e8a12fe984037e`, a new import and the same study request recovered 24 of 30 reference attacks in the correct octave, all exact. The two phrases scored 12/14 and 12/16. The piano played 37 attacks, including 13 unmatched ones. It followed the subject within one semitone for 75.58% of voiced frames and another scored part for 19.32%. It was silent during only 3.6% of the annotated viola rests.
-
-All 24 matched attacks contributed measurable sound to the studio’s exported piano take and its cello revision. The cello carried the line one octave lower, with the same timing, written dynamics and 88 BPM pulse. All 183 backing events and their rendered samples matched. The original blind takes still served their original WAVs.

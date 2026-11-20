@@ -6,15 +6,15 @@ Original Djound code is distributed under the [MIT license](LICENSE). The compon
 
 | Material | Source and terms |
 | --- | --- |
-| Inter font | `@fontsource-variable/inter` 5.3.0, retained in the web dependency lockfile. Copyright 2016 The Inter Project Authors. [SIL Open Font License 1.1](web/public/licenses/inter-OFL.txt), retained from the font package. [Upstream Inter](https://github.com/rsms/inter). |
-| Prototype sample audio | `warm.wav` and `pulse.wav` derive from the authored fixtures listed in [fixtures/manifest.json](fixtures/manifest.json), dedicated under CC0 1.0 in [fixtures/README.md](fixtures/README.md). [Prototype provenance](web/public/audio/PROVENANCE.txt) records the mapping. |
-| Local demo source | `fixtures/audio/local-demo-source.wav` and its byte-identical `web/public/audio/original.wav` copy are a separately authored synthetic melody. [Source metadata](fixtures/audio/local-demo-source.json) identifies the composition and preparation. This original project fixture is provided under the [project MIT license](LICENSE), separately from the three CC0 fixtures above. |
+| Instrument Sans | Copyright 2022 The Instrument Sans Project Authors. [SIL Open Font License 1.1](web/app/fonts/instrument-sans-OFL.txt). |
+| Source Sans 3 | Copyright 2010–2020 Adobe. Reserved Font Name “Source”. [SIL Open Font License 1.1](web/app/fonts/source-sans-3-OFL.txt). |
+| Three.js | Copyright 2010–2025 three.js authors. The homepage uses the bundled WebGL renderer. [MIT license](web/app/vendor/THREE-LICENSE.txt). |
+| Evening Study | Djound’s original melody and its rendered jazz arrangement are distributed under the [project license](LICENSE). See the [recording credits](fixtures/README.md#listening-room-example). |
+| Test recordings | The three synthesized fixture compositions are dedicated to the public domain under CC0. [Provenance and reproduction](fixtures/README.md). |
 
 ## Featured film
 
 *After Hours Piano* features *Aerith’s Theme* from *Final Fantasy VII*, composed by Nobuo Uematsu. The imported recording was rendered from [Donald C C’s piano sequence](https://www.vgmusic.com/file/c5b47a31aab776c16710e59a6fc00b61.html). The Warm Piano Study and After Hours Piano arrangements were performed by Djound's local rendition engine. The project's MIT license excludes the underlying composition and source arrangement. The portfolio film was edited in [Remotion 4.0.545](https://github.com/remotion-dev/remotion/blob/v4.0.545/LICENSE.md).
-
-The earlier Djound demonstration film contains an excerpt of *To Zanarkand* from *Final Fantasy X*, composed by Nobuo Uematsu. The uploaded piano phrase derives from [Nitayahisa’s MIDI sequence](https://www.vgmusic.com/file/49364e75d5e976e0c5e41e6283486541.html). Djound renders the electric-piano arrangement locally. The composition and source arrangement are excluded from the project’s MIT license.
 
 ## Downloaded during local engine setup
 
@@ -39,7 +39,7 @@ The native Metal backend builds the ACE-Step C++ implementation, copyright (c) 2
 
 ## Other software dependencies
 
-JavaScript, Java and Python dependencies retain their upstream licenses. Versions are recorded in the [web manifest](web/package.json), [Java manifest](server/pom.xml) and [engine requirements](local-engine/requirements.lock). The earlier Zanarkand film was rendered with Remotion 4.0.541. [Remotion license](https://github.com/remotion-dev/remotion/blob/v4.0.541/LICENSE.md)
+JavaScript, Java and Python dependencies retain their upstream licenses. Versions are recorded in the [web manifest](web/package.json), [Java manifest](server/pom.xml) and [engine requirements](local-engine/requirements.lock).
 
 ## Finished mix separation
 

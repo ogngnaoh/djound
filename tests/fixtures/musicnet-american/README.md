@@ -6,7 +6,7 @@ MusicNet credits the performance to Musopen and the score MIDI to Masahiro Ishii
 
 ## Repeat the check
 
-Use the local engine's Python environment from the extension worktree. Obtain `1931.wav` and `1931.csv` from MusicNet's `train_data` and `train_labels` directories or from its byte-identical mirror. The runner verifies the two original files, crops frames 2,084,161 through 3,830,237 at 44.1 kHz and reconstructs program 43's score beats [66, 114). It prints the studio upload path. [Individual files in the mirror](https://huggingface.co/datasets/DreamyWanderer/MusicNet/tree/main/data/train)
+Use the local engine's Python environment from the repository root. Obtain `1931.wav` and `1931.csv` from MusicNet's `train_data` and `train_labels` directories or from its byte-identical mirror. The runner verifies the two original files, crops frames 2,084,161 through 3,830,237 at 44.1 kHz and reconstructs program 43's score beats [66, 114). It prints the studio upload path. [Individual files in the mirror](https://huggingface.co/datasets/DreamyWanderer/MusicNet/tree/main/data/train)
 
 ```sh
 musicnet_work=$(mktemp -d)
@@ -22,9 +22,3 @@ Upload the printed WAV and ask “Turn this into music for a brisk morning walk.
 ```
 
 The command prints a JSON report and exits with status 1 when a threshold is missed. Each pitch must match in the correct octave within one semitone. Each output attack can match one reference attack. Required recall is 80% overall and 70% in each phrase. MusicNet omits some pizzicato parts, so only a subset of errors can be attributed to competing voices.
-
-## First blind result
-
-At commit `ea894d95f07ea28ed8937262a8e8a12fe984037e`, first take `dd9c3fb2-2a5e-4f23-ac5c-6050ec6b0e10` recovered **26/49 distinct attacks**, all at their exact pitches. Phrase one scored 18/29 and phrase two 8/20. The line followed the melody for 77.05% of voiced time. Five pairs of written repeated notes merged and there were eight sustained switches to a competing part or a different octave. The guitar played 62 events at 120 BPM. In a follow-up asking a cello to take the tune, all 26 matched notes contributed audible sound in both exports. The cello played one octave below the guitar and all 199 backing events rendered to the same samples.
-
-The registered `SHA256SUMS` digest was `1cdcfb61f02c85c20bcd8a09b89a9bdb3c0128ae1a36249cf2290ed8a34aaa56`. The excerpt digest is `11e2220218e8894119a314c67404cb0e6c324b79999b7ecdbcf5233e0ad8cc79` and the evaluator digest is `ac630bc15e67e4a46a7b44da47beda5254ea61b821ae3fa915e6ba1928dbecc4`. The sealed scoring rules, published first report and original-source digests are in this directory.

@@ -6,7 +6,7 @@ Hyemi Kim, Jiyun Park, Sein Lee, Taegyun Kwon, Sunjae Won and Juhan Nam publishe
 
 ## Repeat the check
 
-Download `KRAISLER.zip` from the research release. The archive is approximately 1.6 GB. The runner accepts the ZIP or its extracted directory. It verifies six source files, reconstructs frames 624,015 through 1,640,519 of `11_mix_dry.wav` as the original PCM16 and compares the violin pitches with the isolated recording. Run from the extension worktree. [Download the dataset](https://zenodo.org/records/21082251)
+Download `KRAISLER.zip` from the research release. The archive is approximately 1.6 GB. The runner accepts the ZIP or its extracted directory. It verifies six source files, reconstructs frames 624,015 through 1,640,519 of `11_mix_dry.wav` as the original PCM16 and compares the violin pitches with the isolated recording. Run from the repository root. [Download the dataset](https://zenodo.org/records/21082251)
 
 ```sh
 kraisler_work=$(mktemp -d)
@@ -20,9 +20,3 @@ Upload the WAV at the printed path and ask “Make this a calm instrumental for 
 ```
 
 The command prints JSON and exits with status 1 when a threshold is missed. Chronological one-to-one matching requires the correct octave within one semitone, at least 80% of distinct source attacks overall and at least 70% in every line. Exact pitches, voiced time, wrong octaves and competition from the piano are reported separately.
-
-## First blind result
-
-At commit `ea894d95f07ea28ed8937262a8e8a12fe984037e`, first take `ca49ef2d-fe71-45ec-8f7c-59b24ca95b6a` recovered **24/31 distinct attacks**, all at their exact pitches. The lines scored 7/8, 6/9, 5/7 and 6/7. The engine missed both the overall gate and the second-line gate. The selected melody followed 78.26% of voiced time, merged two repeated-note pairs, and spent a continuous second in the wrong octave. The new piano performance played 28 attacks at 112 BPM. All 24 matched notes contributed audible sound to both the exported piano and a follow-up cello performance. The cello played two octaves below the piano and all 195 backing events rendered to the same samples.
-
-The registered `SHA256SUMS` digest was `5782e269dd48d2ba22abc4def4bbc7d539ecf2a9f3706337cfbdc09e1b6b3f0f`. The excerpt digest is `71b4eafb4aeeb76cafb7fc55358f9bd7b8280d5366ce68def5e7db2930b702e1` and the evaluator digest is `5fa390eb85feb92f92f0af53704723ddf33bf1f5f3f454d405c69636cf064477`. This directory retains the original report, registered criteria and digests.

@@ -7,9 +7,9 @@
 /guide/*
 !/guide/running.md
 !/guide/architecture.md
-!/guide/product.md
 /local-engine/evidence/
-/resume-evidence/.local/
+/resume-evidence/
+/prototype/
 /local-engine/QUALIFICATION.md
 /local-engine/qualification_cases.json
 /local-engine/qualify_planner.py
@@ -41,21 +41,12 @@
 !/fixtures/audio/sample-pulse.wav
 !/fixtures/audio/sample-warm.wav
 !/tests/fixtures/controlled-vocal-and-band.flac
-!/web/public/audio/original.wav
-!/web/public/audio/pulse.wav
-!/web/public/audio/warm.wav
-
-# Finished portfolio media and the two app screenshots can ship with the README.
+# Only the finished portfolio film and its README artwork ship.
 /showcase/*
 !/showcase/release/
-!/showcase/local-studio/
 /showcase/release/*
-!/showcase/release/zanarkand.mp4
 !/showcase/release/after-hours-piano.mp4
 !/showcase/release/after-hours-piano.jpg
-/showcase/local-studio/*
-!/showcase/local-studio/studio.png
-!/showcase/local-studio/library.png
 
 # Machine configuration, credentials and private backups
 .DS_Store

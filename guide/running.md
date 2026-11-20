@@ -1,10 +1,10 @@
 # Running Djound
 
-Follow the [quick start](../README.md#run-it-locally) on an Apple Silicon Mac. Bootstrap installs the pinned Java and Node toolchains inside the checkout, installs web dependencies, prepares Maven and pulls the PostgreSQL image.
+Start on an Apple Silicon Mac with Git, Apple Command Line Tools, CMake, Python 3.11, uv, FFmpeg, pnpm 11.5.0 and Docker with Compose. Start Docker, then follow the [quick start](../README.md#run-it-locally). Bootstrap installs the pinned Java and Node toolchains inside the checkout, installs web dependencies, prepares Maven and pulls the PostgreSQL image.
 
 ## Generate song renditions
 
-Install Git, Apple Command Line Tools, CMake, Python 3.11, uv and FFmpeg. From the Djound checkout, run setup once with an internet connection.
+From the Djound checkout, run setup once with an internet connection.
 
 ```sh
 bash local-engine/renditions.sh setup
@@ -28,7 +28,7 @@ The default `DJOUND_RENDITION_BACKEND=auto` uses an explicit `DJOUND_ACE_URL` if
 
 ### Optional ACE-Step Python service
 
-The full-precision upstream service needs substantially more memory than the native backend. On a 16 GB M2 Pro, system-wide swap reached about 16 GB while the Python service was initializing. We stopped that run before generation and completed the same workflow with the native backend. For a larger host, the following installs the pinned Python runtime and upstream 10.1 GB checkpoint snapshot, then starts the service in the foreground. Its 1.7B music language model is included in the snapshot and remains unloaded. [Upstream source](https://github.com/ace-step/ACE-Step-1.5/tree/ca1e85fe9430179831e6bc6be790c332190a3866) · [Checkpoint snapshot](https://huggingface.co/ACE-Step/Ace-Step1.5/tree/19671f406d603126926c1b7e2adc169acbcade22)
+The full-precision upstream service needs substantially more memory than the native backend. On a larger host, the following installs the pinned Python runtime and upstream 10.1 GB checkpoint snapshot, then starts the service in the foreground. Its 1.7B music language model is included in the snapshot and remains unloaded. [Upstream source](https://github.com/ace-step/ACE-Step-1.5/tree/ca1e85fe9430179831e6bc6be790c332190a3866) · [Checkpoint snapshot](https://huggingface.co/ACE-Step/Ace-Step1.5/tree/19671f406d603126926c1b7e2adc169acbcade22)
 
 ```sh
 bash local-engine/renditions.sh setup-http
@@ -63,4 +63,4 @@ If the worker reports memory pressure, close other large workloads before trying
 
 The default media directory is `.runtime/data`. PostgreSQL runs on loopback port 55432 and uses the `djound_postgres` Compose volume. Back up the database and media directory together with the app stopped. Keep the installation identity with its media. Starting the app with an unrelated database and media directory will fail the pairing check.
 
-To use a separate installation, set `DJOUND_DB_URL`, `DJOUND_DATA_DIR` and `DJOUND_PORT` before launching. Stop the server with Control C. Use `docker compose stop db` to stop PostgreSQL while retaining the volume.
+For an independent Compose installation, set a new `COMPOSE_PROJECT_NAME`, a free `DJOUND_DB_PORT`, a separate `DJOUND_DATA_DIR` and a free `DJOUND_PORT` before launching. The Compose project name gives it a separate PostgreSQL volume. Use `DJOUND_DB_URL` to select a specific database. Stop the server with Control C. Use `docker compose stop db` to stop PostgreSQL while retaining the volume.
