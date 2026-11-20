@@ -7,7 +7,7 @@ import wave
 import rendition_audio as audio
 from rendition_melody import build_melody_guide, guide_available
 from rendition_progress import report_stage
-from rendition_score_form import cut_wav, omit_edge, score_window
+from rendition_score_form import cut_wav, export_window, measure_outro, omit_edge, render_saved, restore_edge, score_window
 
 
 def _frames(path):
@@ -90,9 +90,8 @@ def _inherited_score_mix(previous, tracks, seconds, plan, parent_plan, recorded,
                 render_score(old_tracks, old_seconds, old_wav, deadline=deadline, room=room,
                              master_gain=master, receipt=recovered)
                 if parent_plan.get("omittedForm"):
-                    left, right, _ = score_window(parent_plan, old_map)
                     trimmed = work / "earlier-heard.wav"
-                    cut_wav(old_wav, trimmed, left, right)
+                    export_window(old_wav, trimmed, parent_plan, old_tracks, old_seconds, old_map, deadline)
                     trimmed.replace(old_wav)
                 if not _same_recorded_score(old_wav, recorded, parent_plan.get("retainedPassageFrames", [])):
                     return {}
@@ -154,7 +153,7 @@ def _score_caption(plan, tracks):
 
 def perform_score(parent, original, destination, work, *, direction, caption, parent_caption,
                   parent_plan, parent_map, recover_original, scored_ancestor=None, passage_policy=None,
-                  parent_score_input=None, lead_note_edit=None, omit_score_edge=None):
+                  parent_score_input=None, lead_note_edit=None, omit_score_edge=None, restore_score_edge=None):
     """Let a local arranger revise the playing decisions and render them against the source phrases."""
     from rendition_melody import MELODY_TRACE_VERSION, transcribe_recording
     from rendition_score import Timeline, analyze, arrange
@@ -207,19 +206,28 @@ def perform_score(parent, original, destination, work, *, direction, caption, pa
     if parent_plan:
         analysis["parentPlan"] = parent_plan
     report_stage("arranging")
-    if omit_score_edge:
+    if omit_score_edge or restore_score_edge:
         # The removed bars were authored around the recorded tune. Crop the heard
         # performance; rebuilding a shorter chart would renormalize all its parts.
-        plan = omit_edge(parent_plan, omit_score_edge)
-        tracks, _, full_map = arrange(notes, analysis, parent_plan)
+        plan = restore_edge(parent_plan, restore_score_edge) if restore_score_edge else omit_edge(parent_plan, omit_score_edge)
+        tracks, seconds, full_map = arrange(notes, analysis, parent_plan)
+        measure_outro(plan, tracks, full_map)
         before, _, old_map = score_window(parent_plan, full_map)
         start, stop, new_map = score_window(plan, full_map)
         if _frames(parent) != old_map[-1][0]:
             return {"state": "clarify", "error": "The saved performance and its written bars have different durations."}
         from rendition_timeline import relative_map
-        cut_wav(parent, destination, start - before, stop - before)
+        if restore_score_edge:
+            complete = work / "full-form.wav"
+            render_saved(tracks, seconds, plan, complete, deadline)
+            export_window(complete, destination, plan, tracks, seconds, full_map, deadline)
+        elif omit_score_edge == "outro":
+            export_window(parent, destination, plan, tracks, seconds, full_map, deadline, clock_offset=before)
+        else:
+            cut_wav(parent, destination, start - before, stop - before)
+        detail = f"The saved {restore_score_edge} is restored." if restore_score_edge else f"The added {omit_score_edge} is removed."
         return {"parentTimeMap": relative_map(new_map, old_map), "arrangementPlan": plan,
-                "caption": _score_caption(plan, tracks) + f" The added {omit_score_edge} is removed.",
+                "caption": _score_caption(plan, tracks) + " " + detail,
                 "inheritedScoreInput": inherit_input}
     plan = (apply_lead_note_edit(parent_plan, lead_note_edit) if lead_note_edit else
             plan_arrangement(analysis, direction, parent_caption, deadline=deadline))
@@ -233,6 +241,7 @@ def perform_score(parent, original, destination, work, *, direction, caption, pa
         def repeats_parent(candidate, performed):
             return (candidate.get("realization") == "score" and
                     candidate.get("room", .44) == parent_plan.get("room", .44) and
+                    candidate.get("omittedForm", []) == parent_plan.get("omittedForm", []) and
                     performed[:2] == previous_score[:2])
 
         if repeats_parent(plan, performance):
@@ -252,8 +261,9 @@ def perform_score(parent, original, destination, work, *, direction, caption, pa
     plan["melodyTraceVersion"] = trace_version
     if "melodySource" in notes:
         plan["melodyTraceSource"] = notes["melodySource"]
-    tracks, seconds, mapping = performance
-    start, stop, mapping = score_window(plan, mapping)
+    tracks, seconds, full_map = performance
+    measure_outro(plan, tracks, full_map)
+    start, stop, mapping = score_window(plan, full_map)
     if scored_ancestor:
         frames = scored_ancestor["frames"]
         if (mapping != score_window(parent_plan, Timeline(analysis, parent_plan).frames())[2] or stop - start != frames
@@ -281,9 +291,9 @@ def perform_score(parent, original, destination, work, *, direction, caption, pa
     except ScoreBalanceConflict as issue:
         return {"state": "clarify", "error": f"{issue} Try changing when the part comes in, "
                 "or choose Original and ask for a fresh arrangement with a new balance."}
-    if start or stop != round(seconds * audio.RATE):
+    if plan.get("omittedForm"):
         heard = work / "heard-score.wav"
-        cut_wav(score, heard, start, stop)
+        export_window(score, heard, plan, tracks, seconds, full_map, deadline)
         heard.replace(score)
         seconds = (stop - start) / audio.RATE
     if scored_ancestor:

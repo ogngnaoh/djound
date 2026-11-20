@@ -350,11 +350,13 @@ class ScoreRendererTest(unittest.TestCase):
                 def transcribe(source, dest, **kwargs):
                     dest.write_text("{}")
                     return True
+                frames = round(1.85 * player.RATE)
+                clock = [[0, 0], [frames, frames]]
                 with (patch("rendition_performance.guide_available", return_value=True),
                       patch("rendition_melody.transcribe_recording", side_effect=transcribe),
                       patch("rendition_score.analyze", return_value={}),
                       patch("rendition_score_plan.plan_arrangement", return_value=dict(plan)),
-                      patch("rendition_score.arrange", side_effect=[(original,1.85,[]), (edited,1.85,[])])):
+                      patch("rendition_score.arrange", side_effect=[(original,1.85,clock), (edited,1.85,clock)])):
                     result = perform_score(selected, self.work/"upload.wav", output, self.work,
                                            direction="Change the accompaniment and keep the lead.",
                                            caption="", parent_caption="", parent_plan=plan,

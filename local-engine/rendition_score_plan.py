@@ -993,10 +993,18 @@ def _arrange(analysis, direction, old, director, *, tempo_instruction=None):
         plan["room"] = director.choose("What sense of acoustic space suits the performance?", ROOMS)
     if "form" in changes:
         plan.pop("keepEmptyBars", None)
-        plan["introBars"] = director.choose("How many bars of introduction before the theme?",
-                                            {0: "start immediately with the tune", 1: "short one-bar pickup", 2: "two-bar introduction"})
-        plan["endingBars"] = director.choose("How many additional bars after the last source phrase?",
-                                              {0: "close on the final phrase", 1: "one-bar cadence", 2: "two-bar coda"})
+        rewritten = set()
+        if plan.get("omittedForm"):
+            from rendition_score_form import newly_written_edges, restore_edge
+            rewritten = newly_written_edges(direction)
+            for edge in rewritten.intersection(plan["omittedForm"]):
+                plan = restore_edge(plan, edge)
+        if not rewritten or "intro" in rewritten:
+            plan["introBars"] = director.choose("How many bars of introduction before the theme?",
+                                                {0: "start immediately with the tune", 1: "short one-bar pickup", 2: "two-bar introduction"})
+        if not rewritten or "outro" in rewritten:
+            plan["endingBars"] = director.choose("How many additional bars after the last source phrase?",
+                                                  {0: "close on the final phrase", 1: "one-bar cadence", 2: "two-bar coda"})
     revoice = (not additions and changes == {"players"} and len(_members(direction)) == 1
                and re.search(r"\b(?:lead|tune|melody|hook|theme)\b", direction, re.I))
     if register and old and len(assigned) == 1 and changes in ({"players"}, {"register"}):

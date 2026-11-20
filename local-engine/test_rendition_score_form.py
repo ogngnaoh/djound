@@ -3,12 +3,12 @@ from pathlib import Path
 import tempfile
 import time
 import unittest
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 import wave
 
 import rendition_score_plan as planner
 from rendition_score import analyze, arrange
-from rendition_score_form import cut_wav, omit_edge, requested_cut, score_window
+from rendition_score_form import cut_wav, export_window, measure_outro, omit_edge, render_saved, requested_cut, requested_restore, score_window
 from rendition_score_render import RATE, render_score, score_available
 from rendition_performance import perform_score
 from rendition_worker import plan_take
@@ -43,6 +43,49 @@ class ScoreFormTest(unittest.TestCase):
             omit_edge(omit_edge(self.plan, "outro"), "outro")
         with self.assertRaises(planner.ArrangementClarification):
             omit_edge(dict(self.plan, introBars=0), "intro")
+        both = dict(self.plan, omittedForm=["intro", "outro"])
+        self.assertEqual("outro", requested_restore("Can we bring the original outro back?", both))
+        self.assertEqual("intro", requested_restore("Restore the intro.", both))
+        self.assertEqual("outro", requested_restore("Bring the coda back, but leave the intro out.", both))
+        self.assertIsNone(requested_restore("Bring the intro back and add a piano.", both))
+        self.assertIsNone(requested_restore("Restore the intro.", self.plan))
+        director = Mock(brief="A new one-bar closing cadence.")
+        director.choose.return_value = 1
+        with patch.object(planner, "_changes", return_value={"form"}):
+            rewritten = planner._arrange({}, "Write me a new one-bar coda but leave the intro out.", both, director)
+        self.assertEqual((1, 1, ["intro"]), (rewritten["introBars"], rewritten["endingBars"], rewritten["omittedForm"]))
+        director.choose.assert_called_once()
+
+    @unittest.skipUnless(score_available(), "Run local score setup for the native performer")
+    def test_releasing_the_last_lead_excludes_new_band_attacks_and_keeps_historical_cuts(self):
+        # This note crosses the start of the coda; two new drum strokes would
+        # enter if the entire mix simply played on until the note-off.
+        tracks = [{"program": 66, "level_db": -18., "notes": [(.1, 1.55, 69, 82)]},
+                  {"program": 0, "percussion": True, "level_db": -19.,
+                   "notes": [(.1, .2, 37, 70), (1., 1.1, 37, 70), (1.6, 1.7, 38, 88)]}]
+        duration = 2.
+        mapping = [[0, 0], [RATE, RATE], [2*RATE, RATE]]
+        deadline = time.monotonic() + 30
+        with tempfile.TemporaryDirectory() as temp:
+            home = Path(temp)
+            full, lead = home / "band.wav", home / "sax.wav"
+            render_score(tracks, duration, full, room=self.plan["room"], receipt=self.plan, deadline=deadline)
+            render_saved(tracks, duration, self.plan, lead, deadline, lead_only=True)
+            new = omit_edge(self.plan, "outro")
+            measure_outro(new, tracks, mapping)
+            heard = home / "new.wav"
+            export_window(full, heard, new, tracks, duration, mapping, deadline)
+            self.assertEqual(2*RATE, len(pcm(heard))//4)
+            self.assertEqual(pcm(lead)[RATE*4:], pcm(heard)[RATE*4:])
+            self.assertNotEqual(pcm(full)[RATE*4:], pcm(heard)[RATE*4:])
+            self.assertEqual(pcm(full)[:(RATE-441)*4], pcm(heard)[:(RATE-441)*4])
+            earlier = dict(self.plan, omittedForm=["outro"])
+            measure_outro(earlier, tracks, mapping)
+            self.assertNotIn("outroReleaseFrames", earlier)
+            replay, expected = home / "legacy.wav", home / "reference.wav"
+            export_window(full, replay, earlier, tracks, duration, mapping, deadline)
+            cut_wav(full, expected, 0, RATE)
+            self.assertEqual(expected.read_bytes(), replay.read_bytes())
 
     @unittest.skipUnless(score_available(), "Run local score setup for the native performer")
     def test_trimming_both_ends_keeps_pcm_and_later_edits_replay_on_the_shortened_clock(self):
@@ -75,8 +118,22 @@ class ScoreFormTest(unittest.TestCase):
                 left, right, heard_map = score_window(plan, source_map)
                 original, cropped = pcm(base), pcm(current)
                 fade = RATE // 100
-                self.assertEqual(original[(left + fade)*4:(right - fade)*4], cropped[fade*4:-fade*4])
-                self.assertEqual([[0, 0], [right-left, notes["frames"]]], heard_map)
+                body = source_map[-2][0]
+                self.assertEqual(original[(left+fade)*4:(body-fade)*4], cropped[fade*4:(body-left-fade)*4])
+                self.assertEqual([[0, 0], [body-left, notes["frames"]], [right-left, notes["frames"]]], heard_map)
+                # Restoring either edge leaves the other omission in place. The
+                # saved full score, including its gains, still belongs to the take.
+                for edge, remaining in (("intro", "outro"), ("outro", "intro")):
+                    restored = work / ("restored-" + edge + ".wav")
+                    revived = perform_score(current, upload, restored, work, direction="Bring it back.",
+                                            caption="", parent_caption="", parent_plan=plan, parent_map=heard_map,
+                                            recover_original=False, restore_score_edge=edge)
+                    self.assertEqual([remaining], revived["arrangementPlan"]["omittedForm"])
+                    if edge == "intro":
+                        self.assertEqual(pcm(work / "outro.wav"), pcm(restored))
+                    else:
+                        self.assertEqual(original[(left+fade)*4:], pcm(restored)[fade*4:])
+                    (work / "full-form.wav").unlink()
                 with patch("rendition_score_plan.plan_arrangement", return_value=dict(plan, leadProgram=40)):
                     final = work / "violin.wav"
                     result = perform_score(current, upload, final, work, direction="Give the tune to violin.",
@@ -89,9 +146,8 @@ class ScoreFormTest(unittest.TestCase):
                 self.assertEqual(tracks[1:], parts[1:])
                 render_score(parts, seconds, replay, deadline=time.monotonic()+30, room=saved["room"],
                              master_gain=saved["scoreMasterGain"], part_gains=saved["scorePartGains"])
-                lo, hi, _ = score_window(saved, mapping)
                 kept = work / "heard-replay.wav"
-                cut_wav(replay, kept, lo, hi)
+                export_window(replay, kept, saved, parts, seconds, mapping, time.monotonic()+30)
                 self.assertEqual(kept.read_bytes(), final.read_bytes())
                 self.assertEqual(len(pcm(current)), len(pcm(final)))
                 self.assertNotEqual(pcm(current), pcm(final))
