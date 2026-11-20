@@ -35,3 +35,19 @@ The listener recognized *To Zanarkand* in an early rendition but missed the jazz
 For a synth-pop take, the same listener asked, “I like that beat. Bring back the wistful feeling.” They heard the change they wanted in the revision. The rhythm section played the same notes while the lead changed its timing, accents and note lengths. These two sessions capture different reasons to keep a take, both expressible in everyday words.
 
 Refining a completed take and exporting it are available today. Extending a short audition into a longer performance while keeping the exact audio someone fell in love with is an open product capability. [How renditions work](architecture.md#from-a-recording-to-a-rendition)
+
+## First sessions with three different recordings
+
+Agents ran three first sessions from the recordings library. Each imported a recording, played it, made an instrumental, asked for one change, compared the result with the earlier take and kept a favorite. Each favorite reopened in a fresh browser and its downloaded WAV matched the audio served for playback.
+
+| Recording | What the listener could ask for | What the studio played |
+| --- | --- | --- |
+| A 4.45-second solo hum recorded on a phone. [Mahakush’s recording](https://freesound.org/people/mahakush/sounds/368817/) | Choose Solo Piano, then keep the piano accompaniment and put the tune on cello. | The pianist played the two rising figures as part of an 18-second arrangement. On the first revision the accompanying piano became 3.75 dB louder. After the level fix the piano-only opening matched the parent sample for sample, and the cello entered on the tune. |
+| A singer with a higher guitar line, keys, bass and drums. [Recording and credits](../tests/fixtures/controlled-vocal-and-band.md) | Ask for a folk duet with flute and fingerpicked guitar, then give the tune to clarinet while keeping the guitar part. | The transcriber found all 28 reference notes. The lead changed from flute to clarinet while all 36 guitar notes kept their pitch, timing and velocity. |
+| The opening of Mozart’s K.375 Menuetto, played by Soni Ventorum and guests. [Recording](https://commons.wikimedia.org/wiki/File:Wolfgang_Amadeus_Mozart_-_Serenade_K.375_-_4._Menuetto.ogg) | Choose Cinematic Strings, then ask for a gentler melody over the same accompaniment. | The source transcription matched 31 of 36 reference clarinet notes. In the revision, the viola attacked all 38 arranged melody notes more softly and moved 33 entrances. All 66 supporting string and bass notes kept their pitch, timing and velocity. |
+
+Reopening a favorite exposed a navigation problem once a library had more than five recordings. The main library now includes **View all recordings** when its recent list is truncated. Reopening an older project from that link selects its saved favorite.
+
+In the unaided session, the listener chose the saved *To Zanarkand* trio and asked, “make a study soundtrack for me to focus.” The studio reported that it had produced the same audio. The director had changed its description while the band played precisely the previous take. A first repair asked for clarification. The second repair used the same words and saved trio to produce a complete 2:58 instrumental. The 120 BPM swung piano lead became an 88 BPM straight guitar lead. The longer notes and fewer entrances gave the tune more space, and the guitar followed all 378 transcribed notes in order, allowing for octave changes. The agents verified playback, export and the original favorite. The listener delegated the final check to the agents.
+
+On the phone memo’s piano take, the agents asked, “Give me something energetic for the last hill of my bike ride.” The first version shortened the notes but stayed at 72 BPM despite a new chart calling for 120. After the fix, the same words produced a 120 BPM performance with the same seven melody notes. The earlier piano and cello takes remained available.
