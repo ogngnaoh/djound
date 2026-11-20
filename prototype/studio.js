@@ -666,21 +666,24 @@ async function favorite(id) {
 async function exportEdit(id) {
   const edit = item(id);
   if (!edit) return;
-  const response = await fetch(
-    live ? edit.exportUrl : await preview.audioUrl(edit.audioKey),
-  );
-  if (!response.ok) throw new Error("The audio could not be exported.");
-  const blob = await response.blob();
-  const url = URL.createObjectURL(blob);
   const a = document.createElement("a");
-  a.href = url;
-  a.download =
-    (project.title + " - " + edit.name).replace(/[\\/:*?"<>|]/g, "-") + ".wav";
+  if (live) {
+    // Let the browser stream the WAV and use the server's filename, which
+    // includes the edit number and honors any later rename.
+    const response = await fetch(edit.exportUrl, { method: "HEAD" });
+    if (!response.ok) throw new Error("The audio could not be exported.");
+    a.href = edit.exportUrl;
+    a.download = "";
+  } else {
+    a.href = await preview.audioUrl(edit.audioKey);
+    a.download =
+      (project.title + " - " + edit.name).replace(/[\\/:*?"<>|]/g, "-") +
+      ".wav";
+  }
   document.body.append(a);
   a.click();
   a.remove();
-  setTimeout(() => URL.revokeObjectURL(url), 60000);
-  toast("Exported " + edit.name);
+  toast("Downloading " + edit.name);
 }
 async function remove(id) {
   if (isOriginal(id)) return;
