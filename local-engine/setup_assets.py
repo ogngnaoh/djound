@@ -31,15 +31,18 @@ def install_recording_model(directory, cache):
     target = HOME / directory
     identity = {key: manifest[key] for key in ('model', 'revision')}
     HOME.mkdir(parents=True, exist_ok=True)
+    repair = directory == 'instrument-transcriber'
+    existing = target.exists()
     with tempfile.TemporaryDirectory(prefix=f'.{directory}-', dir=HOME) as tmp:
         staged = Path(tmp) / 'ready'
         staged.mkdir()
         for item in manifest['assets']:
             name = item['path']
-            if target.exists():
-                if not verify(target / name, item):
+            if existing:
+                if verify(target / name, item):
+                    continue
+                if not repair:
                     raise ValueError(f'Existing {directory} asset differs: {name}')
-                continue
             output = staged / name
             if cache:
                 if not verify(cache / name, item):
@@ -57,11 +60,36 @@ def install_recording_model(directory, cache):
                                 url, '-o', output], check=True)
             if not verify(output, item):
                 raise ValueError(f'Model asset failed verification: {name}')
-        if not target.exists():
-            write_json(staged / '.djound-verified.json', identity)
-            staged.rename(target)
-        elif json.loads((target / '.djound-verified.json').read_text()) != identity:
-            raise ValueError(f'The existing {directory} receipt differs from its pinned release.')
+        receipt = '.djound-verified.json'
+        if existing:
+            try:
+                correct_receipt = json.loads((target / receipt).read_text()) == identity
+            except (FileNotFoundError, UnicodeDecodeError, json.JSONDecodeError):
+                correct_receipt = False
+            if not correct_receipt and not repair:
+                raise ValueError(f'The existing {directory} receipt differs from its pinned release.')
+            if not correct_receipt:
+                write_json(staged / receipt, identity)
+            # Verify every replacement before changing the installed directory.
+            # Rename files atomically on the same volume, retaining healthy and
+            # unrelated files. The verification receipt goes in last.
+            pending = sorted(staged.iterdir(), key=lambda file: file.name == receipt)
+            if pending and target.is_symlink():
+                raise ValueError(f'Repair the {directory} installation at its real path: {target.resolve()}')
+            for file in pending:
+                file.replace(target / file.name)
+        else:
+            write_json(staged / receipt, identity)
+            try:
+                staged.rename(target)
+            except OSError as error:
+                # Another setup can finish while this one is downloading. Accept
+                # only the complete, independently verified pinned installation.
+                if error.errno not in (errno.EEXIST, errno.ENOTEMPTY):
+                    raise
+                if (not all(verify(target / item['path'], item) for item in manifest['assets'])
+                        or json.loads((target / receipt).read_text()) != identity):
+                    raise
     print(f'Verified {directory}:', manifest['model'])
 
 
