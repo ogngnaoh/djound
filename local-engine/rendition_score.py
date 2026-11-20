@@ -350,6 +350,8 @@ def arrange(notes, analysis, plan):
     timeline = Timeline(analysis, plan)
     palette = _chord_palette(notes, timeline, plan)
     lead = _lead_track(notes, timeline, plan)
+    if "leadSoundProgram" in plan:
+        lead["program"] = plan["leadSoundProgram"]
     if plan.get("leadBalanceDb"):
         lead["gain"] = 10 ** (plan["leadBalanceDb"] / 20)
     if plan.get("leadNoteDynamics"):
@@ -365,7 +367,7 @@ def arrange(notes, analysis, plan):
     for idx, role in enumerate(plan["roles"]):
         kind = role["kind"]
         drum = kind == "percussion"
-        track = {"program": role.get("kit", 0) if drum else role["program"], "percussion": drum,
+        track = {"program": role.get("kit", 0) if drum else role.get("soundProgram", role["program"]), "percussion": drum,
                  "pan": role_pan(role, idx),
                  "level_db": {"bass": -21., "percussion": -22., "chords": -24., "arpeggio": -23.,
                               "counterline": -24., "pedal": -24.}[kind], "notes": []}

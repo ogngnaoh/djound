@@ -340,6 +340,26 @@ class ScoreRevisionTest(unittest.TestCase):
         restored = planner._arrange(analysis, "Turn the guitar back up a little.", json.loads(json.dumps(after)), musician)
         self.assertEqual(before_tracks, arrange(self.notes, analysis, restored))
 
+    def test_a_new_string_technique_keeps_the_players_written_part_and_restores_the_bow(self):
+        from unittest.mock import Mock
+
+        old = dict(self.parent, leadProgram=21, roles=[
+            {"kind": "bass", "program": 42, "pattern": planner._pattern("bass", "two", 4)},
+            {"kind": "chords", "program": 0, "pattern": planner._pattern("chords", "pulse", 4)}])
+        analysis = analyze(self.notes)
+        musician = Mock()
+        def change(plan, words, voice):
+            musician.choose.side_effect = lambda q, options, **kw: "part_sound" if "part_sound" in options else voice
+            return planner._arrange(analysis, words, plan, musician)
+        words = "Could the cello pluck those bouncy notes instead of bowing them? I love the accordion just as it is."
+        plucked = change(old, words, 45)
+        self.assertEqual((42, 45), (plucked["roles"][0]["program"], plucked["roles"][0]["soundProgram"]))
+        before, length, clock = arrange(self.notes, analysis, old)
+        after = arrange(self.notes, analysis, plucked)
+        self.assertEqual(([before[0], dict(before[1], program=45), before[2]], length, clock), after)
+        bowed = change(json.loads(json.dumps(plucked)), "Let the cello go back to bowing again.", 42)
+        self.assertEqual((before, length, clock), arrange(self.notes, analysis, bowed))
+
     def test_adding_backing_to_a_take_the_listener_likes(self):
         from unittest.mock import Mock
 

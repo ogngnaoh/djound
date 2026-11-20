@@ -671,6 +671,50 @@ def balance_marks(plan):
     return [(index, db) for index, db in enumerate(levels) if db]
 
 
+def _part_sound(plan, direction, director):
+    """Keep the selected player's written figure while changing the sound used to play it."""
+    names = _catalog()[0]
+    parts = [(plan, "leadProgram", "leadSoundProgram", "melody")]
+    parts += [(r, "program", "soundProgram", r["kind"]) for r in plan["roles"] if r["program"] is not None]
+    clauses = [s.strip() for s in re.split(r"[.!?;]|\bbut keep\b", direction, flags=re.I) if s.strip()]
+    action = ". ".join(s for s in clauses if not _liked_part(s))
+    named = _members(action)
+    performers = [i for i, (p, key, _, _) in enumerate(parts) if p[key] in named]
+    if len(performers) == 1:
+        part, key, sound, _ = parts[performers[0]]
+    else:
+        options = {i: f"{names[p[key]]} {kind} part {i + 1}" for i, (p, key, _, kind) in enumerate(parts)}
+        options["absent"] = "none of these players"
+        target = director.choose("Which existing part should keep playing its notes with a different sound? "
+                                 "Exclude performers the listener wants to keep exactly.", options, context=direction)
+        if target == "absent":
+            raise ArrangementClarification("Which player in this take should change sound?")
+        part, key, sound, _ = parts[target]
+    program = part[key]
+    options = {p: names[p] for p in named if p >= 0 and p != program}
+    if 40 <= program <= 51:
+        options.update({45: "pizzicato, plucked orchestral strings", 44: "tremolo, rapidly bowed strings"})
+        bowed = program if program not in (44, 45) else 48
+        options[bowed] = f"bowed, ordinary sustained {names[bowed]}"
+    options["other"] = "a sound outside the available choices"
+    voice = director.choose("What sound does the listener want this player to USE now? "
+                            "Distinguish the new technique from a sound they want to stop or protect.", options,
+                            context=action)
+    if voice == "other":
+        raise ArrangementClarification("Which instrument or playing technique should this player use?")
+    if voice == part.get(sound, program):
+        raise ArrangementClarification("That player is already using this sound. Which new sound would you like?")
+    if 40 <= program <= 51 and voice in (program, 44, 45, 48) and re.search(
+            r"\b(?:pizz(?:icato)?|pluck\w*|bow(?:s|ed|ing)?|arco|tremolo)\b", action, re.I):
+        if voice == program:
+            part.pop(sound, None)
+        else:
+            part[sound] = voice
+    else:
+        part[key] = voice
+        part.pop(sound, None)
+
+
 def _balance_parts(plan, direction, director):
     """Adjust only the marked player's level, relative to the take being revised."""
     names = _catalog()[0]
@@ -712,6 +756,7 @@ def _changes(director, direction, register=None):
             "interaction": "when the accompanists hold back, answer the lead, or build at a returning theme",
             "dynamics": "whole-ensemble intensity or room ambience",
             "balance": "turn a specific existing player up or down in the mix, without changing what they play",
+            "part_sound": "one existing player changes sound or technique (such as plucking a bowed part), keeping their notes",
             "form": "opening, ending or form only",
             "production": "sound treatment or studio effects only",
             "feel": "performance feel or mood with same players", "all": "entire new musical arrangement or style",
@@ -730,7 +775,7 @@ def _changes(director, direction, register=None):
              "ensemble": "reshape the pace and intensity of the whole ensemble"})
         return {"phrasing"} if scope == "lead" else {"pulse", "phrasing", "dynamics"}
     if axis == "several":
-        return {group for group in (*GROUPS, "balance")
+        return {group for group in (*GROUPS, "balance", "part_sound")
                 if director.choose(f"Did the listener request a change to {axes[group]}?",
                                    {False: "keep the current decision", True: "change it"})}
     return {axis}
@@ -861,6 +906,9 @@ def _arrange(analysis, direction, old, director, *, tempo_instruction=None):
     if changes == {"balance"}:
         _balance_parts(plan, direction, director)
         return plan
+    if changes == {"part_sound"}:
+        _part_sound(plan, direction, director)
+        return plan
     assigned = _stated_leads(direction) if register else set()
     if register == "natural":
         plan.pop("leadOctaveShift", None)
@@ -915,9 +963,13 @@ def _arrange(analysis, direction, old, director, *, tempo_instruction=None):
         names = _catalog()[0]
         plan["leadProgram"] = (candidates[0] if len(candidates) == 1 and assigned == {candidates[0]} else
                                director.choose("Which performer is the new melody player?", {p: names[p] for p in candidates}))
+        if plan["leadProgram"] != old["leadProgram"]:
+            plan.pop("leadSoundProgram", None)
         return plan
     if "players" in changes:
         plan["leadProgram"], cast, lineup_edit = _score_players(director, direction, old, additions)
+        if old and plan["leadProgram"] != old["leadProgram"]:
+            plan.pop("leadSoundProgram", None)
         if changes == {"players"} and lineup_edit == "remove" and plan["leadProgram"] == old["leadProgram"]:
             from rendition_score import role_pan
 
@@ -976,6 +1028,8 @@ def _arrange(analysis, direction, old, director, *, tempo_instruction=None):
                 role["followPhrases"] = _phrase_part(director, role, direction)
             elif "followPhrases" in prior:
                 role["followPhrases"] = prior["followPhrases"]
+    if "part_sound" in changes:
+        _part_sound(plan, direction, director)
     if "balance" in changes:
         _balance_parts(plan, direction, director)
     return plan
@@ -1170,8 +1224,11 @@ def _run(request):
         if "leadNoteDynamics" in old:
             context["currentScore"]["leadNoteDynamics"] = old["leadNoteDynamics"]
         names = _catalog()[0]
-        context["currentScore"]["players"] = [names[old["leadProgram"]]] + [
-            f"{r['kind']}: {names[r['program']] if r['program'] is not None else 'drum kit'}" for r in old["roles"]]
+        def heard(program, voice):
+            written = names[program] if program is not None else "drum kit"
+            return written if voice is None else f"{written} played as {names[voice]}"
+        context["currentScore"]["players"] = [heard(old["leadProgram"], old.get("leadSoundProgram"))] + [
+            f"{r['kind']}: {heard(r['program'], r.get('soundProgram'))}" for r in old["roles"]]
     reconsider = bool(old and request.get("reconsider"))
     if reconsider:
         # Write the destination before showing the old band. Otherwise a vivid description of
