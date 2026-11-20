@@ -1,0 +1,141 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="theme-color" content="#191818" />
+    <title>Library · Djound</title>
+    <link rel="icon" href="data:," />
+    <link rel="stylesheet" href="./base.css" />
+    <link rel="stylesheet" href="./library.css" />
+  </head>
+  <body class="library-page">
+    <header class="library-mast">
+      <div class="mast-inner">
+        <a href="./index.html" aria-label="Djound home" class="brand"
+          ><img src="./media/wordmark.png" alt="Djound" width="106"
+        /></a>
+        <span class="mast-rule"></span><span class="mast-place">Library</span>
+      </div>
+    </header>
+    <main class="library-main">
+      <div class="library-heading">
+        <h1>Your library</h1>
+        <button id="bring" class="btn-primary" type="button">
+          <span aria-hidden="true">+</span> Bring a recording
+        </button>
+      </div>
+      <div id="load-message" role="status">Loading recordings…</div>
+      <section
+        class="feature"
+        aria-labelledby="feature-title"
+        id="feature"
+        hidden
+      >
+        <div class="sleeve-stage" aria-hidden="true">
+          <div class="record-object">
+            <div class="record-disc"></div>
+            <canvas class="sleeve" width="900" height="900"></canvas>
+          </div>
+        </div>
+        <div class="feature-detail">
+          <p class="feature-label">
+            <i aria-hidden="true"></i> On the turntable
+          </p>
+          <h2 id="feature-title"></h2>
+          <p id="feature-meta"></p>
+          <a id="feature-open" class="studio-link" href="./studio.html"
+            >Open Studio <span aria-hidden="true">↗</span></a
+          >
+          <div class="mini-player">
+            <button
+              id="preview"
+              class="play-transport"
+              type="button"
+              aria-label="Play original"
+            >
+              <span class="play-glyph" aria-hidden="true"></span>
+            </button>
+            <label class="visually-hidden" for="seek"
+              >Original playback position</label
+            >
+            <input
+              type="range"
+              id="seek"
+              min="0"
+              max="1"
+              step=".01"
+              value="0"
+              disabled
+            />
+            <span id="time-label">0:00</span>
+          </div>
+          <p class="error-message" id="preview-error" role="status"></p>
+        </div>
+      </section>
+      <section class="recordings" aria-labelledby="recordings-title" hidden>
+        <div class="list-title">
+          <h2 id="recordings-title">Recordings</h2>
+          <span id="record-count"></span>
+        </div>
+        <div class="table-shell">
+          <div class="columns table-head" aria-hidden="true">
+            <span>Recording</span><span>Edits</span><span>Last changed</span
+            ><span></span>
+          </div>
+          <ul id="record-list"></ul>
+        </div>
+      </section>
+    </main>
+    <dialog id="import-dialog" aria-labelledby="dialog-title">
+      <div class="dialog-top">
+        <h2 id="dialog-title">Bring a recording</h2>
+        <button id="close-dialog" type="button" aria-label="Close import">
+          ×
+        </button>
+      </div>
+      <p class="dialog-description">
+        Open an audio file from your device to start editing it.
+      </p>
+      <div id="drop-zone">
+        <span class="upload-icon" aria-hidden="true">↑</span>
+        <strong>Drop an audio file here</strong>
+        <button id="choose" type="button" class="btn-quiet">
+          Choose a file
+        </button>
+        <input
+          type="file"
+          id="file-input"
+          accept="audio/*,.mp3,.wav,.m4a,.aif,.aiff,.flac,.ogg,.aac,.opus"
+          hidden
+        />
+      </div>
+      <div id="file-preview" hidden>
+        <div class="file-summary">
+          <span class="music-icon" aria-hidden="true">♫</span>
+          <div>
+            <strong id="filename"></strong><small id="filesize"></small>
+          </div>
+          <button type="button" class="text-button" id="change-file">
+            Change
+          </button>
+        </div>
+        <audio
+          controls
+          preload="metadata"
+          id="candidate-player"
+          aria-label="Preview selected recording"
+        ></audio>
+      </div>
+      <p id="import-error" class="error-message" role="alert"></p>
+      <div class="dialog-actions">
+        <span id="import-status" aria-live="polite"></span
+        ><button id="confirm-import" class="btn-primary" type="button" disabled>
+          Open in Studio <span aria-hidden="true">↗</span>
+        </button>
+      </div>
+    </dialog>
+    <audio id="record-player" preload="metadata"></audio>
+    <script type="module" src="./library.js"></script>
+  </body>
+</html>
