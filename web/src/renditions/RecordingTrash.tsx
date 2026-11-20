@@ -1,4 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { DropdownMenu } from "radix-ui";
+import { MoreHorizontal, Trash2 } from "lucide-react";
 import {
   createContext,
   type ReactNode,
@@ -184,35 +186,69 @@ export function RecordingTrashAction({
 }) {
   const controls = useContext(TrashContext);
   const reasonId = useId();
+  const trigger = useRef<HTMLButtonElement>(null);
+  const openingConfirmation = useRef(false);
   if (!controls)
     throw new Error("RecordingTrashAction needs RecordingTrashControls.");
   const working = !inTrash && recording.inFlightCount > 0;
+  if (!inTrash)
+    return (
+      <DropdownMenu.Root>
+        <DropdownMenu.Trigger asChild>
+          <button
+            className="collection-menu-trigger"
+            type="button"
+            ref={trigger}
+            aria-label={`Options for ${recording.title}`}
+          >
+            <MoreHorizontal size={19} aria-hidden="true" />
+          </button>
+        </DropdownMenu.Trigger>
+        <DropdownMenu.Portal>
+          <DropdownMenu.Content
+            align="end"
+            sideOffset={5}
+            className="collection-menu-content"
+            onCloseAutoFocus={(event) => {
+              if (openingConfirmation.current) event.preventDefault();
+              openingConfirmation.current = false;
+            }}
+          >
+            <DropdownMenu.Item
+              disabled={controls.busy || working}
+              aria-describedby={working ? reasonId : undefined}
+              onSelect={() => {
+                if (!trigger.current) return;
+                openingConfirmation.current = true;
+                controls.request(
+                  { recording, moveToTrash: true },
+                  trigger.current,
+                );
+              }}
+            >
+              <Trash2 size={15} /> Move to Trash
+            </DropdownMenu.Item>
+            {working && (
+              <small id={reasonId}>
+                Available when the current edit finishes.
+              </small>
+            )}
+          </DropdownMenu.Content>
+        </DropdownMenu.Portal>
+      </DropdownMenu.Root>
+    );
   return (
-    <>
-      <Button
-        type="button"
-        variant="ghost"
-        size="sm"
-        aria-label={
-          inTrash
-            ? `Restore ${recording.title}`
-            : `Move ${recording.title} to Trash`
-        }
-        aria-haspopup={inTrash ? undefined : "dialog"}
-        aria-describedby={working ? reasonId : undefined}
-        disabled={controls.busy || working}
-        onClick={(event) =>
-          controls.request(
-            { recording, moveToTrash: !inTrash },
-            event.currentTarget,
-          )
-        }
-      >
-        {inTrash ? "Restore" : "Move to Trash"}
-      </Button>
-      {working && (
-        <span id={reasonId}>Available when the current edit finishes.</span>
-      )}
-    </>
+    <Button
+      type="button"
+      variant="ghost"
+      size="sm"
+      aria-label={`Restore ${recording.title}`}
+      disabled={controls.busy}
+      onClick={(event) =>
+        controls.request({ recording, moveToTrash: false }, event.currentTarget)
+      }
+    >
+      Restore
+    </Button>
   );
 }

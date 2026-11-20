@@ -88,7 +88,7 @@ export function RecordingImport() {
             : "Import recording"}
         </Button>
       </SheetTrigger>
-      <SheetContent>
+      <SheetContent className="recording-import-sheet">
         <SheetHeader>
           <SheetTitle>Import recording</SheetTitle>
           <SheetDescription>
