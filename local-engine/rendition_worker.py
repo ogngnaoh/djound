@@ -235,7 +235,8 @@ def plan_take(request, duration):
         raise ValueError("Describe the change in up to 1000 characters.")
     has_passages = bool(request.get("scoredAncestor"))
     direction, passage_policy = passage_direction(prompt)
-    if has_passages or (request.get("parentScoreInput") and passage_policy == "fresh"):
+    has_saved_score = request.get("parentScoreInput") or (request.get("parentPlan") or {}).get("realization") == "score"
+    if has_passages or (has_saved_score and passage_policy == "fresh"):
         prompt = direction
     else:
         passage_policy = None

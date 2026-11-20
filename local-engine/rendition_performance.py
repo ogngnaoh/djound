@@ -130,11 +130,14 @@ def perform_score(parent, original, destination, work, *, direction, caption, pa
     from rendition_score_render import ScoreBalanceConflict, render_score, score_available
 
     inherit_input = parent_score_input is not None and not recover_original and parent_plan is not None
+    # Upload-based scores have no separate parentScoreInput descriptor. They still
+    # own a performed melody and must not silently fall back to audio generation.
+    saved_score = bool(scored_ancestor or inherit_input or (
+        parent_plan and parent_plan.get("fromUpload") and parent_plan.get("realization", "score") == "score"))
     if not (guide_available() and score_available()):
-        if scored_ancestor:
-            return {"state": "clarify", "error": "Restore the local score player to revise this take with its saved passage."}
-        if inherit_input:
-            return {"state": "clarify", "error": "Restore the local score player to revise this saved arrangement."}
+        if saved_score:
+            raise RuntimeError("Restore the local melody transcriber and score player with rendition setup, "
+                               "then retry this saved arrangement.")
         return None
     deadline = audio.rendition_deadline()
     from_upload = (original == parent or recover_original or bool(parent_plan and parent_plan.get("fromUpload")))
@@ -162,8 +165,9 @@ def perform_score(parent, original, destination, work, *, direction, caption, pa
     trace_source = parent_plan.get("melodyTraceSource") if same_input else None
     if not transcribe_recording(basis, transcription, deadline=deadline, trace_version=trace_version,
                                 trace_source=trace_source):
-        if scored_ancestor or inherit_input:
-            return {"state": "clarify", "error": "I couldn't recover this take's score. You can ask for a fresh interpretation of the whole take."}
+        if saved_score:
+            return {"state": "clarify", "error": "I couldn't recover the saved melody. "
+                    "Choose Original to arrange the upload again, or ask for a fresh interpretation of the whole take."}
         return None
     notes = json.loads(transcription.read_text())
     analysis = analyze(notes)

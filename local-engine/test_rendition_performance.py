@@ -48,6 +48,38 @@ class PerformanceTest(unittest.TestCase):
                 self.assertEqual(3, transcribe.call_args.kwargs["trace_version"])
                 self.assertEqual(pin, transcribe.call_args.kwargs["trace_source"])
 
+    def test_upload_based_score_requires_its_saved_melody_on_a_direct_revision(self):
+        import rendition_worker
+
+        original = self.root / "upload.wav"
+        self.write(original, 12, 2)
+        plan = {"version": 1, "fromUpload": True, "realization": "score",
+                "melodyTraceVersion": 6, "melodyTraceSource": "instrument_tracks"}
+        request = {"source": str(self.parent), "original": str(original), "output": str(self.destination),
+                   "supportsArrangedScore": True, "parentCaption": "Saved trio", "parentPlan": plan,
+                   "prompt": "Solo piano"}
+        with (patch.object(music, "perform_take") as fallback,
+              patch("rendition_score_render.score_available", return_value=True),
+              patch.object(music, "guide_available", return_value=False)):
+            with self.assertRaisesRegex(RuntimeError, "rendition setup"):
+                rendition_worker.run(request)
+            fallback.assert_not_called()
+        with (patch.object(music, "perform_take") as fallback,
+              patch.object(music, "guide_available", return_value=True),
+              patch("rendition_score_render.score_available", return_value=True),
+              patch("rendition_melody.transcribe_recording", return_value=False) as transcribe):
+            result = rendition_worker.run(request)
+            self.assertEqual("clarify", result["state"])
+            self.assertIn("fresh interpretation", result["error"])
+            self.assertEqual(original.resolve(), transcribe.call_args.args[0])
+            self.assertEqual("instrument_tracks", transcribe.call_args.kwargs["trace_source"])
+            fallback.assert_not_called()
+        with patch.object(music, "perform_score", return_value={"state": "clarify"}) as perform:
+            rendition_worker.run({**request, "prompt": "Start fresh with solo piano"})
+            self.assertIsNone(perform.call_args.kwargs["parent_plan"])
+            self.assertEqual("fresh", perform.call_args.kwargs["passage_policy"])
+        self.assertFalse(self.destination.exists())
+
     def test_retained_score_uses_its_verified_source_and_original_trace_version(self):
         upload = self.root / "upload.wav"
         earlier = self.root / "earlier.wav"
