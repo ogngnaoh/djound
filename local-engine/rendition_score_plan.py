@@ -39,7 +39,8 @@ KINDS = {"chords": "sound several chord tones together", "arpeggio": "break chor
          "bass": "outline harmonic movement in a low register", "pedal": "sustain or pulse one foundation pitch",
          "counterline": "answer the theme with a separate melodic line"}
 GESTURES = {
-    "chords": {"hold": "one sustained voicing", "backbeats": "short chords on alternate beats",
+    "chords": {"hold": "one sustained voicing", "backbeats": "short chords on beats two and four",
+               "offbeat": "short chord strokes halfway between successive beats",
                "anticipate": "syncopated comping with rests and anticipations", "pulse": "short chords on each beat"},
     "bass": {"walk": "walking movement, one changing note per beat", "two": "alternate root and fifth, with space",
              "hold": "long root notes", "pulse": "repeat the foundation on a regular pulse", "anticipate": "displaced bass ostinato"},
@@ -535,6 +536,29 @@ def _kit_parts(meter, direction, brief):
             (not pair or {36, 38} <= {hit["pitch"] for hit in hits})}
 
 
+CHORD_PLACEMENTS = {
+    "offbeat": r"\b(?:off[ -]?beats?|between\s+(?:(?:the|each|every)\s+)?beats?|"
+               r"on\s+(?:the|each|every)\s+(?:[‘'\"“]ands?[’'\"”]|ands?(?=\s+of\s+(?:each|every|the)\s+beat|[.,;!?]|$)))"
+               r"(?=$|[\s.,;!?])",
+    "backbeats": r"\b(?:backbeats?|(?:beats?\s+)?(?:two\s+and\s+four|2\s*(?:and|&)\s*4))\b",
+    "pulse": r"\b(?:on\s+(?:each|every|the)\s+beat|on[ -]beats?)\b",
+}
+
+
+def _chord_placement(text, program):
+    # Mark timing idioms before separating players on “and”. Quoted pitches or
+    # chord names in parentheses can contain commas inside a player's cue.
+    marked = re.sub(r"\([^@()]*,[^@()]*\)", "", _marked(text))
+    for gesture, pattern in CHORD_PLACEMENTS.items():
+        marked = re.sub(pattern, " timing_" + gesture + " ", marked, flags=re.I)
+    words = _part_words(marked, program)
+    negative = r"\b(?:not|never|avoid|without|no|instead of|rather than|don['’]t)\s+" \
+               r"(?:(?:play(?:ing)?|on|the|those|any|chords?|strokes?)\s+)*timing_(\w+)"
+    excluded = set(re.findall(negative, words))
+    requested = re.findall(r"\btiming_(\w+)", re.sub(negative, "", words))
+    return (requested[-1] if requested else None), excluded
+
+
 def _roles(director, cast, meter, direction):
     roles = []
     names = _catalog()[0]
@@ -549,6 +573,16 @@ def _roles(director, cast, meter, direction):
         if patterns is not None and "backbeat" in patterns and {h["pitch"] for h in patterns["backbeat"]} == {36, 38}:
             available["backbeat"] = "kick and snare on alternating beats"
         gesture = next((g for g, pattern in gestures.items() if g in available and re.search(pattern, words)), None)
+        if kind == "chords":
+            requested, excluded = _chord_placement(direction, program)
+            if not requested and not gesture:
+                requested, cue_exclusions = _chord_placement(director.brief, program)
+                excluded.update(cue_exclusions)
+            available = {g: label for g, label in available.items() if g not in excluded}
+            if requested in available:
+                gesture = requested
+            elif gesture not in available:
+                gesture = None
         if len(available) == 1:
             gesture = next(iter(available))
         if gesture is None:

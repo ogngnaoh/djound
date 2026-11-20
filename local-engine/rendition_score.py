@@ -303,7 +303,10 @@ def _backing_events(role, timeline, plan, sections, attacks, releases):
             end = min(timeline.last, pos + hit["duration"])
             if end <= pos:
                 continue
-            if raw >= timeline.beats[-1] and bar == bars - 1:
+            # A written offbeat chord part keeps its short strokes through the
+            # ending. Moving its last chord to beat one obscures the groove.
+            if (raw >= timeline.beats[-1] and bar == bars - 1
+                    and not (kind == "chords" and role.get("gesture") == "offbeat")):
                 if idx:
                     continue
                 pos = bar * timeline.meter

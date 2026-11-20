@@ -249,7 +249,7 @@ class ScoreRevisionTest(unittest.TestCase):
         for instrument, program in (("acoustic guitar", 25), ("electric guitar", 27)):
             previous, _, _ = arrange(self.notes, analysis, prior)
             words = f"Keep the trumpet melody exactly. Add {instrument} chords to the accompaniment."
-            director = Mock()
+            director = Mock(brief="Keep the written parts and add guitar chords.")
             director.choose.side_effect = lambda question, options: "add" if "add" in options else next(iter(options))
             with patch.object(planner, "_changes", side_effect=AssertionError("A new backing player is explicit.")):
                 revised = planner._arrange(analysis, words, prior, director)
@@ -286,7 +286,7 @@ class ScoreRevisionTest(unittest.TestCase):
         original = [{"kind": "chords", "program": 0, "gesture": g, "pattern": planner._pattern("chords", g, 4),
                      "followPhrases": follow} for g, follow in (("hold", True), ("pulse", False))]
         old = dict(old, roles=original, phraseInteraction="phrase_answers")
-        chart = Mock()
+        chart = Mock(brief="The flute adds chords under the existing melody.")
         chart.choose.side_effect = lambda q, opts: next(iter(opts))
         revised = planner._arrange(analyze(self.notes), "Add flute chords to the accompaniment.", old, chart)
         self.assertEqual(original, revised["roles"][:2])
@@ -325,7 +325,7 @@ class ScoreRevisionTest(unittest.TestCase):
         words = "I like the cello just the way it is. Could you add a little piano behind it?"
         self.assertEqual([0], planner._backing_additions(words, parent))
         analysis = analyze(self.notes)
-        chart = Mock()
+        chart = Mock(brief="Soft piano chords behind the cello.")
         chart.choose.side_effect = lambda _, options: next(iter(options))
         with patch.object(planner, "_changes", side_effect=AssertionError("The new player is explicit")):
             revised = planner._arrange(analysis, words, parent, chart)
