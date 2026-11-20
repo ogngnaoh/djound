@@ -20,7 +20,7 @@ MAX_FRAMES = 300 * RATE
 MODEL = Path("basic-pitch/basic_pitch/saved_models/icassp_2022/nmp.onnx")
 BANK = "FluidR3_GM.sf2"
 NO_LINE = 3
-MELODY_TRACE_VERSION = 6
+MELODY_TRACE_VERSION = 7
 TRACE_SOURCES = ("single", "mix", "separated_voice", "instrument_tracks")
 
 
@@ -530,7 +530,7 @@ def _recorded_line(source, work, events, duration, trace_version, trace_source, 
         if trace_version >= 6 and trace_source != "mix":
             from rendition_ensemble import resolve_players
             players = resolve_players(source, work, events, notes, duration, deadline,
-                                      pinned=trace_source == "instrument_tracks")
+                                      pinned=trace_source == "instrument_tracks", localized=trace_version >= 7)
             if players is not None:
                 return players, "instrument_tracks"
         return notes, "mix"

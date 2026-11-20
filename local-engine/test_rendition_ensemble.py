@@ -11,6 +11,21 @@ import rendition_melody as melody
 
 
 class EnsemblePassageTest(unittest.TestCase):
+    def test_short_ensemble_phrase_is_found_at_different_offsets_in_a_long_solo(self):
+        for offset in (2., 17., 23., 36.):
+            with self.subTest(offset=offset):
+                solo = [(at, at + .4, 60, .8) for at in np.arange(0, 60, .5) if not offset <= at < offset + 12]
+                # The mixed tracker repeatedly jumps between two sounding players.
+                disputed = [(offset + i, offset + i + .85, 74 if i % 2 else 56, .8) for i in range(12)]
+                backing = [(a, b, pitch, c) for a, b, _, c in disputed for pitch in (44, 56, 74)]
+                notes, events = sorted(solo + disputed), sorted(solo + backing)
+                self.assertEqual([], ensemble._passages(events, notes, 60, False))
+                [(start, stop)] = ensemble._passages(events, notes, 60, True)
+                self.assertLessEqual(start, offset)
+                self.assertGreaterEqual(stop, disputed[-1][1])
+                self.assertGreaterEqual(start, offset - 1.)
+                self.assertLessEqual(stop, offset + 13.)
+
     def test_saved_player_line_requires_its_model_and_saved_mix_never_loads_it(self):
         notes = [(0., .5, 60, .8)]
         with (patch("rendition_foreground.foreground_notes", return_value=notes),
