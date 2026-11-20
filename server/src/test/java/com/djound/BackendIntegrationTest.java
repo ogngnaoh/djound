@@ -510,6 +510,18 @@ class BackendIntegrationTest {
                 if action=='score':
                     inputs.write_text(q['source'])
                     result['arrangementPlan']=plan
+                if action in ('cello','clarinet','fresh','piano'):
+                    basis=q['parentScoreInput']
+                    assert basis['source']==inputs.read_text()!=q['original']
+                    assert basis['id']==Path(basis['source']).stem
+                    assert basis['source']!=q['source'] and 'scoredAncestor' not in q
+                    if action!='cello':
+                        assert q['parentPlan']['scoreSourceTakeId']==basis['id']
+                    if action=='fresh':
+                        inputs.write_text(q['source'])
+                    else:
+                        result['inheritedScoreInput']=True
+                    result['arrangementPlan']=dict(plan,scoreSourceTakeId='untrusted')
                 if action in ('revoice','revoice again'):
                     base=q['scoredAncestor']
                     assert base['scoreSource']==inputs.read_text()!=q['original']
@@ -526,19 +538,22 @@ class BackendIntegrationTest {
                     wav.writeframes(data)
                 print(json.dumps(dict(result,durationSeconds=fmt.nframes/44100)))
                 """);
-        app =
-                launch(
-                        root,
-                        "--djound.mode=LOCAL",
-                        "--djound.rendition-worker=" + worker,
-                        "--djound.local-python=/usr/bin/python3");
+        String[] settings = {
+            "--djound.mode=LOCAL",
+            "--djound.rendition-worker=" + worker,
+            "--djound.local-python=/usr/bin/python3"
+        };
+        app = launch(root, settings);
         var projects = app.getBean(RenditionProjects.class);
         String id = projects.create(wav("song.wav", 44100, 2, 16, 2), null).id();
         String parent = "original";
+        String beforePassages = null;
         for (String request :
                 List.of(
                         "free take",
                         "score",
+                        "cello",
+                        "clarinet",
                         "ending",
                         "revoice",
                         "extend edit",
@@ -557,6 +572,29 @@ class BackendIntegrationTest {
             var done = awaitRendition(projects, id, request);
             assertEquals("ready", done.state(), done.error());
             parent = done.id();
+            if (request.equals("score")) {
+                // A score saved before ordinary takes retained their input ID.
+                app.getBean(JdbcClient.class)
+                        .sql(
+                                "UPDATE rendition_take SET arrangement_plan=arrangement_plan -"
+                                    + " 'scoreSourceTakeId' WHERE id=?")
+                        .param(parent)
+                        .update();
+            }
+            if (request.equals("cello")) {
+                app.close();
+                app = launch(root, settings);
+                projects = app.getBean(RenditionProjects.class);
+                beforePassages = parent;
+            }
+        }
+        for (String request : List.of("fresh", "piano")) {
+            projects.submit(
+                    id,
+                    new RenditionProjects.Command(request, beforePassages, request, null, null));
+            var done = awaitRendition(projects, id, request);
+            assertEquals("ready", done.state(), done.error());
+            beforePassages = done.id();
         }
     }
 

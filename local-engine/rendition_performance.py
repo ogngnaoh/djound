@@ -101,16 +101,20 @@ def _score_caption(plan, tracks):
 
 
 def perform_score(parent, original, destination, work, *, direction, caption, parent_caption,
-                  parent_plan, parent_map, recover_original, scored_ancestor=None, passage_policy=None):
+                  parent_plan, parent_map, recover_original, scored_ancestor=None, passage_policy=None,
+                  parent_score_input=None):
     """Let a local arranger revise the playing decisions and render them against the source phrases."""
     from rendition_melody import MELODY_TRACE_VERSION, transcribe_recording
     from rendition_score import Timeline, analyze, arrange
     from rendition_score_plan import plan_arrangement
     from rendition_score_render import render_score, score_available
 
+    inherit_input = parent_score_input is not None and not recover_original and parent_plan is not None
     if not (guide_available() and score_available()):
         if scored_ancestor:
             return {"state": "clarify", "error": "Restore the local score player to revise this take with its saved passage."}
+        if inherit_input:
+            return {"state": "clarify", "error": "Restore the local score player to revise this saved arrangement."}
         return None
     deadline = audio.rendition_deadline()
     from_upload = (original == parent or recover_original or bool(parent_plan and parent_plan.get("fromUpload")))
@@ -123,16 +127,22 @@ def perform_score(parent, original, destination, work, *, direction, caption, pa
             return {"state": "clarify", "error": "The saved passage follows an arrangement of an earlier take. "
                     "To use the upload’s melody, ask “Bring back the original melody and make a fresh "
                     "interpretation of the whole take,” or select Original to start from the upload."}
+    elif inherit_input:
+        saved = parent_score_input.get("source")
+        if not saved or not Path(saved).is_file():
+            return {"state": "clarify", "error": "I couldn't recover this arrangement's source. "
+                    "You can ask for a fresh interpretation of the whole take."}
+        basis = Path(saved).resolve(strict=True)
     transcription = work / "source-notes.json"
     report_stage("melody")
     trace_version = parent_plan.get("melodyTraceVersion", 1) if parent_plan else MELODY_TRACE_VERSION
     # A separated singer or a mix contour belongs to a particular recording.
     # A freshly rendered instrumental take used as a new input gets its own analysis.
-    same_input = parent_plan and (scored_ancestor or (parent_plan.get("fromUpload") and from_upload))
+    same_input = parent_plan and (scored_ancestor or inherit_input or (parent_plan.get("fromUpload") and from_upload))
     trace_source = parent_plan.get("melodyTraceSource") if same_input else None
     if not transcribe_recording(basis, transcription, deadline=deadline, trace_version=trace_version,
                                 trace_source=trace_source):
-        if scored_ancestor:
+        if scored_ancestor or inherit_input:
             return {"state": "clarify", "error": "I couldn't recover this take's score. You can ask for a fresh interpretation of the whole take."}
         return None
     notes = json.loads(transcription.read_text())
@@ -173,9 +183,11 @@ def perform_score(parent, original, destination, work, *, direction, caption, pa
                 or plan.get("realization") != "score"):
             return {"state": "clarify", "error": "This change needs a different form or a new production. Ask for a fresh interpretation of the whole take, or keep the current timing and describe the part to change."}
         mapping = [[0, 0], [frames, frames]]
-    elif from_upload and parent_map:
+    elif inherit_input or (from_upload and parent_map):
         from rendition_timeline import relative_map
-        mapping = relative_map(mapping, parent_map)
+        # Direct descendants share the saved score input, which may itself be an
+        # arrangement. Compare the two performances on that input's clock.
+        mapping = relative_map(mapping, previous_score[2] if inherit_input else parent_map)
     report_stage("rendering")
     score = work / "arrangement.wav"
     master = _backing_master(previous_score, tracks, seconds, plan, parent_plan,
@@ -221,7 +233,8 @@ def perform_score(parent, original, destination, work, *, direction, caption, pa
     else:
         score.replace(destination)
     report_stage("finishing")
-    return {"parentTimeMap": mapping, "arrangementPlan": plan, "caption": _score_caption(plan, tracks)}
+    return {"parentTimeMap": mapping, "arrangementPlan": plan, "caption": _score_caption(plan, tracks),
+            "inheritedScoreInput": inherit_input}
 
 
 def _play_duet(guide, work, program, lane, direction, seconds, deadline):

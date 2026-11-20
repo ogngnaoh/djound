@@ -9,6 +9,8 @@ from unittest.mock import patch
 from rendition_performance import perform_score
 from rendition_score import analyze, arrange
 import rendition_score_plan as planner
+import rendition_score_render as player
+from rendition_timeline import relative_map
 
 
 class ScoreRevisionTest(unittest.TestCase):
@@ -60,6 +62,53 @@ class ScoreRevisionTest(unittest.TestCase):
         self.assertEqual(expected, player.call_args.args[0])
         self.assertEqual(revision["leadTouch"], result["arrangementPlan"]["leadTouch"])
         self.assertTrue(self.output.is_file())
+
+    @unittest.skipUnless(player.score_available(), "Run the local guide setup for soundfont tests")
+    def test_nonupload_score_descendants_keep_parts_gain_and_parent_time(self):
+        upload, basis = self.root / "upload.wav", self.root / "audio-only-take.wav"
+        basis.touch()
+        self.notes["melodySource"] = "mix"
+        piano = dict(self.parent, fromUpload=False, introBars=1, endingBars=1, roles=[
+            {"program": 0, "kind": "arpeggio", "pattern": planner._pattern("arpeggio", "wave", 4)}])
+        # The first score transcribes an audio-only take. Two successive revisions
+        # revoice its melody; the third intentionally changes its tempo.
+        def transcribe(source, path, **kwargs):
+            self.assertEqual(basis.resolve(), source.resolve())
+            path.write_text(json.dumps(self.notes))
+            return True
+
+        source, prior = basis, None
+        for index, (program, bpm) in enumerate(((0, 100), (42, 100), (71, 100), (71, 120))):
+            work = self.root / str(index)
+            work.mkdir()
+            output = work / "take.wav"
+            candidate = dict(prior or piano, leadProgram=program, bpm=bpm)
+            with (patch("rendition_performance.guide_available", return_value=True),
+                  patch("rendition_melody.transcribe_recording", side_effect=transcribe) as extractor,
+                  patch("rendition_score_plan.plan_arrangement", return_value=candidate)):
+                result = perform_score(source, upload, output, work, direction="Revise the arrangement",
+                                       caption="Instrumental", parent_caption="Piano", parent_plan=prior,
+                                       parent_map=None, recover_original=False,
+                                       parent_score_input={"source": str(basis)} if prior else None)
+            self.assertEqual(bool(prior), result["inheritedScoreInput"])
+            self.assertEqual("mix" if prior else None, extractor.call_args.kwargs["trace_source"])
+            saved = result["arrangementPlan"]
+            tracks, seconds, mapping = arrange(self.notes, analyze(self.notes), saved)
+            self.assertTrue(tracks[1]["notes"])
+            self.assertEqual(program, tracks[0]["program"])
+            if prior:
+                old_tracks, old_seconds, old_map = arrange(self.notes, analyze(self.notes), prior)
+                self.assertEqual(relative_map(mapping, old_map), result["parentTimeMap"])
+                self.assertNotEqual(source.read_bytes(), output.read_bytes())
+                if bpm == prior["bpm"]:
+                    self.assertEqual(old_seconds, seconds)
+                    self.assertEqual(old_tracks[1:], tracks[1:])
+                    self.assertEqual(prior["scoreMasterGain"], saved["scoreMasterGain"])
+                else:
+                    self.assertLess(seconds, old_seconds)
+                    self.assertEqual([round(seconds * player.RATE), round(old_seconds * player.RATE)],
+                                     result["parentTimeMap"][-1])
+            source, prior = output, saved
 
     def test_an_unresolved_retry_leaves_the_parent_as_the_only_performance(self):
         first = dict(self.parent, conductorCue="Focus on the melody.")

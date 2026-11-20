@@ -72,8 +72,33 @@ class PerformanceTest(unittest.TestCase):
                 self.assertEqual(version, transcribe.call_args.kwargs["trace_version"])
                 self.assertEqual(analyzer, transcribe.call_args.kwargs["trace_source"])
 
+    def test_direct_score_can_start_fresh_when_its_old_recording_is_missing(self):
+        import rendition_worker
+
+        upload = self.root / "upload.wav"
+        self.write(upload, 21, 2)
+        request = {"source": str(self.parent), "original": str(upload), "output": str(self.destination),
+                   "supportsArrangedScore": True, "parentCaption": "Piano",
+                   "parentPlan": {"fromUpload": False, "melodyTraceSource": "mix"},
+                   "parentScoreInput": {"id": "earlier", "source": None}}
+        with (patch.object(music, "guide_available", return_value=True),
+              patch("rendition_score_render.score_available", return_value=True),
+              patch("rendition_melody.transcribe_recording") as transcribe):
+            result = rendition_worker.run({**request, "prompt": "Solo piano"})
+            self.assertEqual("clarify", result["state"])
+            self.assertIn("fresh interpretation", result["error"])
+            transcribe.assert_not_called()
+        with patch.object(music, "perform_score", return_value={"state": "clarify"}) as perform:
+            for words, original in (("Start fresh with solo piano", False), ("Solo piano and start fresh", False),
+                                    ("Bring back the original melody and make a fresh interpretation of the whole take.", True)):
+                rendition_worker.run({**request, "prompt": words})
+                self.assertIsNone(perform.call_args.kwargs["parent_plan"])
+                self.assertIsNone(perform.call_args.kwargs["parent_score_input"])
+                self.assertEqual(original, perform.call_args.kwargs["recover_original"])
+
     def test_original_melody_conflict_and_fresh_retry_go_to_the_requested_recording(self):
         import rendition_worker
+        from rendition_melody import MELODY_TRACE_VERSION
 
         upload, earlier = self.root / "upload.wav", self.root / "earlier.wav"
         self.write(upload, 21, 2)
@@ -94,7 +119,7 @@ class PerformanceTest(unittest.TestCase):
             transcribe.assert_not_called()
 
         def transcribe(source, path, **options):
-            self.assertEqual(3, options["trace_version"])
+            self.assertEqual(MELODY_TRACE_VERSION, options["trace_version"])
             self.assertIsNone(options["trace_source"])
             path.write_text(json.dumps({"frames": 88200, "melodySource": "single", "melody": [(0, .3, 60, .8)]}))
             return True

@@ -109,6 +109,8 @@ public final class RenditionProjects implements AutoCloseable {
 
     record Earlier(String id, String request, String label, String caption) {}
 
+    record ScoreInput(String id, String source) {}
+
     record ScoredAncestor(
             String id,
             String source,
@@ -589,12 +591,7 @@ public final class RenditionProjects implements AutoCloseable {
             take = earlier;
         }
         var plan = RenditionTimeline.storedPlan(take.arrangementPlan());
-        if (take.frames() != frames
-                || plan == null
-                || plan.path("version").asInt(0) != 1
-                || !"score".equals(plan.path("realization").asString(""))
-                || !plan.path("roles").isArray()
-                || !plan.path("fromUpload").isBoolean()) return null;
+        if (take.frames() != frames || !isSavedScore(plan)) return null;
         boolean hybrid = plan.has("retainedPassageFrames");
         if (hybrid) edited.addAll(retainedFrames(plan.get("retainedPassageFrames"), frames));
         if (edited.isEmpty()) return null;
@@ -604,23 +601,33 @@ public final class RenditionProjects implements AutoCloseable {
             if (merged.isEmpty() || merged.getLast()[1] < interval[0]) merged.add(interval);
             else merged.getLast()[1] = Math.max(merged.getLast()[1], interval[1]);
         }
-        // Whole scores can be transcribed from the upload or another take. A hybrid's
-        // immediate parent is already arranged, so use its saved, server-owned source ID.
-        String inputId =
-                plan.path("fromUpload").asBoolean()
-                        ? ORIGINAL
-                        : hybrid ? plan.path("scoreSourceTakeId").asString(null) : take.parentId();
-        if (inputId == null) return null;
-        Path input = audio.file(project.id());
-        if (!ORIGINAL.equals(inputId)) {
-            var scoreInput = readyJob(project.id(), inputId);
-            input = audio.file(scoreInput.id());
-            if (!verifiedScoreAudio(input, scoreInput)) return null;
-        }
+        var input = scoreInput(project, take, plan);
+        if (input.source() == null) return null;
         Path ancestor = audio.file(take.id());
         if (!verifiedScoreAudio(ancestor, take)) return null;
         return new ScoredAncestor(
-                take.id(), ancestor.toString(), frames, plan, merged, input.toString(), inputId);
+                take.id(), ancestor.toString(), frames, plan, merged, input.source(), input.id());
+    }
+
+    private static boolean isSavedScore(JsonNode plan) {
+        return plan != null
+                && plan.path("version").asInt(0) == 1
+                && "score".equals(plan.path("realization").asString(""))
+                && plan.path("roles").isArray()
+                && plan.path("fromUpload").isBoolean();
+    }
+
+    private ScoreInput scoreInput(Project project, Job take, JsonNode plan) {
+        if (plan.path("fromUpload").asBoolean())
+            return new ScoreInput(ORIGINAL, audio.file(project.id()).toString());
+        // Before source IDs were saved, whole scores were always transcribed from
+        // their immediate parent. A retained passage already required an explicit ID.
+        String id = plan.path("scoreSourceTakeId").asString(null);
+        if (id == null && !plan.has("retainedPassageFrames")) id = take.parentId();
+        if (id == null || ORIGINAL.equals(id)) return new ScoreInput(id, null);
+        var input = readyJob(project.id(), id);
+        var file = audio.file(input.id());
+        return new ScoreInput(id, verifiedScoreAudio(file, input) ? file.toString() : null);
     }
 
     private boolean verifiedScoreAudio(Path file, Job take) {
@@ -664,6 +671,16 @@ public final class RenditionProjects implements AutoCloseable {
                             ? scoredAncestor(project, parent, basis.frames())
                             : null;
             if (ancestor != null) request.put("scoredAncestor", ancestor);
+            ScoreInput directInput = null;
+            if (job.startSeconds() == null
+                    && isSavedScore(parentPlan)
+                    && !parentPlan.path("fromUpload").asBoolean()
+                    && !parentPlan.has("retainedPassageFrames")
+                    && parent.appliedStartSeconds() == null
+                    && parent.appliedEndSeconds() == null) {
+                directInput = scoreInput(project, parent, parentPlan);
+                request.put("parentScoreInput", directInput);
+            }
             if (job.passageChoice() != null) {
                 if (ancestor == null)
                     throw new IOException(
@@ -745,6 +762,12 @@ public final class RenditionProjects implements AutoCloseable {
                         throw new IOException(
                                 "The retained passages could not be matched to this take.");
                     object.put("scoreSourceTakeId", ancestor.scoreSourceTakeId());
+                } else if (isSavedScore(object) && !object.path("fromUpload").asBoolean()) {
+                    if (result.path("inheritedScoreInput").asBoolean(false)) {
+                        if (directInput == null || directInput.source() == null)
+                            throw new IOException("The earlier score input could not be verified.");
+                        object.put("scoreSourceTakeId", directInput.id());
+                    } else if (parent != null) object.put("scoreSourceTakeId", parent.id());
                 }
             }
             if (scoped && (nextPlan.isMissingNode() || nextPlan.isNull()) && parentPlan != null)

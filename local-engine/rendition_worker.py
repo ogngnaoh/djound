@@ -185,6 +185,7 @@ PASSAGE_CHOICES = {
     "keep my edited passage exactly": "keep",
     "change my edited passage too": "develop",
     "make a fresh interpretation of the whole take": "fresh",
+    "start fresh": "fresh",
 }
 PASSAGE_MENTION = re.compile(
     r"\b(?:ending|end|outro|opening|intro|beginning|start|passages?|sections?|earlier|previous(?:ly)?|"
@@ -195,6 +196,9 @@ PASSAGE_MENTION = re.compile(
 
 def passage_direction(prompt):
     """The clarification's example replies can be appended to the original request."""
+    fresh = re.match(r"^\s*start fresh(?:\s+with\s+|\s+and\s+|[,.!]\s*)(.+)$", prompt, re.I)
+    if fresh:
+        return fresh[1].strip(), "fresh"
     for words, policy in PASSAGE_CHOICES.items():
         phrase = re.search(r"\b(?:and\s+)?" + words + r"[.!?\s]*$", prompt, re.I)
         if phrase:
@@ -220,7 +224,11 @@ def plan_take(request, duration):
     if not isinstance(prompt, str) or not 0 < len(prompt.strip()) <= 1000:
         raise ValueError("Describe the change in up to 1000 characters.")
     has_passages = bool(request.get("scoredAncestor"))
-    prompt, passage_policy = passage_direction(prompt) if has_passages else (prompt, None)
+    direction, passage_policy = passage_direction(prompt)
+    if has_passages or (request.get("parentScoreInput") and passage_policy == "fresh"):
+        prompt = direction
+    else:
+        passage_policy = None
     answer = request.get("passagePolicy")
     if answer is not None:
         if answer not in ("keep", "develop") or not has_passages:
@@ -281,7 +289,8 @@ def plan_take(request, duration):
         if isinstance(plan, dict):
             plan = dict(plan)
             inferred_policy = plan.pop("previousPassages", None)
-            passage_policy = passage_policy or inferred_policy
+            if has_passages:
+                passage_policy = passage_policy or inferred_policy
             choice = plan.pop("reference", None)
             keep_ensemble = choice == "original" and plan.pop("keep_ensemble", False) is True
             unresolved_passage = has_passages and plan.get("scope") == "whole" and passage_policy == "clarify"
@@ -335,6 +344,8 @@ def plan_take(request, duration):
         if passage_policy == "keep" and ancestor.get("editedFrames") == [[0, ancestor.get("frames")]]:
             return {"state": "clarify", "error": "The saved passages cover the whole take. To change it, ask to change the edited passage too or choose an earlier take."}
         retained = {"passagePolicy": passage_policy}
+    elif start is None and passage_policy == "fresh":
+        retained = {"passagePolicy": "fresh"}
     return {"state": "planned", **retained, "caption": caption.strip(), "label": label.strip()[:120], "planner": planner,
             "appliedStartSeconds": start, "appliedEndSeconds": end, "melodyReference": reference,
             "keepEnsemble": keep_ensemble}
@@ -351,7 +362,7 @@ def run(request, plan_only=False):
     output = Path(request["output"])
     if output.resolve() in (source, Path(request["original"]).resolve()) or output.exists():
         raise ValueError("A revision requires a new audio file.")
-    direction = passage_direction(request["prompt"])[0] if request.get("scoredAncestor") else request["prompt"]
+    direction = passage_direction(request["prompt"])[0] if decision.get("passagePolicy") else request["prompt"]
     caption = decision["caption"]
     if decision["planner"] != "style" and caption.casefold() != direction.strip().casefold():
         caption = direction.strip() + ". " + caption
@@ -373,6 +384,7 @@ def run(request, plan_only=False):
                                      parent_plan=None if policy == "fresh" else request.get("parentPlan"), parent_map=parent_map,
                                      recover_original=reference is not None,
                                      scored_ancestor=request.get("scoredAncestor") if policy in ("keep", "develop") else None,
+                                     parent_score_input=request.get("parentScoreInput") if policy != "fresh" else None,
                                      passage_policy=policy)
             if metadata:
                 if metadata.get("state") == "clarify":
