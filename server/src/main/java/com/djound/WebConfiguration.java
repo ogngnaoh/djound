@@ -4,10 +4,12 @@ import jakarta.servlet.http.*;
 
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.annotation.Configuration;
+import org.springframework.http.HttpMethod;
 import org.springframework.stereotype.Controller;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.servlet.HandlerInterceptor;
 import org.springframework.web.servlet.config.annotation.*;
+import org.springframework.web.servlet.resource.NoResourceFoundException;
 
 import java.util.*;
 
@@ -45,19 +47,15 @@ public class WebConfiguration implements WebMvcConfigurer {
     }
 
     @Controller
-    static class Spa {
-        @GetMapping({
-            "/",
-            "/remix/new",
-            "/remix/{id}",
-            "/remix/{id}/melody",
-            "/remix/{id}/notes",
-            "/mixes",
-            "/mixes/{id}",
-            "/renditions",
-            "/renditions/{id}"
-        })
-        public String app() {
+    static class WebEntry {
+        @GetMapping(value = {"/", "/{section:(?!api$|error$)[^.]+}/**"}, produces = "text/html")
+        public String app(HttpServletRequest request) throws NoResourceFoundException {
+            // File requests keep ordinary 404 semantics, including old hashed bundles.
+            if (request.getRequestURI().contains("."))
+                throw new NoResourceFoundException(
+                        HttpMethod.valueOf(request.getMethod()),
+                        request.getRequestURI(),
+                        "This resource could not be found.");
             return "forward:/index.html";
         }
     }
