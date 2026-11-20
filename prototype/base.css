@@ -1,0 +1,36 @@
+@font-face {
+  font-family: Instrument;
+  src: url("./fonts/instrument-sans.ttf") format("truetype");
+  font-weight: 400 700;
+  font-display: swap;
+}
+@font-face {
+  font-family: Source;
+  src: url("./fonts/source-sans-3.ttf") format("truetype");
+  font-weight: 200 900;
+  font-display: swap;
+}
+:root {
+  color-scheme: dark;
+  --page: #171614;
+  --surface: #211f1c;
+  --ink: #f2eee7;
+  --muted: #b9b0a4;
+  --line: #454039;
+  --accent: #e2ab79;
+  --sans: Instrument, system-ui, sans-serif;
+  --body: Source, system-ui, sans-serif;
+  background: var(--page);
+  color: var(--ink);
+  font-family: var(--sans);
+}
+*, *::before, *::after { box-sizing: border-box; }
+body { margin: 0; }
+[hidden] { display: none !important; }
+button, input, textarea, select { font: inherit; }
+a { color: inherit; }
+button, a, input, textarea { -webkit-tap-highlight-color: transparent; }
+button { color: inherit; cursor: pointer; }
+button:disabled { cursor: default; }
+:focus-visible { outline: 2px solid #edbd86; outline-offset: 3px; }
+img { max-width: 100%; }
