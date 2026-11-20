@@ -4,7 +4,7 @@ import unittest
 from unittest.mock import Mock
 
 from rendition_score import _gap_answers, analyze, arrange, Timeline
-from rendition_score_plan import ArrangementClarification, _scope_gap_answers
+from rendition_score_plan import ArrangementClarification, _lead_duration, _scope_gap_answers
 
 
 class GapAnswersTest(unittest.TestCase):
@@ -39,6 +39,23 @@ class GapAnswersTest(unittest.TestCase):
         self.assertEqual(outside(revised[2]), outside(initial[2]))
         self.assertEqual(arrange(source, analysis, saved), (revised, length, markers))
 
+        # Asking a melody to sing instead of clipping its notes is a duration
+        # edit. The selected piano replies still need room to enter.
+        smooth = copy.deepcopy(saved)
+        director.choose.side_effect = ["extend"]
+        self.assertTrue(_lead_duration(smooth, "Let the accordion sing instead of clipping every note.", director))
+        held, same_length, same_map = arrange(source, analysis, smooth)
+        self.assertEqual((held[1:], same_length, same_map), (revised[1:], length, markers))
+        def attacks(track):
+            return [(start, pitch, velocity) for start, _, pitch, velocity in track["notes"]]
+        self.assertEqual(attacks(held[0]), attacks(revised[0]))
+        self.assertGreater(sum(n[1]-n[0] for n in held[0]["notes"]), sum(n[1]-n[0] for n in revised[0]["notes"]))
+        for start, end, *_ in answers:
+            self.assertTrue(all(end <= a or start >= b for a,b,*_ in held[0]["notes"]))
+        director.choose.side_effect = ["shorten"]
+        self.assertTrue(_lead_duration(smooth, "Make the melody notes shorter.", director))
+        self.assertEqual(arrange(source, analysis, smooth)[0], revised)
+
         # A later lead revision must not quietly move the already selected piano performance.
         next_lead = dict(saved, phrasing="laid_back", leadTouch={"velocity":[76, 84, 88],
                                                                 "lengthPercent":85, "endOffsetMs":20})
@@ -65,6 +82,16 @@ class GapAnswersTest(unittest.TestCase):
         director.choose.return_value = "whole"
         self.assertFalse(_scope_gap_answers(plan, "Let the whole band and piano trade phrases in the gaps.", director))
         self.assertNotIn("answerTiming", plan["roles"][0])
+
+    def test_explicit_level_backing_and_recording_peak_requests_keep_their_own_scope(self):
+        plan = {"leadProgram": 21, "roles": []}
+        director = Mock()
+        for text in ("Make the accordion louder.", "Play shorter notes on the piano.",
+                     "Keep the long notes. Turn the accordion up.", "The recording is clipping.",
+                     "Make the whole band staccato."):
+            with self.subTest(text=text):
+                self.assertFalse(_lead_duration(plan, text, director))
+        director.choose.assert_not_called()
 
 
 if __name__ == "__main__":

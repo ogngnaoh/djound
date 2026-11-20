@@ -671,6 +671,44 @@ def balance_marks(plan):
     return [(index, db) for index, db in enumerate(levels) if db]
 
 
+def _lead_duration(plan, direction, director):
+    """Read note-length requests separately from vocal intensity or mix level."""
+    articulation = (r"\b(?:legato|staccato|chopp(?:y|ier)|"
+                    r"(?:clipp?(?:ed|ing)?|connect(?:ed|ing)?|detach(?:ed|ing)?|"
+                    r"short(?:er|en)?|long(?:er)?|sustain(?:ed|ing)?) (?:the |each |every |my )?notes?|"
+                    r"notes? (?:longer|shorter|ring|connect)|more connected|less clipped)\b")
+    actions = [s.strip() for s in re.split(r"[.!?;]|\bbut\b", direction, flags=re.I)
+               if s.strip() and not re.match(r"\s*(?:i (?:like|love)|keep|preserve|leave .* alone)\b", s, re.I)]
+    if any(re.search(r"\b(?:volume|louder|quieter|decibels?|dB|turn .* (?:up|down))\b", s, re.I) for s in actions):
+        return False
+    lead = {plan["leadProgram"], plan.get("leadSoundProgram", plan["leadProgram"])}
+    explicit = [s for s in actions if re.search(articulation, s, re.I) and set(_members(s)) <= lead
+                and not re.search(r"\b(?:whole band|ensemble|accompaniment|backing|rhythm section)\b", s, re.I)]
+    if not explicit:
+        return False
+    action = ". ".join(explicit)
+    change = director.choose("What should happen to the DURATION of the lead notes? "
+                             "A sound after ‘instead of’ or ‘less’ is the sound being rejected. "
+                             "Playing louder does not lengthen a note.", {
+                                 "extend": "hold notes longer and let the tune sing or join up",
+                                 "shorten": "release notes sooner for a clipped or detached sound",
+                                 "other": "keep note lengths, or a change to something other than the lead"},
+                             context=action)
+    if change == "other":
+        return False
+    previous = plan.get("leadDurationScale", 1.)
+    scale = min(2., max(.5, round(previous * (1.30 if change == "extend" else 1 / 1.30), 4)))
+    if scale == previous:
+        raise ArrangementClarification("The lead has reached this note-length setting. Try changing its pace instead.")
+    plan["leadDurationScale"] = scale
+    if "backingTiming" not in plan and any(r["kind"] == "counterline" or (
+            plan.get("phraseInteraction", "steady") != "steady" and r.get("followPhrases", True)) for r in plan["roles"]):
+        plan["backingTiming"] = {"phrasing": plan["phrasing"], "leadDurationScale": previous}
+        if "leadTouch" in plan:
+            plan["backingTiming"]["leadTouch"] = copy.deepcopy(plan["leadTouch"])
+    return True
+
+
 def _scope_gap_answers(plan, direction, director):
     """Change a named accompanist's placement without rewriting the whole ensemble."""
     gap = r"\b(?:gaps?|rests?|pauses?|breaths?|between (?:the |my |its )?(?:lines|phrases)|stops playing)\b"
@@ -711,7 +749,7 @@ def _scope_gap_answers(plan, direction, director):
     else:
         # Remember the particular lead performance this player is answering,
         # including when a previous revision preserved an older cue for other players.
-        cue = {k: copy.deepcopy(plan[k]) for k in ("phrasing", "leadTouch") if k in plan}
+        cue = {k: copy.deepcopy(plan[k]) for k in ("phrasing", "leadTouch", "leadDurationScale") if k in plan}
         if role.get("answerTiming") == cue:
             raise ArrangementClarification("That player already answers in the melody's gaps. Which other change would you like?")
         role["answerTiming"] = cue
@@ -950,6 +988,8 @@ def _arrange(analysis, direction, old, director, *, tempo_instruction=None):
     if old:
         changes = {"players"} if additions else _changes(director, direction, register)
     plan = copy.deepcopy(old) if old else {"version": 1}
+    if old and changes in ({"balance"}, {"phrasing"}) and _lead_duration(plan, direction, director):
+        return plan
     if changes == {"interaction"} and _scope_gap_answers(plan, direction, director):
         return plan
     if changes == {"balance"}:
@@ -1047,7 +1087,8 @@ def _arrange(analysis, direction, old, director, *, tempo_instruction=None):
         if any(r["kind"] == "counterline" or (responsive and r.get("followPhrases", True)) for r in old["roles"]):
             # These players listened to the previous lead to place notes in its rests.
             # Keep the cue they heard across further revisions of the lead.
-            plan["backingTiming"] = {key: copy.deepcopy(old[key]) for key in ("phrasing", "leadTouch") if key in old}
+            plan["backingTiming"] = {key: copy.deepcopy(old[key]) for key in ("phrasing", "leadTouch", "leadDurationScale")
+                                     if key in old}
     elif not additions and (changes.intersection({"players", "groove", "interaction"})
                             or ("phrasing" in changes and len(changes) > 1)):
         plan.pop("backingTiming", None)
@@ -1308,7 +1349,7 @@ def _run(request):
     tempo_instruction = _listener_tempo(director, direction)
     plan = _arrange(analysis, direction, old, director, tempo_instruction=tempo_instruction)
     if (old and plan.get("bpm") == old["bpm"] and not _backing_additions(direction, old)
-            and balance_marks(plan) == balance_marks(old)
+            and balance_marks(plan) == balance_marks(old) and plan.get("leadDurationScale") == old.get("leadDurationScale")
             and all(a.get("answerTiming") == b.get("answerTiming") for a, b in zip(plan["roles"], old["roles"]))):
         requested, references = tempo_instruction
         proposed = _single_tempo(director.brief)

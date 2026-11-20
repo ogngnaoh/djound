@@ -150,6 +150,9 @@ def lead_octave(plan, median_pitch):
 
 def _lead_track(notes, timeline, plan):
     melody = notes["melody"]
+    duration_scale = plan.get("leadDurationScale", 1.)
+    if type(duration_scale) not in (int, float) or not .5 <= duration_scale <= 2.:
+        raise ValueError("The saved lead note-length setting is invalid.")
     shift = 12 * lead_octave(plan, median(note[2] for note in melody))
     track = {"program": plan["leadProgram"], "level_db": -19., "notes": []}
     touch = plan.get("leadTouch")
@@ -204,7 +207,7 @@ def _lead_track(notes, timeline, plan):
         positions = timed
     for i, (pos, span, pitch, confidence) in enumerate(positions):
         next_onset = positions[i + 1][0] if i + 1 < len(positions) else timeline.last
-        end = min(next_onset, pos + span, timeline.last)
+        end = min(next_onset, pos + span * duration_scale, timeline.last)
         if end > pos:
             accent = 64 + 25 * confidence + 5 * math.cos(math.pi * pos)
             velocity = round(accent * (expression[i][2] if touch else 1.) * _level(plan, pos, timeline.last))
@@ -394,12 +397,14 @@ def arrange(notes, analysis, plan):
         lead["note_dynamics"] = plan["leadNoteDynamics"]
     cue = lead
     if timing := plan.get("backingTiming"):
-        cue = _lead_track(notes, timeline, dict(plan, phrasing=timing["phrasing"], leadTouch=timing.get("leadTouch")))
+        cue = _lead_track(notes, timeline, dict(plan, phrasing=timing["phrasing"], leadTouch=timing.get("leadTouch"),
+                                                leadDurationScale=timing.get("leadDurationScale", 1.)))
     attacks = [a / timeline.beat for a, _, _, _ in cue["notes"]]
     releases = [b / timeline.beat for _, b, _, _ in cue["notes"]]
     sections = _phrase_backing(analysis, timeline, plan, attacks, releases)
     tracks = [lead]
     previous = {}
+    reply_starts = []
     for idx, role in enumerate(plan["roles"]):
         kind = role["kind"]
         drum = kind == "percussion"
@@ -412,8 +417,12 @@ def arrange(notes, analysis, plan):
         events = _backing_events(role, timeline, plan, sections, attacks, releases)
         if timing := role.get("answerTiming"):
             answer_cue = _lead_track(notes, timeline, dict(plan, phrasing=timing["phrasing"],
-                                                          leadTouch=timing.get("leadTouch")))
+                                                          leadTouch=timing.get("leadTouch"),
+                                                          leadDurationScale=timing.get("leadDurationScale", 1.)))
             events = _gap_answers(events, role, answer_cue["notes"], timeline)
+            if plan.get("leadDurationScale", 1.) > timing.get("leadDurationScale", 1.):
+                reply_starts.extend(pos * timeline.beat for pos, _, _, _ in events
+                                    if timeline.intro <= pos < timeline.beats[-1])
         for pos, end, raw_pos, hit in events:
             cell = min(len(palette) - 1, int(raw_pos // (timeline.meter / 2)))
             root, tones = palette[cell]
@@ -439,4 +448,15 @@ def arrange(notes, analysis, plan):
                     track["notes"].append((attack, end * timeline.beat, min(127, pitch), velocity))
         if track["notes"]:
             tracks.append(track)
+    if reply_starts:
+        # A longer note may reach a reply the listener kept. Honor the other
+        # player's recorded entrance without moving any attack in either part.
+        reply_starts.sort()
+        sustained = []
+        for start, end, pitch, velocity in lead["notes"]:
+            i = bisect_right(reply_starts, start + .035)
+            if i < len(reply_starts):
+                end = min(end, reply_starts[i] - .025)
+            sustained.append((start, end, pitch, velocity))
+        lead["notes"] = sustained
     return tracks, timeline.duration, timeline.frames()

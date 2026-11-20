@@ -130,6 +130,9 @@ def _score_caption(plan, tracks):
     if tracks[0]["notes"]:
         feel = {"flowing": "connected notes", "articulated": "short, separated notes",
                 "laid_back": "relaxed timing", "syncopated": "offbeat accents"}[plan["phrasing"]]
+        duration_scale = plan.get("leadDurationScale", 1.)
+        if duration_scale != 1.:
+            feel = "longer, more connected notes" if duration_scale > 1. else "shorter, more detached notes"
         closing = ""
         if touch := plan.get("leadTouch"):
             _, middle, end = touch["velocity"]
@@ -249,6 +252,9 @@ def perform_score(parent, original, destination, work, *, direction, caption, pa
                 return {"state": "clarify", "error": "I couldn't find the lead notes to change in this take."}
             if balance_marks(plan) != balance_marks(parent_plan):
                 return {"state": "clarify", "error": "That part has no sounding notes to adjust in this take."}
+            if plan.get("leadDurationScale") != parent_plan.get("leadDurationScale"):
+                return {"state": "clarify", "error": "The notes have reached their available length between entrances. "
+                        "Try changing the pace to give them more space."}
             plan = plan_arrangement(analysis, direction, parent_caption, deadline=deadline, reconsider=True)
             if plan is not None:
                 performance = arrange(notes, analysis, plan)
@@ -300,7 +306,8 @@ def perform_score(parent, original, destination, work, *, direction, caption, pa
         intervals = scored_ancestor["editedFrames"]
         same_performance = all(plan.get(field) == parent_plan.get(field) for field in
                                ("bpm", "meter", "subdivision", "roles", "phraseInteraction", "phraseDynamics",
-                                "harmony", "phrasing", "leadTouch", "leadNoteDynamics", "room", "realization"))
+                                "harmony", "phrasing", "leadTouch", "leadNoteDynamics", "leadDurationScale",
+                                "room", "realization"))
         def passage_file(start, end, folder):
             if passage_policy == "keep":
                 return parent
