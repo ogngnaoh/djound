@@ -8,6 +8,7 @@ import org.springframework.web.bind.annotation.*;
 import org.springframework.web.multipart.MultipartFile;
 
 import java.io.IOException;
+import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.util.List;
 
@@ -85,7 +86,7 @@ final class RenditionController {
     @GetMapping("/{id}/takes/{takeId}/waveform")
     ResponseEntity<int[]> waveform(@PathVariable String id, @PathVariable String takeId)
             throws IOException {
-        var peaks = RenditionWaveform.peaks(projects.path(id, takeId));
+        var peaks = RenditionWaveform.peaks(projects.audioFile(id, takeId, false).path());
         return ResponseEntity.ok().header("Cache-Control", "private, no-cache").body(peaks);
     }
 
@@ -93,20 +94,20 @@ final class RenditionController {
     ResponseEntity<FileSystemResource> audio(
             @PathVariable String id, @PathVariable String takeId, @PathVariable String operation)
             throws IOException {
-        var file = projects.path(id, takeId);
+        var file = projects.audioFile(id, takeId, operation.equals("export"));
         var reply =
                 ResponseEntity.ok()
                         .contentType(MediaType.parseMediaType("audio/wav"))
-                        .contentLength(Files.size(file))
+                        .contentLength(Files.size(file.path()))
                         .header("Cache-Control", "private, no-cache")
                         .header("Accept-Ranges", "bytes");
-        if (operation.equals("export"))
+        if (file.exportName() != null)
             reply.header(
                     "Content-Disposition",
                     ContentDisposition.attachment()
-                            .filename("djound-" + takeId + ".wav")
+                            .filename(file.exportName(), StandardCharsets.UTF_8)
                             .build()
                             .toString());
-        return reply.body(new FileSystemResource(file));
+        return reply.body(new FileSystemResource(file.path()));
     }
 }

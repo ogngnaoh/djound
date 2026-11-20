@@ -141,7 +141,8 @@ class BackendIntegrationTest {
                         .start()
                         .waitFor());
         var upload =
-                new MockMultipartFile("file", "memo.m4a", "audio/mp4", Files.readAllBytes(memo));
+                new MockMultipartFile(
+                        "file", "Étude 東京.m4a", "audio/mp4", Files.readAllBytes(memo));
         var session = projects.create(upload, "import");
         String id = session.id();
         var imported = projects.list().getFirst();
@@ -194,21 +195,38 @@ class BackendIntegrationTest {
                                     .build(),
                             java.net.http.HttpResponse.BodyHandlers.ofByteArray());
             assertEquals(200, exported.statusCode());
+            assertEquals("Étude 東京 - Take 2 - Test output.wav", renditionExportName(exported));
+            assertEquals(
+                    "private, no-cache",
+                    exported.headers().firstValue("Cache-Control").orElseThrow());
+            var firstExport = renditionRequest(http, "GET", take.exportUrl());
+            assertEquals("Étude 東京 - Take 1 - Test output.wav", renditionExportName(firstExport));
+            var original =
+                    renditionRequest(
+                            http, "GET", session.originalUrl().replace("/audio", "/export"));
+            assertEquals("Étude 東京 - Original.wav", renditionExportName(original));
+            var playback = renditionRequest(http, "GET", session.originalUrl());
+            assertArrayEquals(playback.body(), original.body());
+            assertTrue(playback.headers().firstValue("Content-Disposition").isEmpty());
             assertEquals(
                     second.sha256(),
                     HexFormat.of()
                             .formatHex(
                                     java.security.MessageDigest.getInstance("SHA-256")
                                             .digest(exported.body())));
-            var partial =
-                    http.send(
-                            java.net.http.HttpRequest.newBuilder(
-                                            java.net.URI.create(url + session.originalUrl()))
-                                    .header("Range", "bytes=0-43")
-                                    .build(),
-                            java.net.http.HttpResponse.BodyHandlers.ofByteArray());
-            assertEquals(206, partial.statusCode());
-            assertEquals(44, partial.body().length);
+            for (var full : List.of(playback, exported)) {
+                var partial =
+                        http.send(
+                                java.net.http.HttpRequest.newBuilder(full.uri())
+                                        .header("Range", "bytes=0-43")
+                                        .build(),
+                                java.net.http.HttpResponse.BodyHandlers.ofByteArray());
+                assertEquals(206, partial.statusCode());
+                assertEquals(
+                        full.headers().firstValue("Content-Disposition"),
+                        partial.headers().firstValue("Content-Disposition"));
+                assertArrayEquals(Arrays.copyOf(full.body(), 44), partial.body());
+            }
         }
         assertEquals(second.id(), projects.favorite(id, second.id()).favoriteId());
         projects.submit(
@@ -320,6 +338,14 @@ class BackendIntegrationTest {
             assertEquals(second.id(), reopened.create(upload, "import").favoriteId());
             assertArrayEquals(heard, renditionRequest(http, "GET", second.exportUrl()).body());
         }
+    }
+
+    private static String renditionExportName(java.net.http.HttpResponse<?> response) {
+        var header = response.headers().firstValue("Content-Disposition").orElseThrow();
+        assertTrue(header.chars().allMatch(c -> c >= 32 && c < 127));
+        var attachment = org.springframework.http.ContentDisposition.parse(header);
+        assertTrue(attachment.isAttachment());
+        return attachment.getFilename();
     }
 
     private java.net.http.HttpResponse<byte[]> renditionRequest(

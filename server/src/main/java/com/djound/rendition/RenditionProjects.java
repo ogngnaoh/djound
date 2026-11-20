@@ -559,14 +559,31 @@ public final class RenditionProjects implements AutoCloseable {
                 });
     }
 
-    Path path(String id, String takeId) {
-        Project p = project(id);
-        String fileId = ORIGINAL.equals(takeId) ? p.id() : readyJob(id, takeId).id();
-        Path path = audio.file(fileId);
+    record AudioFile(Path path, String exportName) {}
+
+    AudioFile audioFile(String id, String takeId, boolean export) {
+        Project recording = project(id);
+        Job take = ORIGINAL.equals(takeId) ? null : readyJob(id, takeId);
+        Path path = audio.file(take == null ? recording.id() : take.id());
         if (!Files.isRegularFile(path, LinkOption.NOFOLLOW_LINKS))
             throw new ApiProblem(
                     410, "RENDITION_FILE_LOST", "The saved audio is missing from local storage.");
-        return path;
+        if (!export) return new AudioFile(path, null);
+        if (take == null)
+            return new AudioFile(path, RenditionExportName.original(recording.title()));
+        // Match the studio's numbering, including requests that did not produce playable takes.
+        long number =
+                db.sql(
+                                """
+                                SELECT count(*) FROM rendition_take t
+                                WHERE t.project_id = ? AND (t.created_at, t.id) <=
+                                    (SELECT created_at, id FROM rendition_take WHERE project_id = ? AND id = ?)
+                                """)
+                        .params(id, id, take.id())
+                        .query(Long.class)
+                        .single();
+        return new AudioFile(
+                path, RenditionExportName.take(recording.title(), number, take.label()));
     }
 
     private void consume() {
