@@ -375,6 +375,10 @@ def _score_players(director, direction, old, additions=()):
         lead = explicit[0]
     else:
         lead = director.choose("Which listed player carries the recognizable main tune?", {p: names[p] for p in melodic[:12]})
+    if edit == "remove" and lead == old["leadProgram"]:
+        # Keep every surviving written part, including multiple parts of the same player.
+        cast = [(r["kind"], KIT if r["kind"] == "percussion" else r["program"]) for r in old["roles"]]
+        return lead, [(kind, p) for kind, p in cast if p in players], edit
     if solo:
         players = [lead]
     remaining = [p for p in players if p != lead]
@@ -389,9 +393,6 @@ def _score_players(director, direction, old, additions=()):
         # second part. Only the new instruments need a role from the director.
         cast = [(r["kind"], KIT if r["kind"] == "percussion" else r["program"]) for r in old["roles"]]
         remaining = [p for p in remaining if p not in old_players]
-    elif lead == (old or {}).get("leadProgram") and edit == "remove":
-        if lead in existing:
-            cast.append((existing[lead], lead))
     elif lead in POLYPHONIC:
         self_part = director.choose(f"How does the melody player ({names[lead]}) accompany their own melody? "
                                     "Allow a second-hand part in a solo or comping when appropriate.",
@@ -406,7 +407,7 @@ def _score_players(director, direction, old, additions=()):
         if kind is None:
             kind = director.choose(f"What supporting part does {names[p]} play?", KINDS)
         cast.append((kind, p))
-    return lead, cast
+    return lead, cast, edit
 
 
 def _event(beat, duration, degree, velocity, pitch=None):
@@ -772,6 +773,7 @@ def _arrange(analysis, direction, old, director, *, tempo_instruction=None):
         plan["phraseDynamics"] = director.choose("How should intensity develop across phrases?", DYNAMICS)
         plan["room"] = director.choose("What sense of acoustic space suits the performance?", ROOMS)
     if "form" in changes:
+        plan.pop("keepEmptyBars", None)
         plan["introBars"] = director.choose("How many bars of introduction before the theme?",
                                             {0: "start immediately with the tune", 1: "short one-bar pickup", 2: "two-bar introduction"})
         plan["endingBars"] = director.choose("How many additional bars after the last source phrase?",
@@ -792,6 +794,23 @@ def _arrange(analysis, direction, old, director, *, tempo_instruction=None):
         plan["leadProgram"] = (candidates[0] if len(candidates) == 1 and assigned == {candidates[0]} else
                                director.choose("Which performer is the new melody player?", {p: names[p] for p in candidates}))
         return plan
+    if "players" in changes:
+        plan["leadProgram"], cast, lineup_edit = _score_players(director, direction, old, additions)
+        if changes == {"players"} and lineup_edit == "remove" and plan["leadProgram"] == old["leadProgram"]:
+            from rendition_score import role_pan
+
+            kept = {program for _, program in cast}
+            roles = []
+            for index, role in enumerate(old["roles"]):
+                if (KIT if role["kind"] == "percussion" else role["program"]) in kept:
+                    part = copy.deepcopy(role)
+                    if index != len(roles):
+                        part["pan"] = role_pan(role, index)
+                    roles.append(part)
+            if not roles and old["roles"]:
+                plan["keepEmptyBars"] = True
+            plan["roles"] = roles
+            return plan
     if old and changes == {"phrasing"} and "backingTiming" not in plan:
         responsive = old.get("phraseInteraction", "steady") != "steady"
         if any(r["kind"] == "counterline" or (responsive and r.get("followPhrases", True)) for r in old["roles"]):
@@ -801,9 +820,7 @@ def _arrange(analysis, direction, old, director, *, tempo_instruction=None):
     elif not additions and (changes.intersection({"players", "groove", "interaction"})
                             or ("phrasing" in changes and len(changes) > 1)):
         plan.pop("backingTiming", None)
-    if "players" in changes:
-        plan["leadProgram"], cast = _score_players(director, direction, old, additions)
-    elif "groove" in changes:
+    if "players" not in changes and "groove" in changes:
         cast = [(r["kind"], KIT if r["kind"] == "percussion" else r["program"]) for r in plan["roles"]]
     if additions:
         # The selected parts are already written, including distinct roles for

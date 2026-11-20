@@ -292,6 +292,31 @@ class ScoreRevisionTest(unittest.TestCase):
         self.assertEqual(original, revised["roles"][:2])
         self.assertFalse(any("Acoustic Grand Piano" in call.args[0] for call in chart.choose.call_args_list))
 
+    @unittest.skipUnless(player.score_available(), "Run the local guide setup for soundfont tests")
+    def test_removing_a_backing_player_sounds_like_muting_their_written_parts(self):
+        import time
+        from test_rendition_score_plan import Musician
+
+        roles = [{"kind": kind, "program": program, "gesture": gesture, "pattern": planner._pattern(kind, gesture, 4)}
+                 for kind, program, gesture in (("chords", 25, "hold"), ("bass", 32, "two"),
+                                                ("chords", 0, "pulse"), ("chords", 0, "anticipate"))]
+        plan = dict(self.parent, leadProgram=42, introBars=1, endingBars=1, roles=roles,
+                    backingTiming={"phrasing": "articulated"})
+        analysis = analyze(self.notes)
+        original, seconds, clock = arrange(self.notes, analysis, plan)
+        musician = Musician({"What is the listener": "players", "How is the listener": "remove"})
+        child = planner._arrange(analysis, "Remove the guitar. Keep everyone else as they are.", plan, musician)
+        tracks, duration, mapping = arrange(self.notes, analysis, json.loads(json.dumps(child)))
+        self.assertEqual((original[:1] + original[2:], seconds, clock), (tracks, duration, mapping))
+        self.assertEqual(plan["backingTiming"], child["backingTiming"])
+        options = dict(room=plan["room"], deadline=time.monotonic() + 30, master_gain=.40)
+        muted = self.root / "muted.wav"
+        player.render_score(original, seconds, muted, part_gains=[.75, 0., .85, .92, .65], **options)
+        player.render_score(tracks, duration, self.output, part_gains=[.75, .85, .92, .65], **options)
+        self.assertEqual(muted.read_bytes(), self.output.read_bytes())
+        solo = planner._arrange(analysis, "Remove the bass and piano.", child, musician)
+        self.assertEqual(([original[0]], seconds, clock), arrange(self.notes, analysis, solo))
+
     def test_adding_backing_to_a_take_the_listener_likes(self):
         from unittest.mock import Mock
 

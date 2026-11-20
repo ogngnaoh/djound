@@ -12,6 +12,10 @@ from chart import CHORDS, rank_bar
 RATE = 44100
 
 
+def role_pan(role, index):
+    return role.get("pan", (0., -.14, .18, -.22)[index % 4])
+
+
 def analyze(notes):
     """Locate phrases using sounding notes, rests and the estimated pulse."""
     melody = notes["melody"]
@@ -46,7 +50,8 @@ class Timeline:
     def __init__(self, analysis, plan):
         self.beat = 60 / plan["bpm"]
         self.meter = plan["meter"]
-        self.intro = plan["introBars"] * self.meter if plan["roles"] else 0
+        play_form = plan["roles"] or plan.get("keepEmptyBars")
+        self.intro = plan["introBars"] * self.meter if play_form else 0
         source_beat = 60 / analysis["bpm"]
         self.seconds = [0.]
         self.beats = [float(self.intro)]
@@ -56,7 +61,7 @@ class Timeline:
             self.beats.append(self.beats[-1] + max(.5, round(2 * intervals) / 2))
             self.seconds.append(phrase["end"])
         self.release = .45
-        self.last = self.beats[-1] + (plan["endingBars"] * self.meter if plan["roles"] else 0)
+        self.last = self.beats[-1] + (plan["endingBars"] * self.meter if play_form else 0)
         self.duration = self.last * self.beat + self.release
         if self.duration > 600:
             raise ValueError("This arrangement would exceed ten minutes. Try a faster or shorter interpretation.")
@@ -357,7 +362,7 @@ def arrange(notes, analysis, plan):
         kind = role["kind"]
         drum = kind == "percussion"
         track = {"program": role.get("kit", 0) if drum else role["program"], "percussion": drum,
-                 "pan": (0., -.14, .18, -.22)[idx % 4],
+                 "pan": role_pan(role, idx),
                  "level_db": {"bass": -21., "percussion": -22., "chords": -24., "arpeggio": -23.,
                               "counterline": -24., "pedal": -24.}[kind], "notes": []}
         for pos, end, raw_pos, hit in _backing_events(role, timeline, plan, sections, attacks, releases):
