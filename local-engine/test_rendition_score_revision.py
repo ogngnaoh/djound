@@ -194,7 +194,7 @@ class ScoreRevisionTest(unittest.TestCase):
             words = f"Keep the trumpet melody exactly. Add {instrument} chords to the accompaniment."
             director = Mock()
             director.choose.side_effect = lambda question, options: "add" if "add" in options else next(iter(options))
-            with patch.object(planner, "_changes", return_value={"players"}):
+            with patch.object(planner, "_changes", side_effect=AssertionError("A new backing player is explicit.")):
                 revised = planner._arrange(analysis, words, prior, director)
             tracks, _, _ = arrange(self.notes, analysis, revised)
             self.assertEqual(previous, tracks[:-1])
@@ -212,6 +212,28 @@ class ScoreRevisionTest(unittest.TestCase):
             restored = planner._prior({"parentPlan": json.loads(json.dumps(at_limit))})
             with self.assertRaisesRegex(planner.ArrangementClarification, "Choose a part to replace"):
                 planner._arrange(analysis, "Add violin chords.", restored, director)
+
+    def test_a_supporting_addition_does_not_override_a_compound_edit(self):
+        old = dict(self.parent, leadProgram=56)
+        for words in ("Give the tune to a cello and add guitar to the backing.",
+                      "Add strings instead of piano.", "Add a guitar to carry the melody.",
+                      "Add guitar chords and make this much faster.", "Add guitar chords in 3/4.",
+                      "Add guitar but remove the trumpet."):
+            self.assertEqual([], planner._backing_additions(words, old), words)
+        words = "Keep the trumpet melody intact. Add softly strummed acoustic guitar and electric piano to the backing."
+        self.assertEqual([25, 4], planner._backing_additions(words, old))
+
+        # Existing performers can have two different figures for the same patch.
+        # The original arrangement must survive without reasking the director.
+        from unittest.mock import Mock
+        original = [{"kind": "chords", "program": 0, "gesture": g, "pattern": planner._pattern("chords", g, 4),
+                     "followPhrases": follow} for g, follow in (("hold", True), ("pulse", False))]
+        old = dict(old, roles=original, phraseInteraction="phrase_answers")
+        chart = Mock()
+        chart.choose.side_effect = lambda q, opts: next(iter(opts))
+        revised = planner._arrange(analyze(self.notes), "Add flute chords to the accompaniment.", old, chart)
+        self.assertEqual(original, revised["roles"][:2])
+        self.assertFalse(any("Acoustic Grand Piano" in call.args[0] for call in chart.choose.call_args_list))
 
     def test_upload_octave_uses_the_recording_actually_selected_for_transcription(self):
         from unittest.mock import Mock

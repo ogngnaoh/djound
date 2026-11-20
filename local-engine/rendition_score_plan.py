@@ -202,14 +202,40 @@ def _excluded_player(program, direction):
     return program != KIT and _excluded(program, direction)
 
 
-def _score_players(director, direction, old):
+def _backing_additions(direction, old):
+    """Resolve a directly requested supporting player without reassigning the protected lead."""
+    if not old or not re.search(r"\b(?:add|bring in|layer in|introduce)\b", direction, re.I):
+        return []
+    existing = {old["leadProgram"], *(KIT if r["kind"] == "percussion" else r["program"] for r in old["roles"])}
+    directives = r"(?:add|bring|layer|introduce|keep|leave|preserve|retain|don't|do not|give|make|change|swap|replace|remove|speed|slow|play)"
+    clauses = re.split(r"[.!?;]|(?:,\s*|\b(?:and|but|while|then)\s+)(?=" + directives + r"\b)", direction, flags=re.I)
+    additions = []
+    supporting = False
+    for phrase in (c.strip() for c in clauses if c.strip()):
+        if re.match(r"^(?:keep|leave|preserve|retain|don['’]t (?:change|touch)|do not (?:change|touch))\b", phrase, re.I):
+            supporting |= bool(MELODY_PART.search(phrase))
+            continue
+        add = re.match(r"^(?:(?:can|could|would) you\s+)?(?:please\s+)?(?:add|bring in|layer in|introduce)\s+(.+)", phrase, re.I)
+        if not add or re.search(r"\b(?:replace|swap|instead of|in place of|rather than|without|solo|"
+                                r"tempo|bpm|meter|faster|slower)\b|\b\d+/\d+\b", phrase, re.I):
+            return []
+        performer = re.split(r"\b(?:alongside|beneath|behind|underneath|under|over)\b", add[1], maxsplit=1, flags=re.I)[0]
+        programs = _members(performer)
+        if not programs or MELODY_PART.search(performer) or any(p in existing or _excluded_player(p, phrase) for p in programs):
+            return []
+        supporting |= bool(re.search(r"\b(?:backing|accompaniment|rhythm section|chords?|comping|behind|underneath)\b", phrase, re.I))
+        additions.extend(programs)
+    return list(dict.fromkeys(additions)) if supporting else []
+
+
+def _score_players(director, direction, old, additions=()):
     names = _catalog()[0]
-    named = [p for p in _members(direction) if not _excluded_player(p, direction)]
+    named = list(additions) or [p for p in _members(direction) if not _excluded_player(p, direction)]
     explicit = _explicit(direction)
-    solo = _size_hint(direction) is True
+    solo = not additions and _size_hint(direction) is True
     old_players = [] if not old else [old["leadProgram"]] + [KIT if r["kind"] == "percussion" else r["program"] for r in old["roles"]]
-    edit = None
-    if old and not solo:
+    edit = "add" if additions else None
+    if old and not solo and not additions:
         edit = director.choose("How is the listener changing the existing players?",
                                {"replace": "replace or recast the group", "add": "add performers while keeping the group",
                                 "remove": "remove performers while keeping the rest", "roles": "same performers, new roles"})
@@ -237,7 +263,7 @@ def _score_players(director, direction, old):
             raise ArrangementClarification("Choose an instrument that can carry the source melody.")
         melodic = [director.choose("Which instrument in that family plays the main tune?", allowed)]
     stated_leads = _stated_leads(direction)
-    if edit in ("add", "remove") and old["leadProgram"] in melodic and not stated_leads.intersection(melodic):
+    if additions or (edit in ("add", "remove") and old["leadProgram"] in melodic and not stated_leads.intersection(melodic)):
         lead = old["leadProgram"]
     elif len(stated_leads.intersection(melodic)) == 1:
         lead = next(iter(stated_leads.intersection(melodic)))
@@ -548,7 +574,10 @@ def _lead_touch(director, direction, phrasing, old):
 
 def _arrange(analysis, direction, old, director, *, tempo_instruction=None):
     register = _lead_register(direction, old, director)
-    changes = _changes(director, direction, register) if old else set(GROUPS)
+    additions = _backing_additions(direction, old)
+    changes = set(GROUPS)
+    if old:
+        changes = {"players"} if additions else _changes(director, direction, register)
     plan = copy.deepcopy(old) if old else {"version": 1}
     assigned = _stated_leads(direction) if register else set()
     if register == "natural":
@@ -588,7 +617,7 @@ def _arrange(analysis, direction, old, director, *, tempo_instruction=None):
                                             {0: "start immediately with the tune", 1: "short one-bar pickup", 2: "two-bar introduction"})
         plan["endingBars"] = director.choose("How many additional bars after the last source phrase?",
                                               {0: "close on the final phrase", 1: "one-bar cadence", 2: "two-bar coda"})
-    revoice = (changes == {"players"} and len(_members(direction)) == 1
+    revoice = (not additions and changes == {"players"} and len(_members(direction)) == 1
                and re.search(r"\b(?:lead|tune|melody|hook|theme)\b", direction, re.I))
     if register and old and len(assigned) == 1 and changes in ({"players"}, {"register"}):
         # A named reference instrument ("same octave as this trumpet") is not a new player.
@@ -610,13 +639,18 @@ def _arrange(analysis, direction, old, director, *, tempo_instruction=None):
             # These players listened to the previous lead to place notes in its rests.
             # Keep the cue they heard across further revisions of the lead.
             plan["backingTiming"] = {key: copy.deepcopy(old[key]) for key in ("phrasing", "leadTouch") if key in old}
-    elif changes.intersection({"players", "groove", "interaction"}) or ("phrasing" in changes and len(changes) > 1):
+    elif not additions and (changes.intersection({"players", "groove", "interaction"})
+                            or ("phrasing" in changes and len(changes) > 1)):
         plan.pop("backingTiming", None)
     if "players" in changes:
-        plan["leadProgram"], cast = _score_players(director, direction, old)
+        plan["leadProgram"], cast = _score_players(director, direction, old, additions)
     elif "groove" in changes:
         cast = [(r["kind"], KIT if r["kind"] == "percussion" else r["program"]) for r in plan["roles"]]
-    if changes.intersection({"players", "groove"}):
+    if additions:
+        # The selected parts are already written, including distinct roles for
+        # the same instrument. Ask for a figure only for the joining performers.
+        plan["roles"].extend(_roles(director, cast[len(old["roles"]):], plan["meter"], direction))
+    elif changes.intersection({"players", "groove"}):
         plan["roles"] = _roles(director, cast, plan["meter"], direction)
         if old and "groove" not in changes:
             prior_roles = {(r["kind"], r["program"]): r for r in old["roles"]}
@@ -628,7 +662,7 @@ def _arrange(analysis, direction, old, director, *, tempo_instruction=None):
         plan["phraseInteractionVersion"] = 2
     if plan.get("phraseInteraction", "steady") != "steady" and changes.intersection({"players", "groove", "interaction"}):
         prior_roles = {(r["kind"], r["program"]): r for r in old["roles"]} if old else {}
-        for role in plan["roles"]:
+        for role in plan["roles"][len(old["roles"]) if additions else 0:]:
             prior = prior_roles.get((role["kind"], role["program"]))
             if prior is None or "interaction" in changes:
                 role["followPhrases"] = _phrase_part(director, role, direction)
