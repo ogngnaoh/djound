@@ -661,7 +661,7 @@ button.take-history-row .take-history-icon svg {
   font-size: 13px;
   font-variant-numeric: tabular-nums;
 }
-@media (min-width: 1101px) and (min-height: 900px) {
+@media (min-width: 1101px) and (min-height: 960px) {
   .take-explorer .recording-wave-ruler {
     height: 45px;
     font-size: 16px;
