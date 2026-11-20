@@ -1030,7 +1030,7 @@ def _run(request):
         director = _Director(context)
     tempo_instruction = _listener_tempo(director, direction)
     plan = _arrange(analysis, direction, old, director, tempo_instruction=tempo_instruction)
-    if old and plan.get("bpm") == old["bpm"]:
+    if old and plan.get("bpm") == old["bpm"] and not _backing_additions(direction, old):
         requested, references = tempo_instruction
         proposed = _single_tempo(director.brief)
         if isinstance(requested, (int, float)):

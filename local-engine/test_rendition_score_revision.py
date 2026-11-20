@@ -294,6 +294,15 @@ class ScoreRevisionTest(unittest.TestCase):
         self.assertEqual(before, after[:-1])
         self.assertEqual(0, after[-1]["program"])
         self.assertTrue(after[-1]["notes"])
+        # An unsolicited tempo in the generated rehearsal notes must not move
+        # the saved melody when the listener only asked for another player.
+        chart.brief = "140 BPM. Piano answers the existing lead."
+        chart.identity = "scripted"
+        with (patch.object(planner, "_Director", return_value=chart),
+              patch.object(planner, "_interpret_freely", side_effect=AssertionError("Keep the old pace"))):
+            saved = planner._run({"analysis": dict(analysis, parentPlan=parent), "direction": words,
+                                  "parentCaption": "Cello with bass."})
+        self.assertEqual(before, arrange(self.notes, analysis, saved)[0][:-1])
         for prefix in ("I'd like the cello louder.", "I like the flute.", "I love the cello but change its octave."):
             self.assertEqual([], planner._backing_additions(prefix + " Add piano behind it.", parent))
 
