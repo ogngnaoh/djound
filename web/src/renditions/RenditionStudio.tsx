@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { ArrowLeft, Bookmark, Check, Download, Play } from "lucide-react";
-import { Link, useParams, useSearchParams } from "react-router-dom";
+import { Bookmark, Check, Download, Play } from "lucide-react";
+import { useLocation, useParams, useSearchParams } from "react-router-dom";
 import { Button } from "../components/ui/button";
 import { readLocal, writeLocal } from "../recovery";
 import { useAudio, clock } from "../studio/Player";
@@ -19,6 +19,7 @@ import {
 } from "./api";
 import { useRecoverableRequest } from "./useRecoverableRequest";
 import { RestoreRecording } from "./RestoreRecording";
+import { LibraryReturnLink } from "./libraryNavigation";
 import { correspondingPosition, passageAuditionStart } from "./songTime";
 import "./renditions.css";
 
@@ -39,10 +40,21 @@ const answerLabels = {
 } satisfies Record<RenditionAnswer["choice"], string>;
 type Passage = { start: string; end: string };
 type Revision = { text: string; range: Passage | null };
+type LinkChoice = { requested: string; fallback: string; audioError?: boolean };
 const inProgress = (take: Rendition) =>
   take.state === "queued" || take.state === "running";
 const progressText = (take: Rendition) =>
   take.state === "queued" ? "Queued" : take.progress || "Making take…";
+
+function linkStatus(take: Rendition | undefined, audioError = false) {
+  if (audioError) return "The linked take could not be played.";
+  if (take && inProgress(take)) return "The linked take is still being made.";
+  if (take?.state === "clarify") return "The linked take needs more direction.";
+  if (take?.state === "failed") return "The linked take did not finish.";
+  if (take?.state === "ready" && take.audioUrl)
+    return "The linked take is ready.";
+  return "The linked take is unavailable.";
+}
 
 function PassageChoices({
   question,
@@ -127,6 +139,7 @@ function RecordingSession({
     }
   }, [client, finishedCount]);
   const [params, setParams] = useSearchParams();
+  const location = useLocation();
   const player = useRef<HTMLAudioElement>(null);
   const direction = useRef<HTMLTextAreaElement>(null);
   const seekOnLoad = useRef<number | null>(null);
@@ -144,7 +157,26 @@ function RecordingSession({
     workingId: string;
     referenceId: string;
   } | null>(null);
-  const wanted = params.get("take") || project.favoriteId || "original";
+  const requestedId = params.get("take");
+  const linked = project.takes.find((take) => take.id === requestedId);
+  const linkedReady = linked?.state === "ready" && !!linked.audioUrl;
+  const favoriteId = project.takes.find(
+    (take) =>
+      take.id === project.favoriteId && take.state === "ready" && take.audioUrl,
+  )?.id;
+  const [linkChoice, setLinkChoice] = useState<LinkChoice | null>(null);
+  // A queued link may become ready while its listener is auditioning the fallback.
+  // Keep that audio and editing choice stable until they choose which take to open.
+  const recovery =
+    linkChoice && linkChoice.requested === requestedId
+      ? linkChoice
+      : requestedId !== null && requestedId !== "original" && !linkedReady
+        ? { requested: requestedId, fallback: favoriteId ?? "original" }
+        : null;
+  useEffect(() => {
+    if (recovery?.requested !== linkChoice?.requested) setLinkChoice(recovery);
+  }, [recovery, linkChoice]);
+  const wanted = recovery?.fallback ?? requestedId ?? favoriteId ?? "original";
   const selected = project.takes.find(
     (t) => t.id === wanted && t.state === "ready" && t.audioUrl,
   );
@@ -160,6 +192,10 @@ function RecordingSession({
     return `Take ${index + 1} · ${project.takes[index].label}`;
   };
   const activeName = label(activeId);
+  const fallbackName =
+    selected && selected.id === project.favoriteId
+      ? "your favorite, " + activeName
+      : activeName;
   const parentId = activeId;
   const parentTake = selected ?? null;
   const parentDuration = parentTake?.durationSeconds ?? project.durationSeconds;
@@ -297,21 +333,21 @@ function RecordingSession({
     startPlayback = true,
   ) {
     const id = take?.id ?? "original";
-    if (id !== activeId) {
-      setPreviousId(activeId);
+    if (id === requestedId && recovery) setLinkChoice(null);
+    if (id !== activeId) setPreviousId(activeId);
+    if (id !== activeId || (recovery && id !== requestedId)) {
       setRange(null);
       setText("");
       setRevising(null);
-    } else {
-      setAudition(null);
     }
+    setAudition(null);
     setParams(
       (current) => {
         const next = new URLSearchParams(current);
         next.set("take", id);
         return next;
       },
-      { replace: true },
+      { replace: true, state: location.state },
     );
     switchAudio(take, from, startPlayback);
   }
@@ -321,6 +357,32 @@ function RecordingSession({
     const target = returnToWorking ? (selected ?? null) : take;
     setAudition(returnToWorking ? null : { workingId: activeId, referenceId });
     switchAudio(target, positionIn(target), player.current?.paused === false);
+  }
+  function openFromLink(take: Rendition | null) {
+    chooseTake(take, undefined, player.current?.paused === false);
+  }
+  function mediaFailed(audio: HTMLAudioElement) {
+    if (!audio.error || audio.getAttribute("src") !== heardUrl) return;
+    if (
+      requestedId !== null &&
+      heardId === activeId &&
+      activeId !== "original" &&
+      (recovery || activeId === requestedId)
+    ) {
+      // A ready row may point to a missing file. If even the favorite fails,
+      // keep the saved link and offer Original instead of retrying in a loop.
+      setLinkChoice({
+        requested: requestedId,
+        fallback:
+          favoriteId && favoriteId !== activeId && favoriteId !== requestedId
+            ? favoriteId
+            : "original",
+        audioError: activeId === requestedId || recovery?.audioError,
+      });
+      setNotice("");
+      return;
+    }
+    setNotice("This audio could not be opened. Try playing it again.");
   }
   function passageAt(position: number, length: number): Passage {
     const start = Math.max(0, Math.min(Math.floor(position), length - 1));
@@ -371,7 +433,7 @@ function RecordingSession({
     end > start &&
     end <= parentDuration;
   function make(prompt: string) {
-    if (!prompt.trim()) return;
+    if (!prompt.trim() || recovery) return;
     const bounds: Pick<TakeRequest, "startSeconds" | "endSeconds"> = {};
     if (range) {
       if (!validRange) {
@@ -425,20 +487,37 @@ function RecordingSession({
       setSaving(false);
     }
   }
-  const locked = creation.busy || !!creation.pending;
+  const locked = creation.busy || !!creation.pending || !!recovery;
   return (
     <section
       className="mix-editor rendition-studio"
       data-working-take-id={activeId}
     >
       <header className="mix-heading">
-        <Link to="/renditions">
-          <ArrowLeft size={15} /> Your recordings
-        </Link>
+        <LibraryReturnLink />
         <h1>{project.title}</h1>
       </header>
       <div className="mix-edit-grid">
         <div className="mix-main">
+          {recovery && (
+            <div className="mix-reply">
+              <p role="status">
+                {linkStatus(linked, recovery.audioError)} You can listen to{" "}
+                {fallbackName}. Choose a take to edit.
+              </p>
+              <Button
+                variant="outline"
+                onClick={() => openFromLink(selected ?? null)}
+              >
+                Use {activeName}
+              </Button>
+              {linkedReady && (
+                <Button variant="outline" onClick={() => openFromLink(linked)}>
+                  {recovery.audioError ? "Retry" : "Open"} {label(linked.id)}
+                </Button>
+              )}
+            </div>
+          )}
           <div className="mix-time">
             <strong>
               {label(heardId)}
@@ -452,9 +531,7 @@ function RecordingSession({
             preload="metadata"
             aria-label={"Listen to " + label(heardId)}
             data-take-id={heardId}
-            onError={() =>
-              setNotice("This audio could not be opened. Try playing it again.")
-            }
+            onError={(event) => mediaFailed(event.currentTarget)}
             onTimeUpdate={(e) => {
               if (
                 stopAt.current !== null &&
@@ -573,6 +650,7 @@ function RecordingSession({
               <textarea
                 ref={direction}
                 maxLength={1000}
+                disabled={!!recovery}
                 aria-label="Describe a version or change"
                 placeholder={
                   selected
@@ -586,6 +664,7 @@ function RecordingSession({
                 <button
                   className="text-action"
                   type="button"
+                  disabled={!!recovery}
                   aria-expanded={!!range}
                   onClick={() => {
                     if (range) setRange(null);
