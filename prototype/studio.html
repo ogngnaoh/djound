@@ -1,0 +1,209 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="theme-color" content="#171715" />
+    <title>Studio · Djound</title>
+    <link rel="icon" href="data:," />
+    <link rel="stylesheet" href="base.css" />
+    <link rel="stylesheet" href="studio.css" />
+  </head>
+  <body class="studio">
+    <header class="topbar">
+      <a class="brand" href="./" aria-label="Djound home"
+        ><img src="media/wordmark.png" alt="Djound"
+      /></a>
+      <nav aria-label="Breadcrumb">
+        <a href="library.html">Library</a><i data-icon="chevron"></i
+        ><span aria-current="page">Studio</span>
+      </nav>
+      <button type="button" class="quiet outlined" id="export-top" disabled>
+        <i data-icon="export"></i> Export audio
+      </button>
+    </header>
+    <div class="workspace" id="workspace" hidden>
+      <aside class="rail" aria-labelledby="edits-title" id="rail">
+        <div class="rail-heading">
+          <h2 id="edits-title">Edits</h2>
+          <span id="edit-count"></span
+          ><button
+            type="button"
+            class="icon mobile-close"
+            aria-label="Close edits"
+            id="close-edits"
+          >
+            <i data-icon="close"></i>
+          </button>
+        </div>
+        <ul id="edit-list"></ul>
+      </aside>
+      <main class="desk">
+        <div class="main-inner">
+          <button
+            type="button"
+            class="mobile-edits quiet"
+            id="open-edits"
+            aria-controls="rail"
+            aria-expanded="false"
+          >
+            <i data-icon="sidebar"></i> Edits
+          </button>
+          <header class="project-head">
+            <div class="record-art" aria-hidden="true"><span></span></div>
+            <div>
+              <p id="project-kind">Recording</p>
+              <h1 id="project-title"></h1>
+            </div>
+          </header>
+          <section class="listener" aria-label="Audio player">
+            <div class="listener-title">
+              <div class="live-label">
+                <i data-icon="headphones"></i><span>Listening to</span>
+                <strong id="heard-name"></strong>
+              </div>
+              <button
+                type="button"
+                id="favorite"
+                class="icon favorite"
+                aria-label="Favorite this performance"
+              >
+                <i data-icon="star"></i>
+              </button>
+            </div>
+            <div class="wave-area" id="wave-area">
+              <canvas id="wave" aria-hidden="true"></canvas>
+              <input
+                type="range"
+                id="scrub"
+                min="0"
+                max="1"
+                value="0"
+                step="any"
+                aria-label="Playback position"
+                disabled
+              />
+            </div>
+            <div class="ruler" aria-hidden="true" id="ruler"></div>
+            <div class="transport">
+              <div class="playback">
+                <button
+                  type="button"
+                  id="play"
+                  class="round-play"
+                  aria-label="Play"
+                >
+                  <i data-icon="play"></i>
+                </button>
+                <button
+                  type="button"
+                  class="icon"
+                  id="rewind"
+                  aria-label="Return to start"
+                >
+                  <i data-icon="rewind"></i></button
+                ><span class="clock"
+                  ><b id="elapsed">0:00</b><span> / </span
+                  ><span id="duration">0:00</span></span
+                >
+              </div>
+              <div
+                class="compare"
+                id="compare"
+                role="group"
+                aria-label="Compare performances"
+              ></div>
+            </div>
+          </section>
+          <div class="lineage" id="lineage" hidden></div>
+          <section class="edit-section" aria-labelledby="compose-title">
+            <div class="compose-heading">
+              <h2 id="compose-title">Make an edit</h2>
+              <div class="parent-select">
+                <i data-icon="branch"></i
+                ><label for="parent">Editing from</label
+                ><select id="parent" aria-label="Editing from"></select>
+              </div>
+            </div>
+            <form id="composer">
+              <label class="sr" for="request">Describe your edit</label>
+              <textarea
+                id="request"
+                maxlength="600"
+                rows="2"
+                placeholder="How would you like this to sound?"
+              ></textarea>
+              <div class="composer-foot">
+                <span id="preview-note"
+                  >Interactive preview · simulated generation</span
+                ><button type="submit" id="generate" class="make">
+                  <i data-icon="sliders"></i> Create edit
+                </button>
+              </div>
+            </form>
+            <div
+              class="suggestions"
+              id="suggestions"
+              aria-label="Suggested requests"
+            ></div>
+            <div class="notice" role="status" id="message"></div>
+            <div class="job" id="job" hidden>
+              <div class="job-title">
+                <span class="job-glyph" id="job-glyph"></span>
+                <div aria-live="polite" aria-atomic="true">
+                  <strong id="job-title"></strong>
+                  <p id="job-detail"></p>
+                </div>
+                <span id="percentage" class="clock"></span>
+              </div>
+              <progress
+                aria-label="Simulated generation progress"
+                id="progress"
+                max="100"
+                value="0"
+              >
+                0%</progress
+              ><button
+                type="button"
+                class="quiet outlined"
+                id="hear-result"
+                hidden
+              >
+                <i data-icon="play"></i> Play new edit
+              </button>
+            </div>
+          </section>
+        </div>
+      </main>
+    </div>
+    <section id="loading" class="loading" role="status">
+      Opening Studio…
+    </section>
+    <div class="menu" id="edit-menu" popover="auto"></div>
+    <dialog id="rename">
+      <form id="rename-form">
+        <h2>Rename edit</h2>
+        <label for="new-name">Edit name</label
+        ><input id="new-name" maxlength="80" required />
+        <div class="dialog-actions">
+          <button type="button" class="quiet" id="cancel-rename">Cancel</button
+          ><button type="submit" class="make">Save name</button>
+        </div>
+      </form>
+    </dialog>
+    <div class="toast" id="toast" role="status" hidden>
+      <span id="toast-text"></span
+      ><button class="quiet" id="undo" type="button" hidden>Undo</button
+      ><button
+        class="icon"
+        id="dismiss-toast"
+        type="button"
+        aria-label="Dismiss"
+      >
+        <i data-icon="close"></i>
+      </button>
+    </div>
+    <audio id="audio" preload="auto"></audio>
+    <script type="module" src="studio.js"></script>
+  </body>
+</html>
