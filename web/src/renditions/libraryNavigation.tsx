@@ -1,5 +1,5 @@
 import { useEffect } from "react";
-import { ArrowLeft } from "lucide-react";
+import { Folder } from "lucide-react";
 import { Link, useLocation, useNavigate } from "react-router-dom";
 
 export function useLibraryOrigin() {
@@ -65,7 +65,7 @@ export function LibraryReturnLink() {
         }
       }}
     >
-      <ArrowLeft size={15} aria-hidden="true" />
+      <Folder size={19} aria-hidden="true" />
       {view === "favorites"
         ? "Favorites"
         : view === "trash"

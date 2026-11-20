@@ -5,6 +5,7 @@ import {
   Route,
   Routes,
   useLocation,
+  useMatch,
   useNavigate,
   useParams,
 } from "react-router-dom";
@@ -52,10 +53,12 @@ import {
 import { Context, useStudio, storage, remember } from "./context";
 import { Loading, Failure } from "./Views";
 import { LibraryPage } from "./LibraryPage";
+import { RecordingHeader } from "../renditions/RecordingHeader";
 import MixLibrary from "../mixes/MixLibrary";
 import MixEditor from "../mixes/MixEditor";
 import { NewProject } from "./NewProject";
 import "./studio.css";
+import "../renditions/recording-workspace.css";
 const RecordingLibrary = lazy(() => import("../renditions/RecordingLibrary"));
 const RenditionStudio = lazy(() => import("../renditions/RenditionStudio"));
 const scenarios: { value: Scenario; label: string }[] = [
@@ -121,6 +124,20 @@ function Shell() {
     audio = useAudio(),
     client = useQueryClient();
   const [tools, setTools] = useState(false);
+  const optionsOpener = useRef<HTMLElement | null>(null);
+  function openOptions() {
+    optionsOpener.current =
+      document.activeElement instanceof HTMLElement
+        ? document.activeElement
+        : null;
+    setTools(true);
+  }
+  const recording = useMatch("/renditions/:id");
+  const recordingWorkspace =
+    mode === "backend" &&
+    (location.pathname === "/" ||
+      location.pathname === "/renditions" ||
+      !!recording);
   const last = storage(
     `djound.last.${mode}`,
     mode === "prototype" ? "evening" : "",
@@ -150,71 +167,80 @@ function Shell() {
     return () => viewport?.removeEventListener("resize", update);
   }, []);
   return (
-    <div className={`studio-app ${audio.track ? "with-player" : ""}`}>
+    <div
+      className={`studio-app ${recordingWorkspace ? "recording-workspace" : ""} ${audio.track ? "with-player" : ""}`}
+    >
       <a className="skip-link" href="#workspace">
         Skip to workspace
       </a>
-      <header className="navigation">
-        <Link className="brand" to="/" aria-label="Djound home">
-          <img src="/brand/wordmark.svg" alt="Djound" />
-        </Link>
-        {mode === "prototype" && (
-          <span className="mobile-prototype-label">Prototype</span>
-        )}
-        <nav aria-label="Main navigation">
-          <NavLink to="/" end>
-            <Folder />
-            Library
-          </NavLink>
-          {mode === "backend" && (
-            <NavLink to="/tools/library">
-              <SlidersHorizontal /> Other tools
-            </NavLink>
-          )}
+      {recordingWorkspace ? (
+        <RecordingHeader
+          recordingId={recording?.params.id}
+          onOptions={openOptions}
+        />
+      ) : (
+        <header className="navigation">
+          <Link className="brand" to="/" aria-label="Djound home">
+            <img src="/brand/wordmark.svg" alt="Djound" />
+          </Link>
           {mode === "prototype" && (
-            <NavLink to="/remix/new">
-              <Plus />
-              New project
+            <span className="mobile-prototype-label">Prototype</span>
+          )}
+          <nav aria-label="Main navigation">
+            <NavLink to="/" end>
+              <Folder />
+              Library
             </NavLink>
-          )}
-          {mode === "prototype" && (
-            <Link
-              className={
-                location.pathname.startsWith("/remix/") &&
-                location.pathname !== "/remix/new"
-                  ? "active"
-                  : ""
-              }
-              to={projectPath}
-            >
-              <SlidersHorizontal />
-              Project Studio
-            </Link>
-          )}
-        </nav>
-        <div className="workspace-mode">
-          <button onClick={() => setTools(true)}>
-            <span className={mode === "prototype" ? "mode-dot" : ""} />
-            {mode === "prototype" ? "Prototype workspace" : "Local workspace"}
-            <Settings2 size={14} />
-          </button>
-          <span>
-            {mode === "prototype"
-              ? "Sample data · no AI required"
-              : "Connected to your local backend"}
-          </span>
-        </div>
-        <Button
-          variant="ghost"
-          size="icon"
-          className="mobile-tools"
-          aria-label="Workspace options"
-          onClick={() => setTools(true)}
-        >
-          <MoreHorizontal />
-        </Button>
-      </header>
-      <main id="workspace">
+            {mode === "backend" && (
+              <NavLink to="/tools/library">
+                <SlidersHorizontal /> Other tools
+              </NavLink>
+            )}
+            {mode === "prototype" && (
+              <NavLink to="/remix/new">
+                <Plus />
+                New project
+              </NavLink>
+            )}
+            {mode === "prototype" && (
+              <Link
+                className={
+                  location.pathname.startsWith("/remix/") &&
+                  location.pathname !== "/remix/new"
+                    ? "active"
+                    : ""
+                }
+                to={projectPath}
+              >
+                <SlidersHorizontal />
+                Project Studio
+              </Link>
+            )}
+          </nav>
+          <div className="workspace-mode">
+            <button onClick={openOptions}>
+              <span className={mode === "prototype" ? "mode-dot" : ""} />
+              {mode === "prototype" ? "Prototype workspace" : "Local workspace"}
+              <Settings2 size={14} />
+            </button>
+            <span>
+              {mode === "prototype"
+                ? "Sample data · no AI required"
+                : "Connected to your local backend"}
+            </span>
+          </div>
+          <Button
+            variant="ghost"
+            size="icon"
+            className="mobile-tools"
+            aria-label="Workspace options"
+            onClick={openOptions}
+          >
+            <MoreHorizontal />
+          </Button>
+        </header>
+      )}
+      <main id="workspace" tabIndex={-1}>
         <Routes>
           <Route
             path="/"
@@ -277,7 +303,16 @@ function Shell() {
       </main>
       <Transport />
       <Sheet open={tools} onOpenChange={setTools}>
-        <SheetContent>
+        <SheetContent
+          onCloseAutoFocus={(event) => {
+            event.preventDefault();
+            const opener = optionsOpener.current;
+            (opener?.isConnected
+              ? opener
+              : document.getElementById("workspace")
+            )?.focus();
+          }}
+        >
           <div className="workspace-options">
             <SheetTitle>Workspace options</SheetTitle>
             <SheetDescription>
