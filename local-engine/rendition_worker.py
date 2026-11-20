@@ -177,6 +177,16 @@ ORIGINAL_REFERENCE = re.compile(
     r"(?:(?:closer to|follow|restore|bring back|go back to) (?:the )?original (?:melody|tune|phrasing|recording)|"
     r"bring (?:the )?original (?:melody|tune|phrasing) back)(?: here| in this passage)?", re.I)
 RECORDING_MENTION = re.compile(r"\b(?:original|upload(?:ed)?|my (?:recording|voice memo)|recording I (?:brought|sent))\b", re.I)
+OTHER_PERFORMANCE = re.compile(
+    r"\b(?:original|upload\w*|recording|source|voice memo|demo|import\w*|"
+    r"(?:first|earlier|previous|other|last|initial|old) (?:take|performance|version|one)|"
+    r"(?:I|we) (?:first |originally )?(?:sang|hummed|played|whistled|sent)|"
+    r"bring back|recover|restore|go back|return to)\b", re.I)
+KEEP_MELODY = re.compile(
+    r"\b(?:keep|retain|preserve|maintain|leave|don't (?:touch|change)|do not (?:touch|change))\b"
+    r"[^.!?;,]{0,100}\b(?:melody|lead|tune|theme|hook|motif)\b|"
+    r"\b(?:melody|lead|tune|theme|hook|motif)\b[^.!?;,]{0,65}\b(?:unchanged|untouched|as (?:it is|played|it sounds))\b",
+    re.I)
 KEEP_PASSAGE = re.compile(r"\b(?:keep|preserve|retain|leave)\s+(?:(?:the|that|this|my)\s+)?(?:edited\s+)?"
                           r"(opening|intro|beginning|start|ending|outro|end)\b", re.I)
 TIMED_EDGE = re.compile(r"\b(first|last|final)\s+(\d+(?:\.\d+)?)\s*(?:seconds?|secs?|s)\b", re.I)
@@ -255,7 +265,9 @@ def plan_take(request, duration):
     style = prompt.strip().casefold()
     reference = "parent"
     keep_ensemble = False
-    mentions_recording = bool(request.get("parentCaption") or RECORDING_MENTION.search(prompt))
+    current_melody = (request.get("parentCaption") and not OTHER_PERFORMANCE.search(prompt)
+                      and any(KEEP_MELODY.search(clause) for clause in re.split(r"\b(?:and|but|while)\b", prompt, flags=re.I)))
+    mentions_recording = bool(not current_melody and (request.get("parentCaption") or RECORDING_MENTION.search(prompt)))
     section = SECTION_REFERENCE.search(prompt)
     if section and not selection:
         return {"state": "clarify", "error": "Select the passage you mean in the player, then send your request again."}
@@ -292,7 +304,7 @@ def plan_take(request, duration):
             if has_passages:
                 passage_policy = passage_policy or inferred_policy
             choice = plan.pop("reference", None)
-            keep_ensemble = choice == "original" and plan.pop("keep_ensemble", False) is True
+            keep_ensemble = plan.pop("keep_ensemble", False) is True and choice == "original" and mentions_recording
             unresolved_passage = has_passages and plan.get("scope") == "whole" and passage_policy == "clarify"
             if mentions_recording and plan.get("scope") != "clarify" and not unresolved_passage:
                 if choice in ("parent", "original"):

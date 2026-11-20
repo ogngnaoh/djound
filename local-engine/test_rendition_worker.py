@@ -97,6 +97,36 @@ class RenditionPlannerTest(unittest.TestCase):
         self.assertEqual("original", decision["melodyReference"])
         self.assertFalse(decision["keepEnsemble"])
 
+    def test_keep_this_lead_and_edit_the_backing_keeps_the_selected_score_as_its_reference(self):
+        reply = {"scope": "whole", "caption": "Trumpet over softly strummed guitar.", "label": "A new guitarist",
+                 "reference": "original", "keep_ensemble": True}
+        cases = ("Keep the trumpet melody exactly as it sounds, including its phrasing, timing and volume. "
+                 "Add a softly strummed acoustic guitar to the accompaniment.",
+                 "Don't touch the tune. Change the drums.",
+                 "Leave the lead where it is and add a warm electric piano.",
+                 "The theme stays unchanged. Give it a new rhythm section.")
+        for words in cases:
+            with self.subTest(words=words), patch.object(worker, "infer_plan", return_value=(reply, "model")) as infer:
+                decision = worker.plan_take({"prompt": words, "parentCaption": "A saved trumpet trio."}, 25)
+                self.assertFalse(infer.call_args.args[0]["choose_melody_reference"])
+                self.assertEqual(("parent", False), (decision["melodyReference"], decision["keepEnsemble"]))
+
+    def test_explicit_earlier_recordings_still_require_a_reference_decision(self):
+        cases = (("Keep the tune from my voice memo and change the piano.", "original", False),
+                 ("Keep the melody I hummed at first, with the current backing.", "original", True),
+                 ("Keep the lead from that other take and add a guitar.", "clarify", False),
+                 ("Don't use the upload. Keep the trumpet melody.", "parent", False))
+        for words, reference, ensemble in cases:
+            reply = {"scope": "whole", "caption": "Trumpet with guitar.", "label": "Variation",
+                     "reference": reference, "keep_ensemble": ensemble}
+            with self.subTest(words=words), patch.object(worker, "infer_plan", return_value=(reply, "model")) as infer:
+                decision = worker.plan_take({"prompt": words, "parentCaption": "A saved trumpet trio."}, 25)
+                self.assertTrue(infer.call_args.args[0]["choose_melody_reference"])
+                if reference == "clarify":
+                    self.assertEqual("clarify", decision["state"])
+                else:
+                    self.assertEqual((reference, ensemble), (decision["melodyReference"], decision["keepEnsemble"]))
+
     def test_parent_placeholder_cannot_become_the_new_arrangement_description(self):
         request = "Let a bowed cello play the tune with fingerpicked guitar."
         result = {"scope": "whole", "caption": "The imported recording", "label": "Acoustic duet"}
