@@ -208,6 +208,14 @@ def _excluded_player(program, direction):
     return program != KIT and _excluded(program, direction)
 
 
+def _liked_part(phrase):
+    """Recognize a listener naming what already works, without consuming another edit."""
+    return re.fullmatch(
+        r"i (?:really |still )?(?:like|love) (?:the |this |that )?"
+        r"(?P<part>@-?\d+@|melody|tune|lead|theme|beat|groove|backing|rest|accompaniment)"
+        r"(?: (?:just |exactly )?(?:the way it (?:is|sounds)|as it is))?", _marked(phrase))
+
+
 def _backing_additions(direction, old):
     """Resolve a directly requested supporting player without reassigning the protected lead."""
     if not old or not re.search(r"\b(?:add|bring in|layer in|introduce)\b", direction, re.I):
@@ -218,6 +226,13 @@ def _backing_additions(direction, old):
     additions = []
     supporting = False
     for phrase in (c.strip() for c in clauses if c.strip()):
+        liked = _liked_part(phrase)
+        if liked:
+            players = _members(phrase)
+            if any(p not in existing for p in players):
+                return []
+            supporting |= old["leadProgram"] in players or bool(MELODY_PART.search(phrase))
+            continue
         if re.match(r"^(?:keep|leave|preserve|retain|don['’]t (?:change|touch)|do not (?:change|touch))\b", phrase, re.I):
             supporting |= bool(MELODY_PART.search(phrase))
             continue

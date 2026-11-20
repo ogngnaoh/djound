@@ -235,6 +235,26 @@ class ScoreRevisionTest(unittest.TestCase):
         self.assertEqual(original, revised["roles"][:2])
         self.assertFalse(any("Acoustic Grand Piano" in call.args[0] for call in chart.choose.call_args_list))
 
+    def test_adding_backing_to_a_take_the_listener_likes(self):
+        from unittest.mock import Mock
+
+        bass = {"kind": "bass", "program": 32, "gesture": "walk", "pattern": planner._pattern("bass", "walk", 4)}
+        parent = dict(self.parent, leadProgram=42, roles=[bass])
+        words = "I like the cello just the way it is. Could you add a little piano behind it?"
+        self.assertEqual([0], planner._backing_additions(words, parent))
+        analysis = analyze(self.notes)
+        chart = Mock()
+        chart.choose.side_effect = lambda _, options: next(iter(options))
+        with patch.object(planner, "_changes", side_effect=AssertionError("The new player is explicit")):
+            revised = planner._arrange(analysis, words, parent, chart)
+        before = arrange(self.notes, analysis, parent)[0]
+        after = arrange(self.notes, analysis, revised)[0]
+        self.assertEqual(before, after[:-1])
+        self.assertEqual(0, after[-1]["program"])
+        self.assertTrue(after[-1]["notes"])
+        for prefix in ("I'd like the cello louder.", "I like the flute.", "I love the cello but change its octave."):
+            self.assertEqual([], planner._backing_additions(prefix + " Add piano behind it.", parent))
+
     def test_upload_octave_uses_the_recording_actually_selected_for_transcription(self):
         from unittest.mock import Mock
 
