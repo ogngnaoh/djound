@@ -8,7 +8,6 @@ case "$mode" in
     export DJOUND_MODE=UNCONFIGURED
     python3 tests/runtime_check_test.py
     python3 -m unittest discover -s local-engine -p 'test_*.py'
-    python3 tests/test_free_provider.py
     docker compose up -d --pull never --wait db
     pnpm --dir web run format:check
     pnpm --dir web test

@@ -1,3 +1,0 @@
-event: complete
-data: [{"path":"/tmp/gradio/fixture-one/audio.wav","url":"{{origin}}/gradio_api/file=/tmp/gradio/fixture-one/audio.wav","size":null,"orig_name":"audio.wav","mime_type":null,"is_stream":false,"meta":{"_type":"gradio.FileData"}},{"path":"/tmp/gradio/fixture-two/audio.wav","url":"{{origin}}/gradio_api/file=/tmp/gradio/fixture-two/audio.wav","size":null,"orig_name":"audio.wav","mime_type":null,"is_stream":false,"meta":{"_type":"gradio.FileData"}},{"path":"/tmp/gradio/fixture-three/audio.wav","url":"{{origin}}/gradio_api/file=/tmp/gradio/fixture-three/audio.wav","size":null,"orig_name":"audio.wav","mime_type":null,"is_stream":false,"meta":{"_type":"gradio.FileData"}}]
-

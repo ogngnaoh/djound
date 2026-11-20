@@ -1,9 +1,0 @@
-Djound prototype audio — authored repository fixtures, not AI output.
-original.wav: byte-for-byte copy of fixtures/audio/local-demo-source.wav.
-warm.wav: PCM frames from fixtures/audio/sample-warm.wav, limited to 12 seconds.
-pulse.wav: PCM frames from fixtures/audio/sample-pulse.wav, limited to 12 seconds.
-
-See fixtures/README.md, fixtures/generate.py and fixtures/audio/local-demo-source.json
-for source provenance. Prototype arrangements reuse these prerecorded samples;
-request text does not generate their audio. Edited-note previews are separately
-synthesized in the browser from the actual note data.
