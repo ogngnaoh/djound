@@ -11,7 +11,7 @@ final class RenditionExportName {
     }
 
     static String take(String title, long number, String label) {
-        String name = recordingName(title) + " - Take " + number;
+        String name = recordingName(title) + " - Edit " + number;
         String description = component(label);
         return (description.isEmpty() ? name : name + " - " + description) + ".wav";
     }

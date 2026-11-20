@@ -195,12 +195,12 @@ class BackendIntegrationTest {
                                     .build(),
                             java.net.http.HttpResponse.BodyHandlers.ofByteArray());
             assertEquals(200, exported.statusCode());
-            assertEquals("Étude 東京 - Take 2 - Test output.wav", renditionExportName(exported));
+            assertEquals("Étude 東京 - Edit 2 - Test output.wav", renditionExportName(exported));
             assertEquals(
                     "private, no-cache",
                     exported.headers().firstValue("Cache-Control").orElseThrow());
             var firstExport = renditionRequest(http, "GET", take.exportUrl());
-            assertEquals("Étude 東京 - Take 1 - Test output.wav", renditionExportName(firstExport));
+            assertEquals("Étude 東京 - Edit 1 - Test output.wav", renditionExportName(firstExport));
             var original =
                     renditionRequest(
                             http, "GET", session.originalUrl().replace("/audio", "/export"));
@@ -340,6 +340,117 @@ class BackendIntegrationTest {
         }
     }
 
+    @Test
+    void renamedAndRemovedEditsPreserveDescendantsAndRestoreAcrossRestart() throws Exception {
+        var projects = app.getBean(RenditionProjects.class);
+        String id = projects.create(wav("Memo.wav", 44100, 2, 16, 1), null).id();
+        var db = app.getBean(JdbcClient.class);
+        String parent = UUID.randomUUID().toString(), child = UUID.randomUUID().toString();
+        byte[] parentAudio = wave(44100, 2, 16, 1);
+        byte[] childAudio = parentAudio.clone();
+        childAudio[44] ^= 1;
+        for (var edit : List.of(parent, child)) {
+            byte[] pcm = edit.equals(child) ? childAudio : parentAudio;
+            Files.write(root.resolve("renditions").resolve(edit + ".wav"), pcm);
+            db.sql(
+                            """
+                            INSERT INTO rendition_take(id,project_id,parent_id,request_id,prompt,state,label,frames,sha256)
+                            VALUES(?,?,?,?,?,'ready','Trio',44100,?)
+                            """)
+                    .params(
+                            edit,
+                            id,
+                            edit.equals(child) ? parent : null,
+                            edit,
+                            "Play as a trio",
+                            HexFormat.of()
+                                    .formatHex(
+                                            java.security.MessageDigest.getInstance("SHA-256")
+                                                    .digest(pcm)))
+                    .update();
+        }
+
+        String project = "/api/renditions/" + id, edits = project + "/takes/";
+        var json = new tools.jackson.databind.ObjectMapper();
+        try (var http = java.net.http.HttpClient.newHttpClient()) {
+            projects.favorite(id, parent);
+            var rename =
+                    renditionRequest(
+                            http, "PUT", edits + parent + "/label", "{\"label\":\"Night trio\"}");
+            assertEquals(200, rename.statusCode());
+            assertEquals("Night trio", projects.list().getFirst().favoriteLabel());
+            assertEquals(
+                    "Night trio",
+                    json.readTree(rename.body())
+                            .path("takes")
+                            .get(1)
+                            .path("parentLabel")
+                            .asString());
+            assertEquals(
+                    "Memo - Edit 1 - Night trio.wav",
+                    renditionExportName(renditionRequest(http, "GET", edits + parent + "/export")));
+            var activity = projects.list().getFirst().lastActivityAt();
+            projects.rename(id, parent, "Night trio");
+            assertEquals(activity, projects.list().getFirst().lastActivityAt());
+            assertEquals(
+                    "Trio",
+                    db.sql("SELECT label FROM rendition_take WHERE id=?")
+                            .param(parent)
+                            .query(String.class)
+                            .single());
+            assertEquals(
+                    422,
+                    renditionRequest(http, "PUT", edits + parent + "/label", "{\"label\":\" \"}")
+                            .statusCode());
+            assertEquals(404, renditionRequest(http, "PUT", edits + "original/trash").statusCode());
+
+            assertEquals(
+                    200, renditionRequest(http, "PUT", edits + parent + "/trash").statusCode());
+            var hidden = projects.list().getFirst();
+            assertEquals(1, hidden.readyTakeCount());
+            assertNull(hidden.favoriteId());
+            projects.setTakeTrashed(id, parent, true);
+            assertEquals(hidden, projects.list().getFirst());
+            for (var path : List.of("audio", "export", "waveform"))
+                assertEquals(
+                        410,
+                        renditionRequest(http, "GET", edits + parent + "/" + path).statusCode());
+            assertEquals(
+                    "RENDITION_TAKE_TRASHED",
+                    assertThrows(
+                                    ApiProblem.class,
+                                    () ->
+                                            projects.submit(
+                                                    id,
+                                                    new RenditionProjects.Command(
+                                                            "stale", parent, "Slower", null, null)))
+                            .code());
+            var visible = projects.state(id).takes();
+            assertEquals(List.of(child), visible.stream().map(RenditionProjects.Take::id).toList());
+            assertEquals(parent, visible.getFirst().parentId());
+            assertEquals("Night trio", visible.getFirst().parentLabel());
+            assertArrayEquals(
+                    childAudio, renditionRequest(http, "GET", visible.getFirst().exportUrl()).body());
+            projects.favorite(id, child);
+
+            app.close();
+            app = launch(root);
+            var reopened = app.getBean(RenditionProjects.class);
+            assertEquals(1, reopened.state(id).takes().size());
+            assertEquals(
+                    200, renditionRequest(http, "DELETE", edits + parent + "/trash").statusCode());
+            assertEquals(2, reopened.state(id).takes().size());
+            var restored = reopened.list().getFirst();
+            assertEquals(child, restored.favoriteId());
+            reopened.setTakeTrashed(id, parent, false);
+            assertEquals(restored, reopened.list().getFirst());
+            assertArrayEquals(
+                    parentAudio, renditionRequest(http, "GET", edits + parent + "/audio").body());
+            assertEquals(200, renditionRequest(http, "DELETE", project + "/favorite").statusCode());
+            assertNull(reopened.state(id).favoriteId());
+        }
+    }
+
     private static String renditionExportName(java.net.http.HttpResponse<?> response) {
         var header = response.headers().firstValue("Content-Disposition").orElseThrow();
         assertTrue(header.chars().allMatch(c -> c >= 32 && c < 127));
@@ -350,10 +461,21 @@ class BackendIntegrationTest {
 
     private java.net.http.HttpResponse<byte[]> renditionRequest(
             java.net.http.HttpClient client, String method, String path) throws Exception {
+        return renditionRequest(client, method, path, null);
+    }
+
+    private java.net.http.HttpResponse<byte[]> renditionRequest(
+            java.net.http.HttpClient client, String method, String path, String body)
+            throws Exception {
         String base = "http://127.0.0.1:" + app.getEnvironment().getProperty("local.server.port");
+        var payload =
+                body == null
+                        ? java.net.http.HttpRequest.BodyPublishers.noBody()
+                        : java.net.http.HttpRequest.BodyPublishers.ofString(body);
         return client.send(
                 java.net.http.HttpRequest.newBuilder(java.net.URI.create(base + path))
-                        .method(method, java.net.http.HttpRequest.BodyPublishers.noBody())
+                        .header("Content-Type", "application/json")
+                        .method(method, payload)
                         .build(),
                 java.net.http.HttpResponse.BodyHandlers.ofByteArray());
     }
@@ -389,6 +511,7 @@ class BackendIntegrationTest {
                         with wave.open(base['source']) as f: assert f.getnframes()==132300
                         assert base['editedFrames']==[[11025,22050],[99225,132300]]
                         if prompt=='next arrangement':
+                            assert all(step['label']=='Test arrangement' for step in q['history'])
                             assert base['source']!=q['source'] and base['plan']==plan
                         else:
                             assert base['source']==q['source'] and base['plan']['scoreSourceTakeId']=='original'
@@ -443,6 +566,8 @@ class BackendIntegrationTest {
                 id, new RenditionProjects.Command("earlier", overlap.id(), "earlier", .25, .5));
         var earlier = awaitRendition(projects, id, "earlier");
         assertEquals("ready", earlier.state(), earlier.error());
+        projects.rename(id, first.id(), "My favorite rough mix");
+        projects.setTakeTrashed(id, first.id(), true);
         app.close();
         app = launch(root, settings);
         var reopened = app.getBean(RenditionProjects.class);
@@ -604,6 +729,7 @@ class BackendIntegrationTest {
         assertEquals(
                 "RENDITION_TAKE_MISSING",
                 assertThrows(ApiProblem.class, () -> reopened.answer(other, q1.id(), same)).code());
+        reopened.setTakeTrashed(id, edited.id(), true);
         reopened.answer(id, q1.id(), new RenditionProjects.Answer("alternative", "develop"));
         assertEquals("develop", awaitRendition(reopened, id, "alternative").caption());
     }

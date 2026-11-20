@@ -60,6 +60,7 @@ public final class RenditionProjects implements AutoCloseable {
     public record Take(
             String id,
             String parentId,
+            @JsonInclude(JsonInclude.Include.NON_NULL) String parentLabel,
             String requestId,
             String label,
             String request,
@@ -128,7 +129,29 @@ public final class RenditionProjects implements AutoCloseable {
             String arrangementPlan,
             String clarificationKind,
             String answerTo,
-            String passageChoice) {}
+            String passageChoice,
+            String displayLabel,
+            String parentLabel,
+            OffsetDateTime trashedAt) {
+        Job active() {
+            if (trashedAt != null)
+                throw new ApiProblem(410, "RENDITION_TAKE_TRASHED", "This edit was removed.");
+            return this;
+        }
+
+        Job ready() {
+            if (!state.equals("ready"))
+                throw new ApiProblem(
+                        409,
+                        "RENDITION_TAKE_UNAVAILABLE",
+                        "Choose an edit that has finished generating.");
+            return this;
+        }
+
+        String visibleLabel() {
+            return displayLabel == null ? label : displayLabel;
+        }
+    }
 
     record Earlier(String id, String request, String label, String caption) {}
 
@@ -148,7 +171,9 @@ public final class RenditionProjects implements AutoCloseable {
     private static final String JOB_FIELDS =
             "id,project_id,parent_id,request_id,label,prompt,caption,state,frames,start_seconds,end_seconds,applied_start_seconds,applied_end_seconds,sha256,error,song_time_map::text"
                 + " AS song_time_map,arrangement_plan::text AS"
-                + " arrangement_plan,clarification_kind,answer_to,passage_choice";
+                + " arrangement_plan,clarification_kind,answer_to,passage_choice,display_label,trashed_at,"
+                + " (SELECT coalesce(parent.display_label,parent.label) FROM rendition_take parent"
+                + " WHERE parent.id=rendition_take.parent_id) AS parent_label";
 
     RenditionProjects(
             JdbcClient db,
@@ -189,14 +214,14 @@ public final class RenditionProjects implements AutoCloseable {
                                p.created_at, p.last_activity_at,
                                coalesce(t.ready_count, 0) AS ready_take_count,
                                coalesce(t.working_count, 0) AS in_flight_count,
-                               f.id AS favorite_id, f.label AS favorite_label,
+                               f.id AS favorite_id, coalesce(f.display_label,f.label) AS favorite_label,
                                f.frames / 44100.0 AS favorite_duration_seconds, p.trashed_at
                         FROM rendition_project p
                         LEFT JOIN (
                             SELECT project_id,
                                    count(*) FILTER (WHERE state = 'ready') AS ready_count,
                                    count(*) FILTER (WHERE state IN ('queued', 'running')) AS working_count
-                            FROM rendition_take GROUP BY project_id
+                            FROM rendition_take WHERE trashed_at IS NULL GROUP BY project_id
                         ) t ON t.project_id = p.id
                         LEFT JOIN rendition_take f ON f.project_id = p.id AND f.id = p.favorite_id
                         WHERE (p.trashed_at IS NOT NULL) = ?
@@ -208,14 +233,20 @@ public final class RenditionProjects implements AutoCloseable {
     }
 
     public State state(String id) {
-        Project project = project(id);
+        // A removal clears the favorite and hides the edit in one transaction. Return both
+        // from the same revision while a second client is polling or changing this recording.
+        return tx.execute(status -> state(loadProject(id, true).active()));
+    }
+
+    private State state(Project project) {
+        String id = project.id();
         var takes =
                 db
                         .sql(
                                 "SELECT "
                                         + JOB_FIELDS
-                                        + " FROM rendition_take WHERE project_id=? ORDER BY"
-                                        + " created_at,id")
+                                        + " FROM rendition_take WHERE project_id=? AND trashed_at"
+                                        + " IS NULL ORDER BY created_at,id")
                         .param(id)
                         .query(Job.class)
                         .list()
@@ -336,8 +367,9 @@ public final class RenditionProjects implements AutoCloseable {
         return new Take(
                 job.id(),
                 job.parentId() == null ? ORIGINAL : job.parentId(),
+                job.parentLabel(),
                 job.requestId(),
-                job.label(),
+                job.visibleLabel(),
                 job.prompt(),
                 job.caption(),
                 job.state(),
@@ -392,13 +424,8 @@ public final class RenditionProjects implements AutoCloseable {
     }
 
     private Job readyJob(String project, String id) {
-        Job j = job(project, id);
-        if (!j.state().equals("ready"))
-            throw new ApiProblem(
-                    409,
-                    "RENDITION_TAKE_UNAVAILABLE",
-                    "Choose a version that has finished generating.");
-        return j;
+        // Ancestors remain available to the renderer after removal from the listener's edit list.
+        return job(project, id).ready();
     }
 
     public State submit(String id, Command command) {
@@ -412,7 +439,7 @@ public final class RenditionProjects implements AutoCloseable {
                     422,
                     "RENDITION_ANSWER_INVALID",
                     "Choose whether to keep or change the edited passage.");
-        Job question = job(id, takeId);
+        Job question = job(id, takeId).active();
         if (!"clarify".equals(question.state())
                 || !RETAINED_PASSAGE.equals(question.clarificationKind()))
             throw new ApiProblem(
@@ -462,10 +489,17 @@ public final class RenditionProjects implements AutoCloseable {
                                         || !Objects.equals(j.answerTo(), answerTo)
                                         || !Objects.equals(j.passageChoice(), passageChoice))
                                     throw conflictKey();
+                                j.active();
                                 return false;
                             }
-                            int frames =
-                                    parent == null ? p.frames() : readyJob(id, parent).frames();
+                            if (answerTo != null) job(id, answerTo).active();
+                            int frames = p.frames();
+                            if (parent != null) {
+                                Job source = job(id, parent);
+                                // An answer resumes the visible question using its stored source.
+                                if (answerTo == null) source.active();
+                                frames = source.ready().frames();
+                            }
                             validateScope(
                                     command.startSeconds(), command.endSeconds(), seconds(frames));
                             if (!mode.local())
@@ -516,15 +550,58 @@ public final class RenditionProjects implements AutoCloseable {
         return tx.execute(
                 status -> {
                     loadProject(id, true).active();
-                    readyJob(id, takeId);
+                    if (takeId != null) job(id, takeId).active().ready();
                     db.sql(
                                     """
                                     UPDATE rendition_project SET favorite_id = ?,
                                         last_activity_at = greatest(last_activity_at, statement_timestamp())
-                                    WHERE id = ? AND favorite_id IS DISTINCT FROM ?
+                                    WHERE id = ? AND favorite_id IS DISTINCT FROM CAST(? AS text)
                                     """)
                             .params(takeId, id, takeId)
                             .update();
+                    return state(id);
+                });
+    }
+
+    public State rename(String id, String takeId, String label) {
+        String name = label == null ? "" : label.strip();
+        if (name.isBlank()
+                || name.codePointCount(0, name.length()) > 100
+                || name.codePoints().anyMatch(Character::isISOControl))
+            throw new ApiProblem(
+                    422, "RENDITION_LABEL_INVALID", "Give this edit a name of 1–100 characters.");
+        return tx.execute(
+                status -> {
+                    loadProject(id, true).active();
+                    var edit = job(id, takeId).active().ready();
+                    if (!name.equals(edit.visibleLabel()))
+                        db.sql("UPDATE rendition_take SET display_label=? WHERE id=?")
+                                .params(name, takeId)
+                                .update();
+                    return state(id);
+                });
+    }
+
+    public State setTakeTrashed(String id, String takeId, boolean trash) {
+        return tx.execute(
+                status -> {
+                    Project project = loadProject(id, true).active();
+                    Job take = job(id, takeId);
+                    if ((take.trashedAt() != null) == trash) return state(id);
+                    if (take.state().equals("queued") || take.state().equals("running"))
+                        throw new ApiProblem(
+                                409,
+                                "RENDITION_TAKE_BUSY",
+                                "Wait for this edit to finish before removing it.");
+                    db.sql(
+                                    "UPDATE rendition_take SET trashed_at=CASE WHEN ? THEN"
+                                        + " statement_timestamp() END WHERE id=?")
+                            .params(trash, takeId)
+                            .update();
+                    if (trash && takeId.equals(project.favoriteId()))
+                        db.sql("UPDATE rendition_project SET favorite_id=NULL WHERE id=?")
+                                .param(id)
+                                .update();
                     return state(id);
                 });
     }
@@ -563,7 +640,7 @@ public final class RenditionProjects implements AutoCloseable {
 
     AudioFile audioFile(String id, String takeId, boolean export) {
         Project recording = project(id);
-        Job take = ORIGINAL.equals(takeId) ? null : readyJob(id, takeId);
+        Job take = ORIGINAL.equals(takeId) ? null : job(id, takeId).active().ready();
         Path path = audio.file(take == null ? recording.id() : take.id());
         if (!Files.isRegularFile(path, LinkOption.NOFOLLOW_LINKS))
             throw new ApiProblem(
@@ -571,7 +648,7 @@ public final class RenditionProjects implements AutoCloseable {
         if (!export) return new AudioFile(path, null);
         if (take == null)
             return new AudioFile(path, RenditionExportName.original(recording.title()));
-        // Match the studio's numbering, including requests that did not produce playable takes.
+        // Keep export numbers stable across renames, removed edits and failed requests.
         long number =
                 db.sql(
                                 """
@@ -583,7 +660,7 @@ public final class RenditionProjects implements AutoCloseable {
                         .query(Long.class)
                         .single();
         return new AudioFile(
-                path, RenditionExportName.take(recording.title(), number, take.label()));
+                path, RenditionExportName.take(recording.title(), number, take.visibleLabel()));
     }
 
     private void consume() {

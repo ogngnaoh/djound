@@ -22,6 +22,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/renditions/demo": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** @description Open the bundled recording and its playable example edit in the studio. */
+        post: operations["openRenditionDemo"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/renditions/{id}": {
         parameters: {
             query?: never;
@@ -29,7 +46,7 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** @description Get the original, all submitted takes and the saved favorite. Poll this resource while a take is queued or running. */
+        /** @description Get the original, visible edits and the saved favorite. Poll this resource while a take is queued or running. */
         get: operations["getRenditionProject"];
         put?: never;
         post?: never;
@@ -93,6 +110,47 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/renditions/{id}/takes/{takeId}/label": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: components["parameters"]["ResourceId"];
+                takeId: string;
+            };
+            cookie?: never;
+        };
+        get?: never;
+        /** @description Rename a ready edit in the studio, library and export filename. Its audio and musical instructions are preserved. */
+        put: operations["renameRenditionTake"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/renditions/{id}/takes/{takeId}/trash": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: components["parameters"]["ResourceId"];
+                takeId: string;
+            };
+            cookie?: never;
+        };
+        get?: never;
+        /** @description Hide a finished edit and clear its favorite status. Its descendants keep their audio and history. Repeat calls are safe. */
+        put: operations["trashRenditionTake"];
+        post?: never;
+        /** @description Restore the edit, its label and its audio. Repeat calls are safe. */
+        delete: operations["restoreRenditionTake"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/renditions/{id}/favorite": {
         parameters: {
             query?: never;
@@ -104,7 +162,7 @@ export interface paths {
         /** @description Save a ready take as this project's favorite. */
         put: operations["favoriteRenditionTake"];
         post?: never;
-        delete?: never;
+        delete: operations["clearRenditionFavorite"];
         options?: never;
         head?: never;
         patch?: never;
@@ -858,6 +916,8 @@ export interface components {
             /** Format: uuid */
             id: string;
             parentId: string;
+            /** @description Name of the parent edit including after it has been removed. Omitted for the original. */
+            parentLabel?: string;
             requestId: string;
             label: string;
             request: string;
@@ -1458,6 +1518,32 @@ export interface operations {
             default: components["responses"]["Problem"];
         };
     };
+    openRenditionDemo: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Recording and edit to open. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        /** Format: uuid */
+                        projectId: string;
+                        /** Format: uuid */
+                        editId: string;
+                    };
+                };
+            };
+            default: components["responses"]["Problem"];
+        };
+    };
     getRenditionProject: {
         parameters: {
             query?: never;
@@ -1555,6 +1641,60 @@ export interface operations {
             default: components["responses"]["Problem"];
         };
     };
+    renameRenditionTake: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: components["parameters"]["ResourceId"];
+                takeId: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    label: string;
+                };
+            };
+        };
+        responses: {
+            200: components["responses"]["RenditionProject"];
+            default: components["responses"]["Problem"];
+        };
+    };
+    trashRenditionTake: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: components["parameters"]["ResourceId"];
+                takeId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: components["responses"]["RenditionProject"];
+            default: components["responses"]["Problem"];
+        };
+    };
+    restoreRenditionTake: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: components["parameters"]["ResourceId"];
+                takeId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: components["responses"]["RenditionProject"];
+            default: components["responses"]["Problem"];
+        };
+    };
     favoriteRenditionTake: {
         parameters: {
             query?: never;
@@ -1569,6 +1709,21 @@ export interface operations {
                 "application/json": components["schemas"]["RenditionFavorite"];
             };
         };
+        responses: {
+            200: components["responses"]["RenditionProject"];
+            default: components["responses"]["Problem"];
+        };
+    };
+    clearRenditionFavorite: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: components["parameters"]["ResourceId"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
         responses: {
             200: components["responses"]["RenditionProject"];
             default: components["responses"]["Problem"];

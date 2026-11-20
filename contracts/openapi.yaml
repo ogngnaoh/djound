@@ -30,10 +30,26 @@ paths:
       responses:
         '201': { $ref: '#/components/responses/RenditionProject' }
         default: { $ref: '#/components/responses/Problem' }
+  /api/renditions/demo:
+    post:
+      operationId: openRenditionDemo
+      description: Open the bundled recording and its playable example edit in the studio.
+      responses:
+        '200':
+          description: Recording and edit to open.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [projectId, editId]
+                properties:
+                  projectId: { type: string, format: uuid }
+                  editId: { type: string, format: uuid }
+        default: { $ref: '#/components/responses/Problem' }
   /api/renditions/{id}:
     get:
       operationId: getRenditionProject
-      description: Get the original, all submitted takes and the saved favorite. Poll this resource while a take is queued or running.
+      description: Get the original, visible edits and the saved favorite. Poll this resource while a take is queued or running.
       parameters:
         - { $ref: '#/components/parameters/ResourceId' }
       responses:
@@ -79,6 +95,41 @@ paths:
       responses:
         '202': { $ref: '#/components/responses/RenditionProject' }
         default: { $ref: '#/components/responses/Problem' }
+  /api/renditions/{id}/takes/{takeId}/label:
+    parameters:
+      - { $ref: '#/components/parameters/ResourceId' }
+      - { name: takeId, in: path, required: true, schema: { type: string, format: uuid } }
+    put:
+      operationId: renameRenditionTake
+      description: Rename a ready edit in the studio, library and export filename. Its audio and musical instructions are preserved.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [label]
+              properties:
+                label: { type: string, minLength: 1, maxLength: 100 }
+      responses:
+        '200': { $ref: '#/components/responses/RenditionProject' }
+        default: { $ref: '#/components/responses/Problem' }
+  /api/renditions/{id}/takes/{takeId}/trash:
+    parameters:
+      - { $ref: '#/components/parameters/ResourceId' }
+      - { name: takeId, in: path, required: true, schema: { type: string, format: uuid } }
+    put:
+      operationId: trashRenditionTake
+      description: Hide a finished edit and clear its favorite status. Its descendants keep their audio and history. Repeat calls are safe.
+      responses:
+        '200': { $ref: '#/components/responses/RenditionProject' }
+        default: { $ref: '#/components/responses/Problem' }
+    delete:
+      operationId: restoreRenditionTake
+      description: Restore the edit, its label and its audio. Repeat calls are safe.
+      responses:
+        '200': { $ref: '#/components/responses/RenditionProject' }
+        default: { $ref: '#/components/responses/Problem' }
   /api/renditions/{id}/favorite:
     put:
       operationId: favoriteRenditionTake
@@ -88,6 +139,13 @@ paths:
       requestBody:
         required: true
         content: { application/json: { schema: { $ref: '#/components/schemas/RenditionFavorite' } } }
+      responses:
+        '200': { $ref: '#/components/responses/RenditionProject' }
+        default: { $ref: '#/components/responses/Problem' }
+    delete:
+      operationId: clearRenditionFavorite
+      parameters:
+        - { $ref: '#/components/parameters/ResourceId' }
       responses:
         '200': { $ref: '#/components/responses/RenditionProject' }
         default: { $ref: '#/components/responses/Problem' }
@@ -832,6 +890,7 @@ components:
       properties:
         id: { type: string, format: uuid }
         parentId: { type: string }
+        parentLabel: { type: string, description: Name of the parent edit including after it has been removed. Omitted for the original. }
         requestId: { type: string }
         label: { type: string }
         request: { type: string }

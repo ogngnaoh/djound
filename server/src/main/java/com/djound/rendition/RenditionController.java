@@ -76,11 +76,34 @@ final class RenditionController {
 
     record Favorite(String takeId) {}
 
+    record Label(String label) {}
+
+    @PutMapping("/{id}/takes/{takeId}/label")
+    RenditionProjects.State rename(
+            @PathVariable String id, @PathVariable String takeId, @RequestBody Label body) {
+        return projects.rename(id, takeId, body.label());
+    }
+
+    @PutMapping("/{id}/takes/{takeId}/trash")
+    RenditionProjects.State trashTake(@PathVariable String id, @PathVariable String takeId) {
+        return projects.setTakeTrashed(id, takeId, true);
+    }
+
+    @DeleteMapping("/{id}/takes/{takeId}/trash")
+    RenditionProjects.State restoreTake(@PathVariable String id, @PathVariable String takeId) {
+        return projects.setTakeTrashed(id, takeId, false);
+    }
+
     @PutMapping("/{id}/favorite")
     RenditionProjects.State favorite(@PathVariable String id, @RequestBody Favorite body) {
         if (body.takeId() == null || body.takeId().isBlank())
             throw new ApiProblem(422, "RENDITION_TAKE_REQUIRED", "Choose the version to keep.");
         return projects.favorite(id, body.takeId());
+    }
+
+    @DeleteMapping("/{id}/favorite")
+    RenditionProjects.State clearFavorite(@PathVariable String id) {
+        return projects.favorite(id, null);
     }
 
     @GetMapping("/{id}/takes/{takeId}/waveform")
