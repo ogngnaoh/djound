@@ -46,12 +46,15 @@ async function readPeaks(
 
 function waveBars(peaks: number[]) {
   const count = Math.min(192, peaks.length);
+  // Scale the drawing to this recording so soft passages are visible when seeking.
+  const peakLevel = Math.max(1, ...peaks);
   const bars = Array.from({ length: count }, (_, i) => {
     const from = Math.floor((i * peaks.length) / count);
     const to = Math.floor(((i + 1) * peaks.length) / count);
-    const height = ((100 * Math.max(...peaks.slice(from, to))) / 32768).toFixed(
-      2,
-    );
+    const height = (
+      (100 * Math.max(...peaks.slice(from, to))) /
+      peakLevel
+    ).toFixed(2);
     return `M${i + 0.5} -${height}V${height}`;
   });
   return { count, path: bars.join(" ") };
