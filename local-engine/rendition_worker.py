@@ -391,13 +391,17 @@ def run(request, plan_only=False):
         policy = decision.get("passagePolicy")
         if request.get("supportsArrangedScore") is True and decision["appliedStartSeconds"] is None and (policy or not keep_ensemble):
             from rendition_performance import perform_score
-            metadata = perform_score(source, original, output, work, direction=named_direction,
-                                     caption=caption, parent_caption=request.get("parentCaption") or "",
-                                     parent_plan=None if policy == "fresh" else request.get("parentPlan"), parent_map=parent_map,
-                                     recover_original=reference is not None,
-                                     scored_ancestor=request.get("scoredAncestor") if policy in ("keep", "develop") else None,
-                                     parent_score_input=request.get("parentScoreInput") if policy != "fresh" else None,
-                                     passage_policy=policy)
+            from rendition_score_plan import ArrangementClarification
+            try:
+                metadata = perform_score(source, original, output, work, direction=named_direction,
+                                         caption=caption, parent_caption=request.get("parentCaption") or "",
+                                         parent_plan=None if policy == "fresh" else request.get("parentPlan"), parent_map=parent_map,
+                                         recover_original=reference is not None,
+                                         scored_ancestor=request.get("scoredAncestor") if policy in ("keep", "develop") else None,
+                                         parent_score_input=request.get("parentScoreInput") if policy != "fresh" else None,
+                                         passage_policy=policy)
+            except ArrangementClarification as choice:
+                return {"state": "clarify", "error": str(choice)}
             if metadata:
                 if metadata.get("state") == "clarify":
                     return metadata

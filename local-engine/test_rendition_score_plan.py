@@ -133,6 +133,13 @@ class ScorePlanTest(unittest.TestCase):
                 score.plan_arrangement(SOURCE, "Play it lightly", deadline=time.monotonic() - 1)
             self.assertEqual(1, child.call_count)
 
+    def test_planner_process_distinguishes_musical_choices_from_invalid_scores(self):
+        for key, error in (("clarification", score.ArrangementClarification), ("error", ValueError)):
+            reply = subprocess.CompletedProcess([], 0, json.dumps({key: "test message"}))
+            with patch.object(subprocess, "run", return_value=reply), self.assertRaises(error) as raised:
+                score.plan_arrangement(SOURCE, "Play it lightly")
+            self.assertIs(type(raised.exception), error)
+
 
 class PhraseBackingTest(unittest.TestCase):
     def test_one_reply_fits_a_short_breath_without_touching_the_lead(self):

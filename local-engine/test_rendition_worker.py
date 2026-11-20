@@ -9,6 +9,26 @@ import rendition_worker as worker
 
 
 class RenditionPlannerTest(unittest.TestCase):
+    def test_arrangement_choices_return_to_the_listener_and_invalid_scores_still_fail(self):
+        import rendition_score_plan as score
+
+        with tempfile.TemporaryDirectory() as directory:
+            source = Path(directory) / "source.wav"
+            source.touch()
+            output = source.with_name("revision.wav")
+            request = {"prompt": "Solo piano", "original": str(source), "source": str(source),
+                       "output": str(output), "supportsArrangedScore": True}
+            choice = "Choose Original to match the uploaded recording’s octave."
+            with (patch.object(worker, "audio_duration", return_value=1.),
+                  patch("rendition_performance.perform_score", side_effect=score.ArrangementClarification(choice)) as perform,
+                  patch("rendition_performance.perform_take") as cover):
+                self.assertEqual({"state": "clarify", "error": choice}, worker.run(request))
+                perform.side_effect = ValueError("Damaged score")
+                with self.assertRaisesRegex(ValueError, "Damaged score"):
+                    worker.run(request)
+                cover.assert_not_called()
+                self.assertFalse(output.exists())
+
     def test_whole_musical_direction_develops_the_selected_take_and_its_edited_passage(self):
         base = {"scoredAncestor": {"frames": 44100, "editedFrames": [[33075, 44100]]}}
         plan = {"scope": "whole", "caption": "A lyrical instrumental", "label": "Another take"}

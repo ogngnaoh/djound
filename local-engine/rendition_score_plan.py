@@ -19,6 +19,10 @@ from common import HERE, HOME
 from rendition_voicing import _catalog, _excluded, _explicit, _role_names, _size_hint
 
 
+class ArrangementClarification(ValueError):
+    """An admissible musical request needs a choice from the listener."""
+
+
 METERS = {2: "two beats", 3: "three beats", 4: "four beats", 5: "five beats", 6: "six beats"}
 SUBDIVISIONS = {"straight": "even eighths", "swing": "long-short swing eighths", "triplet": "three equal subdivisions"}
 PHRASINGS = {"flowing": "connected, legato", "articulated": "short, clearly separated",
@@ -229,7 +233,7 @@ def _score_players(director, direction, old):
         family = director.choose("Which instrument family carries the source tune?", families)
         allowed = {p: names[p] for p in range(family * 8, family * 8 + 8) if not _excluded_player(p, direction)}
         if not allowed:
-            raise ValueError("Choose an instrument that can carry the source melody.")
+            raise ArrangementClarification("Choose an instrument that can carry the source melody.")
         melodic = [director.choose("Which instrument in that family plays the main tune?", allowed)]
     stated_leads = _stated_leads(direction)
     if edit in ("add", "remove") and old["leadProgram"] in melodic and not stated_leads.intersection(melodic):
@@ -462,7 +466,7 @@ def _listener_tempo(director, direction):
         if target in ("current", "different"):
             return ("current" if target == "current" else None), marks
     if not _bounded_number(target, 40, 240):
-        raise ValueError("Choose a tempo between 40 and 240 BPM.")
+        raise ArrangementClarification("Choose a tempo between 40 and 240 BPM.")
     return target, marks - {target}
 
 
@@ -484,7 +488,7 @@ def _tempo(director, analysis, old, instruction):
         tempos[round(reference)] = "retain the current pulse"
     options = {n: f"{n} BPM, {m}" for n, m in sorted(tempos.items()) if n not in references}
     if not options:
-        raise ValueError("Which tempo would you like the musicians to play?")
+        raise ArrangementClarification("Which tempo would you like the musicians to play?")
     return director.choose("Choose a quarter-note tempo (BPM) for the desired performance.", options)
 
 
@@ -543,7 +547,7 @@ def _arrange(analysis, direction, old, director, *, tempo_instruction=None):
         plan["leadOctaveShift"] = lead_octave(old, analysis.get("melodyMedianPitch"))
     elif register:
         if register == "upload" and analysis.get("scoreInputIsUpload", (old or {}).get("fromUpload")) is False:
-            raise ValueError("Choose Original to match the uploaded recording’s octave. This score follows an earlier take.")
+            raise ArrangementClarification("Choose Original to match the uploaded recording’s octave. This score follows an earlier take.")
         plan["leadOctaveShift"] = 0
     plan.setdefault("realization", "score")
     plan["themeAnchors"] = _anchors(analysis)
@@ -584,7 +588,7 @@ def _arrange(analysis, direction, old, director, *, tempo_instruction=None):
         proposed = [p for p in _members(director.brief) if p != KIT and not _excluded_player(p, direction)]
         candidates = [p for p in named if p in assigned] or named or proposed
         if not candidates:
-            raise ValueError("Which instrument should carry the tune in this take?")
+            raise ArrangementClarification("Which instrument should carry the tune in this take?")
         names = _catalog()[0]
         plan["leadProgram"] = (candidates[0] if len(candidates) == 1 and assigned == {candidates[0]} else
                                director.choose("Which performer is the new melody player?", {p: names[p] for p in candidates}))
@@ -822,6 +826,8 @@ def plan_arrangement(analysis: dict, direction: str, parent_caption: str = "", *
     result = json.loads(proc.stdout)
     if reconsider and result is None:
         return None
+    if "clarification" in result:
+        raise ArrangementClarification(result["clarification"])
     if "error" in result:
         raise ValueError(result["error"])
     return result
@@ -830,5 +836,7 @@ def plan_arrangement(analysis: dict, direction: str, parent_caption: str = "", *
 if __name__ == "__main__":
     try:
         print(json.dumps(_run(json.load(sys.stdin)), allow_nan=False))
+    except ArrangementClarification as exc:
+        print(json.dumps({"clarification": str(exc)}))
     except ValueError as exc:
         print(json.dumps({"error": str(exc)}))
