@@ -46,7 +46,8 @@ public final class RenditionProjects implements AutoCloseable {
             long inFlightCount,
             String favoriteId,
             String favoriteLabel,
-            Double favoriteDurationSeconds) {}
+            Double favoriteDurationSeconds,
+            OffsetDateTime trashedAt) {}
 
     public record State(
             String id,
@@ -94,7 +95,18 @@ public final class RenditionProjects implements AutoCloseable {
             String uploadSha,
             String sourceSha,
             int frames,
-            String favoriteId) {}
+            String favoriteId,
+            OffsetDateTime trashedAt) {
+        Project active() {
+            if (trashedAt != null)
+                throw new ApiProblem(
+                        410,
+                        "RENDITION_PROJECT_TRASHED",
+                        "This recording is in Trash. Restore it to open it again.",
+                        "RESTORE_RECORDING");
+            return this;
+        }
+    }
 
     record Job(
             String id,
@@ -132,7 +144,7 @@ public final class RenditionProjects implements AutoCloseable {
             String scoreSourceTakeId) {}
 
     private static final String PROJECT_FIELDS =
-            "id,title,upload_sha,source_sha,frames,favorite_id";
+            "id,title,upload_sha,source_sha,frames,favorite_id,trashed_at";
     private static final String JOB_FIELDS =
             "id,project_id,parent_id,request_id,label,prompt,caption,state,frames,start_seconds,end_seconds,applied_start_seconds,applied_end_seconds,sha256,error,song_time_map::text"
                 + " AS song_time_map,arrangement_plan::text AS"
@@ -167,6 +179,10 @@ public final class RenditionProjects implements AutoCloseable {
     }
 
     public List<Index> list() {
+        return list(false);
+    }
+
+    public List<Index> list(boolean trash) {
         return db.sql(
                         """
                         SELECT p.id, p.title, p.frames / 44100.0 AS duration_seconds,
@@ -174,7 +190,7 @@ public final class RenditionProjects implements AutoCloseable {
                                coalesce(t.ready_count, 0) AS ready_take_count,
                                coalesce(t.working_count, 0) AS in_flight_count,
                                f.id AS favorite_id, f.label AS favorite_label,
-                               f.frames / 44100.0 AS favorite_duration_seconds
+                               f.frames / 44100.0 AS favorite_duration_seconds, p.trashed_at
                         FROM rendition_project p
                         LEFT JOIN (
                             SELECT project_id,
@@ -183,8 +199,10 @@ public final class RenditionProjects implements AutoCloseable {
                             FROM rendition_take GROUP BY project_id
                         ) t ON t.project_id = p.id
                         LEFT JOIN rendition_take f ON f.project_id = p.id AND f.id = p.favorite_id
+                        WHERE (p.trashed_at IS NOT NULL) = ?
                         ORDER BY p.last_activity_at DESC, p.id
                         """)
+                .param(trash)
                 .query(Index.class)
                 .list();
     }
@@ -340,7 +358,15 @@ public final class RenditionProjects implements AutoCloseable {
     }
 
     private Project project(String id) {
-        return db.sql("SELECT " + PROJECT_FIELDS + " FROM rendition_project WHERE id=?")
+        return loadProject(id, false).active();
+    }
+
+    private Project loadProject(String id, boolean lock) {
+        return db.sql(
+                        "SELECT "
+                                + PROJECT_FIELDS
+                                + " FROM rendition_project WHERE id=?"
+                                + (lock ? " FOR UPDATE" : ""))
                 .param(id)
                 .query(Project.class)
                 .optional()
@@ -380,6 +406,7 @@ public final class RenditionProjects implements AutoCloseable {
     }
 
     public State answer(String id, String takeId, Answer answer) {
+        project(id);
         if (!"keep".equals(answer.choice()) && !"develop".equals(answer.choice()))
             throw new ApiProblem(
                     422,
@@ -416,22 +443,7 @@ public final class RenditionProjects implements AutoCloseable {
         Boolean inserted =
                 tx.execute(
                         status -> {
-                            Project p =
-                                    db.sql(
-                                                    "SELECT "
-                                                            + PROJECT_FIELDS
-                                                            + " FROM rendition_project WHERE id=?"
-                                                            + " FOR UPDATE")
-                                            .param(id)
-                                            .query(Project.class)
-                                            .optional()
-                                            .orElseThrow(
-                                                    () ->
-                                                            new ApiProblem(
-                                                                    404,
-                                                                    "RENDITION_PROJECT_MISSING",
-                                                                    "The recording project could"
-                                                                            + " not be found."));
+                            Project p = loadProject(id, true).active();
                             var existing =
                                     db.sql(
                                                     "SELECT "
@@ -501,16 +513,50 @@ public final class RenditionProjects implements AutoCloseable {
     }
 
     public State favorite(String id, String takeId) {
-        readyJob(id, takeId);
-        db.sql(
-                        """
-                        UPDATE rendition_project SET favorite_id = ?,
-                            last_activity_at = greatest(last_activity_at, statement_timestamp())
-                        WHERE id = ? AND favorite_id IS DISTINCT FROM ?
-                        """)
-                .params(takeId, id, takeId)
-                .update();
-        return state(id);
+        return tx.execute(
+                status -> {
+                    loadProject(id, true).active();
+                    readyJob(id, takeId);
+                    db.sql(
+                                    """
+                                    UPDATE rendition_project SET favorite_id = ?,
+                                        last_activity_at = greatest(last_activity_at, statement_timestamp())
+                                    WHERE id = ? AND favorite_id IS DISTINCT FROM ?
+                                    """)
+                            .params(takeId, id, takeId)
+                            .update();
+                    return state(id);
+                });
+    }
+
+    public void setTrashed(String id, boolean trash) {
+        tx.executeWithoutResult(
+                status -> {
+                    Project p = loadProject(id, true);
+                    if ((p.trashedAt() != null) == trash) return;
+                    if (trash
+                            && db.sql(
+                                            """
+                                            SELECT EXISTS(SELECT 1 FROM rendition_take
+                                                          WHERE project_id = ? AND state IN ('queued','running'))
+                                            """)
+                                    .param(id)
+                                    .query(Boolean.class)
+                                    .single())
+                        throw new ApiProblem(
+                                409,
+                                "RENDITION_PROJECT_BUSY",
+                                "Wait for this recording’s current requests to finish, then move it"
+                                    + " to Trash.");
+                    db.sql(
+                                    """
+                                    UPDATE rendition_project SET trashed_at = CASE WHEN ? THEN statement_timestamp() END,
+                                        last_activity_at = greatest(last_activity_at, statement_timestamp())
+                                    WHERE id = ?
+                                    """)
+                            .params(trash, id)
+                            .update();
+                });
     }
 
     Path path(String id, String takeId) {

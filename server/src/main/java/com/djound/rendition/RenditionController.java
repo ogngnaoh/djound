@@ -21,8 +21,14 @@ final class RenditionController {
     }
 
     @GetMapping
-    List<RenditionProjects.Index> list() {
-        return projects.list();
+    List<RenditionProjects.Index> list(@RequestParam(defaultValue = "active") String view) {
+        return switch (view) {
+            case "active" -> projects.list();
+            case "trash" -> projects.list(true);
+            default ->
+                    throw new ApiProblem(
+                            400, "RENDITION_VIEW_INVALID", "Choose the active library or Trash.");
+        };
     }
 
     @PostMapping(consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
@@ -37,6 +43,18 @@ final class RenditionController {
     @GetMapping("/{id}")
     RenditionProjects.State state(@PathVariable String id) {
         return projects.state(id);
+    }
+
+    @PutMapping("/{id}/trash")
+    @ResponseStatus(HttpStatus.NO_CONTENT)
+    void trash(@PathVariable String id) {
+        projects.setTrashed(id, true);
+    }
+
+    @DeleteMapping("/{id}/trash")
+    @ResponseStatus(HttpStatus.NO_CONTENT)
+    void restore(@PathVariable String id) {
+        projects.setTrashed(id, false);
     }
 
     @PostMapping("/{id}/takes")
@@ -68,9 +86,7 @@ final class RenditionController {
     ResponseEntity<int[]> waveform(@PathVariable String id, @PathVariable String takeId)
             throws IOException {
         var peaks = RenditionWaveform.peaks(projects.path(id, takeId));
-        return ResponseEntity.ok()
-                .header("Cache-Control", "private, max-age=31536000, immutable")
-                .body(peaks);
+        return ResponseEntity.ok().header("Cache-Control", "private, no-cache").body(peaks);
     }
 
     @GetMapping("/{id}/takes/{takeId}/{operation:audio|export}")
@@ -82,7 +98,7 @@ final class RenditionController {
                 ResponseEntity.ok()
                         .contentType(MediaType.parseMediaType("audio/wav"))
                         .contentLength(Files.size(file))
-                        .header("Cache-Control", "private, max-age=31536000, immutable")
+                        .header("Cache-Control", "private, no-cache")
                         .header("Accept-Ranges", "bytes");
         if (operation.equals("export"))
             reply.header(

@@ -76,21 +76,22 @@ public class ProblemHandler {
 
     static ResponseEntity<Map<String, Object>> body(
             int status, String code, String detail, List<String> actions) {
-        return ResponseEntity.status(status)
-                .contentType(MediaType.APPLICATION_PROBLEM_JSON)
-                .body(
-                        Map.of(
-                                "type",
-                                "urn:djound:problem:" + code.toLowerCase(Locale.ROOT),
-                                "title",
-                                code.replace('_', ' '),
-                                "status",
-                                status,
-                                "detail",
-                                detail,
-                                "code",
-                                code,
-                                "permittedActions",
-                                actions));
+        var response =
+                ResponseEntity.status(status).contentType(MediaType.APPLICATION_PROBLEM_JSON);
+        if (code.equals("RENDITION_PROJECT_TRASHED")) response.cacheControl(CacheControl.noStore());
+        return response.body(
+                Map.of(
+                        "type",
+                        "urn:djound:problem:" + code.toLowerCase(Locale.ROOT),
+                        "title",
+                        code.replace('_', ' '),
+                        "status",
+                        status,
+                        "detail",
+                        detail,
+                        "code",
+                        code,
+                        "permittedActions",
+                        actions));
     }
 }

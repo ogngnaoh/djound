@@ -11,7 +11,7 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** @description List recording-led projects by most recent activity, including import, take status changes and a newly selected favorite. */
+        /** @description List recordings in the active library or Trash by most recent activity, including import, take status changes, favorite changes and moves. */
         get: operations["listRenditionProjects"];
         put?: never;
         /** @description Import a 1–300 second mono or stereo AAC/ALAC M4A, PCM WAV or MP3, up to 64 MiB. Decode it synchronously to a 44.1 kHz stereo PCM16 recording. */
@@ -34,6 +34,26 @@ export interface paths {
         put?: never;
         post?: never;
         delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/renditions/{id}/trash": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: components["parameters"]["ResourceId"];
+            };
+            cookie?: never;
+        };
+        get?: never;
+        /** @description Move the whole recording to Trash, keeping its takes, favorite and audio on disk. Repeat calls are safe. Queued and running requests must finish first. */
+        put: operations["trashRenditionProject"];
+        post?: never;
+        /** @description Restore the same recording, takes and favorite from Trash. Repeat calls are safe. */
+        delete: operations["restoreRenditionProject"];
         options?: never;
         head?: never;
         patch?: never;
@@ -795,6 +815,8 @@ export interface components {
             createdAt: string;
             /** Format: date-time */
             lastActivityAt: string;
+            /** Format: date-time */
+            trashedAt: string | null;
             /** @description Playable generated takes */
             readyTakeCount: number;
             /** @description Queued and running requests. */
@@ -1392,7 +1414,9 @@ export type $defs = Record<string, never>;
 export interface operations {
     listRenditionProjects: {
         parameters: {
-            query?: never;
+            query?: {
+                view?: "active" | "trash";
+            };
             header?: never;
             path?: never;
             cookie?: never;
@@ -1446,6 +1470,48 @@ export interface operations {
         requestBody?: never;
         responses: {
             200: components["responses"]["RenditionProject"];
+            default: components["responses"]["Problem"];
+        };
+    };
+    trashRenditionProject: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: components["parameters"]["ResourceId"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Recording is in Trash. */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            default: components["responses"]["Problem"];
+        };
+    };
+    restoreRenditionProject: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: components["parameters"]["ResourceId"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Recording is in the active library. */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
             default: components["responses"]["Problem"];
         };
     };

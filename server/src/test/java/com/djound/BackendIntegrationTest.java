@@ -252,6 +252,84 @@ class BackendIntegrationTest {
                                 id,
                                 new com.djound.rendition.RenditionProjects.Command(
                                         "offline", take.id(), "another", null, null)));
+        var sibling = restored.create(wav("another.wav", 44100, 1, 16, 1), "sibling");
+        assertEquals(sibling.id(), restored.list().getFirst().id());
+        String resource = "/api/renditions/" + id;
+        try (var http = java.net.http.HttpClient.newHttpClient()) {
+            byte[] heard = renditionRequest(http, "GET", second.audioUrl()).body();
+            assertEquals(204, renditionRequest(http, "PUT", resource + "/trash").statusCode());
+            var trashed = restored.list(true).getFirst();
+            assertEquals(id, trashed.id());
+            assertEquals(second.id(), trashed.favoriteId());
+            assertEquals(2, trashed.readyTakeCount());
+            assertNotNull(trashed.trashedAt());
+            var trashList = renditionRequest(http, "GET", "/api/renditions?view=trash");
+            assertEquals(200, trashList.statusCode());
+            assertEquals(id, json.readTree(trashList.body()).get(0).path("id").asString());
+            assertEquals(400, renditionRequest(http, "GET", "/api/renditions?view=unknown").statusCode());
+            restored.setTrashed(id, true);
+            assertEquals(trashed, restored.list(true).getFirst());
+            assertEquals(
+                    List.of(sibling.id()),
+                    restored.list().stream().map(RenditionProjects.Index::id).toList());
+            for (var path :
+                    List.of(
+                            resource,
+                            session.originalUrl(),
+                            second.audioUrl(),
+                            second.exportUrl(),
+                            resource + "/takes/" + second.id() + "/waveform")) {
+                var blocked = renditionRequest(http, "GET", path);
+                assertEquals(410, blocked.statusCode(), path);
+                assertEquals(
+                        "RENDITION_PROJECT_TRASHED",
+                        json.readTree(blocked.body()).path("code").asString());
+                assertEquals(
+                        "no-store", blocked.headers().firstValue("Cache-Control").orElseThrow());
+            }
+            assertEquals(
+                    "RENDITION_PROJECT_TRASHED",
+                    assertThrows(ApiProblem.class, () -> restored.create(upload, "import")).code());
+            assertEquals(
+                    "RENDITION_PROJECT_TRASHED",
+                    assertThrows(ApiProblem.class, () -> restored.submit(id, first)).code());
+            assertEquals(
+                    "RENDITION_PROJECT_TRASHED",
+                    assertThrows(ApiProblem.class, () -> restored.favorite(id, take.id())).code());
+            assertEquals(
+                    "RENDITION_PROJECT_TRASHED",
+                    assertThrows(
+                                    ApiProblem.class,
+                                    () ->
+                                            restored.answer(
+                                                    id,
+                                                    take.id(),
+                                                    new RenditionProjects.Answer("stale", "keep")))
+                            .code());
+            app.close();
+            app = launch(root);
+            var reopened = app.getBean(RenditionProjects.class);
+            assertEquals(trashed, reopened.list(true).getFirst());
+            assertEquals(204, renditionRequest(http, "DELETE", resource + "/trash").statusCode());
+            var active = reopened.list().getFirst();
+            reopened.setTrashed(id, false);
+            assertEquals(active, reopened.list().getFirst());
+            assertNull(active.trashedAt());
+            assertEquals(id, active.id());
+            assertTrue(reopened.list(true).isEmpty());
+            assertEquals(second.id(), reopened.create(upload, "import").favoriteId());
+            assertArrayEquals(heard, renditionRequest(http, "GET", second.exportUrl()).body());
+        }
+    }
+
+    private java.net.http.HttpResponse<byte[]> renditionRequest(
+            java.net.http.HttpClient client, String method, String path) throws Exception {
+        String base = "http://127.0.0.1:" + app.getEnvironment().getProperty("local.server.port");
+        return client.send(
+                java.net.http.HttpRequest.newBuilder(java.net.URI.create(base + path))
+                        .method(method, java.net.http.HttpRequest.BodyPublishers.noBody())
+                        .build(),
+                java.net.http.HttpResponse.BodyHandlers.ofByteArray());
     }
 
     @Test
@@ -703,6 +781,51 @@ class BackendIntegrationTest {
                 7,
                 projects.list().stream().mapToLong(RenditionProjects.Index::inFlightCount).sum());
         assertTrue(projects.list().stream().allMatch(row -> row.readyTakeCount() == 0));
+        for (var project : List.of(a, b)) {
+            assertEquals(
+                    "RENDITION_PROJECT_BUSY",
+                    assertThrows(ApiProblem.class, () -> projects.setTrashed(project.id(), true))
+                            .code());
+        }
+        var overlap = projects.create(wav("race.wav", 44100, 1, 16, 1), "race");
+        var start = new CyclicBarrier(2);
+        try (var pool = Executors.newFixedThreadPool(2)) {
+            var move =
+                    pool.submit(
+                            () -> {
+                                start.await();
+                                try {
+                                    projects.setTrashed(overlap.id(), true);
+                                    return "trashed";
+                                } catch (ApiProblem e) {
+                                    return e.code();
+                                }
+                            });
+            var submit =
+                    pool.submit(
+                            () -> {
+                                start.await();
+                                try {
+                                    projects.submit(
+                                            overlap.id(),
+                                            new RenditionProjects.Command(
+                                                    "race", "original", "race", null, null));
+                                    return "queued";
+                                } catch (ApiProblem e) {
+                                    return e.code();
+                                }
+                            });
+            String moved = move.get(5, TimeUnit.SECONDS);
+            String submitted = submit.get(5, TimeUnit.SECONDS);
+            if (moved.equals("trashed")) {
+                assertEquals("RENDITION_PROJECT_TRASHED", submitted);
+                assertEquals(0, projects.list(true).getFirst().inFlightCount());
+            } else {
+                assertEquals("RENDITION_PROJECT_BUSY", moved);
+                assertEquals("queued", submitted);
+                assertEquals("queued", projects.state(overlap.id()).takes().getFirst().state());
+            }
+        }
         app.close();
         assertFalse(Files.exists(stageFile));
         for (int i = 0;
