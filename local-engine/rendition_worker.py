@@ -258,6 +258,12 @@ def plan_take(request, duration):
             return {"state": "planned", "caption": prompt.strip(), "label": f"{quality} {position} notes",
                     "planner": "score-note-dynamics", "leadNoteEdit": edit, "melodyReference": "parent",
                     "keepEnsemble": False, "appliedStartSeconds": None, "appliedEndSeconds": None}
+        from rendition_score_form import requested_cut
+        cut = requested_cut(prompt, parent_plan)
+        if cut and not parent_plan.get("retainedPassageFrames"):
+            return {"state": "planned", "caption": prompt.strip(), "label": f"Without the {cut}",
+                    "planner": "score-form", "omitScoreEdge": cut, "melodyReference": "parent",
+                    "keepEnsemble": False, "appliedStartSeconds": None, "appliedEndSeconds": None}
     edge = TIMED_EDGE.search(prompt)
     if edge:
         if TIMED_EDGE.search(prompt, edge.end()):
@@ -412,7 +418,8 @@ def run(request, plan_only=False):
                                          recover_original=reference is not None,
                                          scored_ancestor=request.get("scoredAncestor") if policy in ("keep", "develop") else None,
                                          parent_score_input=request.get("parentScoreInput") if policy != "fresh" else None,
-                                         passage_policy=policy, lead_note_edit=decision.get("leadNoteEdit"))
+                                         passage_policy=policy, lead_note_edit=decision.get("leadNoteEdit"),
+                                         omit_score_edge=decision.get("omitScoreEdge"))
             except ArrangementClarification as choice:
                 return {"state": "clarify", "error": str(choice)}
             if metadata:
