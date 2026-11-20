@@ -1,4 +1,4 @@
-"""Reconstruct and score a new live violin/piano performance. See fixtures/kraisler-dichterliebe/README.md."""
+"""Reconstruct and score the released KRAISLER violin and piano melody checks."""
 import argparse
 import csv
 import hashlib
@@ -16,26 +16,29 @@ import soundfile as sf
 from melody_acceptance import evaluate, prepare_fixture, trace_options
 
 
-NAME = "kraisler-dichterliebe"
-COMMITMENT = "5782e269dd48d2ba22abc4def4bbc7d539ecf2a9f3706337cfbdc09e1b6b3f0f"
+CASES = {
+    "dichterliebe": ("11", "5782e269dd48d2ba22abc4def4bbc7d539ecf2a9f3706337cfbdc09e1b6b3f0f"),
+    "estrellita": ("14", "739132ed5bda2cae5e646087ab5f7d0e7c88fa3fdcb865a4f7def737d90e460a"),
+}
 FILES = {
-    "11_mix_dry.wav": "performance_wav",
-    "11_VN_dry.wav": "performance_wav",
-    "11_PF.mid": "performance_midi",
-    "11_VN.musicxml": "score_musicxml",
-    "11_notes_VN.csv": "annotation_csv",
-    "11_beats.csv": "annotation_csv",
+    "mix_dry.wav": "performance_wav",
+    "VN_dry.wav": "performance_wav",
+    "PF.mid": "performance_midi",
+    "VN.musicxml": "score_musicxml",
+    "notes_VN.csv": "annotation_csv",
+    "beats.csv": "annotation_csv",
 }
 
 
-def read_sources(dataset, hashes):
+def read_sources(dataset, track, hashes):
     if dataset.is_file():
         with ZipFile(dataset) as archive:
-            files = {name: archive.read(f"KRAISLER/{folder}/{name}") for name, folder in FILES.items()}
+            files = {role: archive.read(f"KRAISLER/{folder}/{track}_{role}") for role, folder in FILES.items()}
     else:
         base = dataset / "KRAISLER" if (dataset / "KRAISLER").is_dir() else dataset
-        files = {name: (base / folder / name).read_bytes() for name, folder in FILES.items()}
-    for name, content in files.items():
+        files = {role: (base / folder / f"{track}_{role}").read_bytes() for role, folder in FILES.items()}
+    for role, content in files.items():
+        name = f"{track}_{role}"
         if hashlib.sha256(content).hexdigest() != hashes[name]:
             raise ValueError(f"Unexpected recording or annotation contents in {name}.")
     return files
@@ -60,13 +63,13 @@ def write_fixture(files, destination, manifest):
     rate = manifest["sample_rate"]
     first, last = manifest["clip_frames_half_open"]
     start, stop = first / rate, last / rate
-    with sf.SoundFile(io.BytesIO(files["11_mix_dry.wav"])) as audio:
+    with sf.SoundFile(io.BytesIO(files["mix_dry.wav"])) as audio:
         if (audio.samplerate, audio.channels, audio.subtype) != (rate, 1, "PCM_16"):
             raise ValueError("Expected the original mono PCM16 mixture.")
         audio.seek(first)
         sf.write(destination / "recording.wav", audio.read(last - first, dtype="int16"), rate, subtype="PCM_16")
 
-    labels = csv.DictReader(io.StringIO(files["11_notes_VN.csv"].decode()))
+    labels = csv.DictReader(io.StringIO(files["notes_VN.csv"].decode()))
     notes = [(float(row["onset"]), float(row["offset"]), int(row["midi"])) for row in labels
              if start <= float(row["onset"]) < stop]
 
@@ -79,13 +82,13 @@ def write_fixture(files, destination, manifest):
         writer = csv.writer(table)
         writer.writerow(columns)
         writer.writerows(theme)
-    piano = pretty_midi.PrettyMIDI(io.BytesIO(files["11_PF.mid"])).instruments[0].notes
+    piano = pretty_midi.PrettyMIDI(io.BytesIO(files["PF.mid"])).instruments[0].notes
     with (destination / "parts.csv").open("w", newline="") as table:
         writer = csv.writer(table)
         writer.writerow(columns + ["instrument"])
         writer.writerows(row + ["41"] for row in theme)
         writer.writerows(clip_note(n.start, n.end, n.pitch) + ["1"] for n in piano if n.end > start and n.start < stop)
-    violin, stem_rate = sf.read(io.BytesIO(files["11_VN_dry.wav"]))
+    violin, stem_rate = sf.read(io.BytesIO(files["VN_dry.wav"]))
     if stem_rate != rate or violin.ndim != 1:
         raise ValueError("Expected the matching isolated violin microphone.")
     result = verify_stem(violin, notes, rate)
@@ -96,10 +99,13 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("dataset", type=Path, help="Published KRAISLER.zip or its extracted directory")
     parser.add_argument("output", type=Path, help="Local parent directory for the reconstructed fixture")
+    parser.add_argument("--piece", choices=CASES, default="dichterliebe")
     trace_options(parser)
     args = parser.parse_args()
-    source = partial(read_sources, args.dataset)
-    return evaluate(prepare_fixture(NAME, COMMITMENT, args.output, source, write_fixture), args.trace, transcribe=args.transcribe)
+    track, commitment = CASES[args.piece]
+    source = partial(read_sources, args.dataset, track)
+    fixture = prepare_fixture(f"kraisler-{args.piece}", commitment, args.output, source, write_fixture)
+    return evaluate(fixture, args.trace, transcribe=args.transcribe)
 
 
 if __name__ == "__main__":

@@ -1,0 +1,21 @@
+--- assess.py
++++ assess.py
+@@ -1,0 +2 @@
++from bisect import bisect_right
+@@ -20 +21 @@
+-def align(ref, out, tolerance, split):
++def align(ref, out, tolerance, splits):
+@@ -30,4 +31,3 @@
+-            left_ref = a < split - 1e-7
+-            left_out = x < split - 1e-7
+-            second_pickup = abs(a-split) < 1e-7 and split-.18 <= x < split
+-            same_phrase = left_ref == left_out or second_pickup
++            ref_phrase, out_phrase = bisect_right(splits, a+1e-7), bisect_right(splits, x+1e-7)
++            pickup = any(abs(a-split)<1e-7 and split-.18 <= x < split for split in splits)
++            same_phrase = ref_phrase == out_phrase or pickup
+@@ -61 +61 @@
+-    split = manifest['phrases'][1]['start_s']
++    split = [p['start_s'] for p in manifest['phrases'][1:]]
+@@ -75 +75 @@
+-        if r['instrument']=='42': continue
++        if r['instrument']==str(manifest['reference_instrument']): continue

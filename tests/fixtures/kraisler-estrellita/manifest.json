@@ -1,0 +1,52 @@
+{
+  "nonce": "1c334d71a3908021823d198eed838e52e88995123f289ca019823003472ea949",
+  "track": "14",
+  "source": "Manuel Ponce, Estrellita, violin and piano arrangement by Jascha Heifetz. KRAISLER performance 14. The performer plays the answering violin phrase, then repeats and varies the opening material before the cadence. The recorded dry mix is cropped at 13.12 and 38.17 seconds.",
+  "attribution": "Hyemi Kim, Jiyun Park, Sein Lee, Taegyun Kwon, Sunjae Won and Juhan Nam; KAIST Music and Audio Computing Lab. Published 3 July 2026, Version 1.0. DOI 10.5281/zenodo.21082251, associated methods DOI 10.5334/tismir.338. The dataset advertises CC BY 4.0 and additionally asks for research-only, noncommercial use. Retain the music locally for this assessment and link to the source release and method.",
+  "source_independence": "Individual commissioned violin and piano performance and composition distinct from all four earlier assessments, no previous Djound processing or tuning on this recording. Same performance project and annotation process as KRAISLER 11, which is now a development case. These sessions were published in 2026, the original YourMT3+ training corpora were published in 2024.",
+  "sources": [
+    "https://zenodo.org/records/21082251",
+    "https://doi.org/10.5334/tismir.338",
+    "https://arxiv.org/html/2407.04822v2",
+    "https://huggingface.co/ONLY4DarkKnight/YourMT3-plus-onnx/blob/7f0d7c26a90ce1bcff74d3938f84db570a74abab/NOTICE.md"
+  ],
+  "release_archive_md5": "22f6f51e9c356c1ea8f591d85603fd73",
+  "source_hashes": {
+    "14_mix_dry.wav": "7e6d609ca37e5b5afb093fb57e08b970a6aef725defedd82b5b13ff66ac1be77",
+    "14_VN_dry.wav": "4b12c3f9d788cd0b7077e453804607790cd5feea64284d87606025c7498f348e",
+    "14_PF.mid": "0706dcd689453613568434f578d18495c90882a2777a6c7ade4e2e7ef09b2d5c",
+    "14_VN.musicxml": "890c55a2cdf10e13d516ce1af7baea359764e540a959bd2a19f048d69ecdfc64",
+    "14_notes_VN.csv": "b551e27320541a31d9a89d729565287caf29acbf8207c451bd61f42f14c4ea7a",
+    "14_beats.csv": "4a90b5b3cabb8915b9003d4bc95015fc272b398e49e3d1c599a028551f53b896"
+  },
+  "clip_frames_half_open": [
+    578592,
+    1683297
+  ],
+  "sample_rate": 44100,
+  "reference_instrument": 41,
+  "ground_truth": "The violin part of the Ponce/Heifetz score carries the melody; the piano supports it continuously. Human-reviewed performance-aligned note onsets and pitches from the contributor, with independently captured piano MIDI and isolated violin used only as evaluator evidence. First phrase starts with the pickup into the fourth bar, the return of the familiar violin motif at 21.151 seconds starts the next melodic phrase. The latter includes its written grace-note decoration and reaches the bar-nine cadence. Count every published attack. Some contiguous or overlapping note boundaries and quiet grace notes are intrinsically more uncertain than the main pitches; no adjustment for that uncertainty. The clip boundary is within the long written rest after the cadence.",
+  "phrases": [
+    {
+      "name": "answering phrase",
+      "start_s": 0,
+      "end_s": 8.031,
+      "count": 12
+    },
+    {
+      "name": "varied return through cadence",
+      "start_s": 8.031,
+      "end_s": 25.050000000000004,
+      "count": 28
+    }
+  ],
+  "scoring": {
+    "coordinates": "Source trace against native capture times. Render from actual selected part and export is checked against that trace separately using its documented timing/arrangement mapping. No oracle-based octave remapping, transposition or time warping for source trace.",
+    "matching": "Chronological one-to-one dynamic programming. Eligible if onset within 0.18 seconds and intervals overlap at least 0.04 seconds; alternatively at least half of the shorter interval overlaps and onset within 0.25 seconds. Maximize matched pair count, then exact pitches, then minimize combined onset/duration difference. Pitch must be within one MIDI semitone in the true octave; repeat with 0 semitone tolerance for exact metric. Each extracted/source note used once. Match independently within each source phrase; output assigned by onset, allowing up to 0.18s for a phrase pickup if near split and pitch fits; global calculation must never reuse an output or reference note. Report ratios by labels from global matching.",
+    "pass_gate": "Correct-octave distinct-note recall >=0.80 overall, >=0.70 in each distinct phrase. Non-silent complete waveform with reproducible, exported lead part matching kept trace, and actual requested instrumental edit. Report exact-note recall, precision of trace events, note-time coverage, same pitch-class wrong octave, repeated notes collapsed, and false switches. Higher tolerance or source-pitch equality following automatic transposition cannot rehabilitate a failed key gate.",
+    "coverage": "Center-sample every 20ms where the reference is active. At every tick, count |midi delta|<=1 with no re-registration of time; assign overlap to latest onset. Report full-run absolute exact versus +/-1, per phrase, rests precision and fraction erroneously placed on an annotated competing part (within 1 semitone and >1 away from the reference). A false switch is a continuous run >=120ms on an annotated competing voice, or a wrong octave of the melody, allowing one 20ms hole and coalescing the adjacent affected ticks. Report competing instruments and sample times. Leave ambiguous/unmatched errors counted as such.",
+    "feedback": "If a human preference conflicts with compositional role, report both conclusions. First holdout result must be retained, and this piece becomes development-only if used for repair."
+  },
+  "purpose": "Make this into music for my morning walk. Give it a steady beat with a kick drum and snare, and keep the tune easy to hear.",
+  "revision": "Keep the same pulse and accompaniment exactly as they are. Give the melody to a cello."
+}
