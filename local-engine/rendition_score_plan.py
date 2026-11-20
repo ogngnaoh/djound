@@ -16,6 +16,7 @@ import sys
 import time
 
 from common import HERE, HOME
+from rendition_rhythm import FIGURES, choose_chart_figure, write_chart_figure
 from rendition_score_render import MAX_TRACKS
 from rendition_voicing import _catalog, _excluded, _explicit, _role_names, _size_hint
 
@@ -891,6 +892,16 @@ def _arrange(analysis, direction, old, director, *, tempo_instruction=None):
         if old and "groove" not in changes:
             prior_roles = {(r["kind"], r["program"]): r for r in old["roles"]}
             plan["roles"] = [copy.deepcopy(prior_roles.get((r["kind"], r["program"]), r)) for r in plan["roles"]]
+    figure = getattr(director, "new_chart_figure", None)
+    if not old and figure and _subdivision(direction) in (None, "straight"):
+        marked = _marked(direction)
+        assigned = {p for p in _members(direction) if re.search(
+            r"\b(?:walk\w*|hold\w*|held|sustain\w*|off[ -]?beats?|backbeats?|between|"
+            r"pulse|pulsing|drone|ostinato|arpeggios?|syncopat\w*|quarters?|eighths?|"
+            r"sixteenths?|rests?|each beat|every beat|each bar)\b", _part_words(marked, p))}
+        assigned.update(r["program"] for r in plan["roles"] if r["kind"] == "chords" and
+                        any(_chord_placement(direction, r["program"])))
+        write_chart_figure(plan, figure, assigned)
     if "interaction" in changes and plan["roles"]:
         plan["phraseInteraction"] = director.choose(
             "How should the backing respond to the recorded phrases? Keep a repeating figure for a continuous pulse. "
@@ -1003,6 +1014,13 @@ class _Director:
         self.model, self.tokenizer = load(str(weights), tokenizer_config={"trust_remote_code": False})
         self.generate, self.mx, self.greedy = generate, mx, make_sampler(temp=0)
         context, self.new_chart_tempo = _first_chart_context(self, context)
+        self.new_chart_figure = None
+        if context.get("currentTake") == "" and "currentScore" not in context:
+            self.new_chart_figure = choose_chart_figure(self, context["listener"])
+            if self.new_chart_figure in ("marcato", "habanera", "tresillo"):
+                context = {**context, "rhythmicFigure": self.new_chart_figure + ": " + FIGURES[self.new_chart_figure],
+                           "rehearsal": "Use one backing player to articulate this counted figure in straight time. "
+                           "Keep the other parts complementary. Use a drum kit only if the arrangement calls for one."}
         self.context = json.dumps(context, ensure_ascii=False, separators=(",", ":"))
         self.brief = self.write(
             "Write a practical chart for the requested music. Choose the tempo, meter, feel, instruments and each "
