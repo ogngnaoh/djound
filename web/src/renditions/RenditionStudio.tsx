@@ -16,7 +16,7 @@ import {
   type RenditionCommand,
 } from "./api";
 import { useRecoverableRequest } from "./useRecoverableRequest";
-import { correspondingPosition } from "./songTime";
+import { correspondingPosition, passageAuditionStart } from "./songTime";
 import "./renditions.css";
 
 const styles = [
@@ -139,9 +139,12 @@ function RecordingSession({
   const parentId = revising?.parentId ?? activeId;
   const parentTake = project.takes.find((t) => t.id === parentId) ?? null;
   const parentDuration = parentTake?.durationSeconds ?? project.durationSeconds;
-  const previousTake = project.takes.find(
+  const comparisonTakes = project.takes.filter(
     (take) =>
-      take.id === previousId && take.id !== activeId && take.state === "ready",
+      (take.id === previousId || take.id === selected?.parentId) &&
+      take.id !== activeId &&
+      take.state === "ready" &&
+      take.audioUrl,
   );
   const newestChild = project.takes
     .filter((t) => t.parentId === activeId)
@@ -289,7 +292,7 @@ function RecordingSession({
         : null);
     play(
       parent,
-      next ? Math.max(0, Number(next.start) - 2) : position,
+      next ? passageAuditionStart(Number(next.start)) : position,
       player.current?.paused === false,
     );
     setRevising(take);
@@ -407,15 +410,16 @@ function RecordingSession({
             }}
           />
           <div className="mix-save">
-            {previousTake && (
+            {comparisonTakes.map((take) => (
               <Button
+                key={take.id}
                 size="sm"
                 variant="outline"
-                onClick={() => play(previousTake)}
+                onClick={() => play(take)}
               >
-                <Play /> Compare {label(previousTake.id)}
+                <Play /> Compare {label(take.id)}
               </Button>
-            )}
+            ))}
             {selected && (
               <>
                 <Button size="sm" variant="outline" onClick={() => play(null)}>
@@ -584,11 +588,8 @@ function RecordingSession({
                     onClick={() =>
                       play(
                         latest,
-                        Math.max(
-                          0,
-                          (latest.appliedStartSeconds ??
-                            latest.startSeconds ??
-                            0) - 2,
+                        passageAuditionStart(
+                          latest.appliedStartSeconds ?? latest.startSeconds,
                         ),
                       )
                     }

@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { correspondingPosition } from "./songTime.ts";
+import { correspondingPosition, passageAuditionStart } from "./songTime.ts";
 
 const r = 44100;
 const trio = [
@@ -12,6 +12,14 @@ const slower = [
   [0, 0],
   [20 * r, 10 * r],
 ];
+
+test("only an edited passage overrides the current musical position", () => {
+  assert.equal(passageAuditionStart(null), undefined);
+  assert.equal(passageAuditionStart(undefined), undefined);
+  assert.equal(passageAuditionStart(0), 0);
+  assert.equal(passageAuditionStart(1.5), 0);
+  assert.equal(passageAuditionStart(18), 16);
+});
 
 test("compares the same phrase across the upload and different arrangements", () => {
   assert.equal(correspondingPosition(7, trio, undefined), 6);

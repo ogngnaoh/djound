@@ -1,6 +1,11 @@
 type Landmarks = ReadonlyArray<ReadonlyArray<number>> | undefined;
 const rate = 44100;
 
+/** A missing range leaves playback at the corresponding musical position. */
+export function passageAuditionStart(start: number | null | undefined) {
+  return start == null ? undefined : Math.max(0, start - 2);
+}
+
 /** Look up a file frame on the song clock, or the song frame on another file's clock. */
 function interpolate(
   map: Landmarks,
