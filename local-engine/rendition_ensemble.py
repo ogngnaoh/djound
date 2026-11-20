@@ -84,20 +84,29 @@ def _replace(notes, replacement, start, stop):
     return [tuple(note[:4]) for note in pieces]
 
 
-def resolve_players(source, work, events, mix, duration, deadline, *, pinned=False, localized=False):
-    from rendition_player_line import needs_player_analysis, select_player_line
+def _silent_edges(samples, rate, start, stop):
+    """Keep model context on the same side of a recording cut as the disputed phrase."""
+    silent = np.all(samples == 0, axis=1)
+    gaps = np.flatnonzero(np.diff(np.r_[False, silent, False])).reshape(-1, 2)
+    # A zero crossing or brief instrument attack cannot establish a cut. Look
+    # only around the two edges; silence within the ensemble is part of its music.
+    gaps = gaps[gaps[:, 1] - gaps[:, 0] >= round(.08 * rate)]
+    left = max((end for _, end in gaps if abs(end - start) <= rate / 2 and end < len(samples)), default=0)
+    right = min((begin for begin, _ in gaps if abs(begin - stop) <= rate / 2 and begin > 0), default=len(samples))
+    return (left, right) if left < right else (0, len(samples))
 
-    model = None
+
+def _resolve(source, work, baseline, duration, deadline, passages, select, context_supported, *, honor_cuts):
+    if not passages:
+        return None
+    model = installed_model()
+    if model is None:
+        return None
     revised = None
-    for start, stop in _passages(events, mix, duration, localized):
-        if model is None:
-            model = installed_model()
-            if model is None:
-                break
+    for start, stop in passages:
         left, right = max(0., start - 2), min(duration, stop + 2)
-        if localized and (left != start or right != stop):
-            if not needs_player_analysis(_within(mix, left, right), _within(events, left, right), right - left):
-                left, right = start, stop
+        if (left != start or right != stop) and not context_supported(left, right):
+            left, right = start, stop
         path = source
         if left > 0 or right < duration:
             path = Path(work) / "players-passage.wav"
@@ -105,16 +114,59 @@ def resolve_players(source, work, events, mix, duration, deadline, *, pinned=Fal
                 begin = round(left * recording.samplerate)
                 end = round(right * recording.samplerate)
                 recording.seek(begin)
-                sf.write(path, recording.read(end - begin, dtype="int16", always_2d=True),
-                         recording.samplerate, subtype="PCM_16")
+                samples = recording.read(end - begin, dtype="int16", always_2d=True)
+                if honor_cuts:
+                    lo, hi = _silent_edges(samples, recording.samplerate,
+                                           round(start * recording.samplerate) - begin,
+                                           round(stop * recording.samplerate) - begin)
+                    samples = samples[lo:hi]
+                    begin, end = begin + lo, begin + hi
+                sf.write(path, samples, recording.samplerate, subtype="PCM_16")
                 left, right = begin / recording.samplerate, end / recording.samplerate
+                if honor_cuts:
+                    start, stop = max(start, left), min(stop, right)
+                    if stop <= start:
+                        continue
         views = instrument_tracks(path, model, right - left, deadline)
-        selected = select_player_line(path, _within(events, left, right), _within(mix, left, right),
-                                      views, right - left)
+        selected = select(path, left, right, views)
         if selected:
             aligned = [(a + left, b + left, key, confidence) for a, b, key, confidence in selected]
             if any(b > start and a < stop for a, b, _, _ in aligned):
-                revised = _replace(mix if revised is None else revised, aligned, start, stop)
+                revised = _replace(baseline if revised is None else revised, aligned, start, stop)
+    return revised
+
+
+def resolve_players(source, work, events, mix, duration, deadline, *, pinned=False, localized=False):
+    from rendition_player_line import needs_player_analysis, select_player_line
+
+    def select(path, left, right, views):
+        return select_player_line(path, _within(events, left, right), _within(mix, left, right), views, right - left)
+
+    def context_supported(left, right):
+        return not localized or needs_player_analysis(_within(mix, left, right), _within(events, left, right), right - left)
+
+    revised = _resolve(source, work, mix, duration, deadline, _passages(events, mix, duration, localized),
+                       select, context_supported, honor_cuts=localized)
     if revised is None and pinned:
         raise ValueError("This take used the local instrument transcriber. Restore its verified model to recover the saved tune.")
+    return revised
+
+
+def resolve_separated_player(source, work, events, separated, mix, duration, deadline, *, pinned=False):
+    from rendition_voice_player import needs_voice_player, select_voice_player
+
+    def agrees(left, right):
+        return needs_voice_player(_within(separated, left, right), _within(mix, left, right), right - left)
+
+    def select(path, left, right, views):
+        return select_voice_player(path, _within(events, left, right), _within(separated, left, right),
+                                   _within(mix, left, right), views, right - left)
+
+    # Keep complete short performances together so an instrument's repeated
+    # phrases help identify it. Longer performances may change lead at a rest.
+    cuts = [0., duration] if duration <= 48 else _boundaries(separated, duration)
+    spans = [(a, b) for a, b in zip(cuts, cuts[1:]) if agrees(a, b)]
+    revised = _resolve(source, work, separated, duration, deadline, spans, select, agrees, honor_cuts=True)
+    if pinned and revised is None:
+        raise ValueError("This take needs its saved separated instrument melody. Restore the verified local models and retry.")
     return revised

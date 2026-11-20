@@ -1,6 +1,7 @@
 """Extract a likely lead from a canonical recording and synthesize a timed instrumental guide."""
 
 from collections import deque
+from functools import cache
 from importlib.util import find_spec
 import json
 import math
@@ -21,7 +22,7 @@ MODEL = Path("basic-pitch/basic_pitch/saved_models/icassp_2022/nmp.onnx")
 BANK = "FluidR3_GM.sf2"
 NO_LINE = 3
 MELODY_TRACE_VERSION = 7
-TRACE_SOURCES = ("single", "mix", "separated_voice", "instrument_tracks")
+TRACE_SOURCES = ("single", "mix", "separated_voice", "instrument_tracks", "separated_player")
 
 
 def guide_available() -> bool:
@@ -69,7 +70,8 @@ def _extract_to_file(source, output, program, deadline, preserve_register, *, no
     if type(trace_version) is not int or not 1 <= trace_version <= MELODY_TRACE_VERSION:
         raise ValueError("This saved take uses an unsupported melody transcription.")
     if trace_source is not None and (trace_version < 3 or trace_source not in TRACE_SOURCES
-                                     or (trace_source == "instrument_tracks" and trace_version < 6)):
+                                     or (trace_source == "instrument_tracks" and trace_version < 6)
+                                     or (trace_source == "separated_player" and trace_version < 7)):
         raise ValueError("This saved take has an unknown melody source.")
     if type(preserve_register) is not bool:
         raise ValueError("Specify whether to keep the recorded octave.")
@@ -517,6 +519,7 @@ def _with_instrumental_phrases(voice, events, duration, *, mix_line=None):
 
 
 def _recorded_line(source, work, events, duration, trace_version, trace_source, deadline):
+    @cache
     def mix_line():
         if trace_version >= 4:
             from rendition_foreground import foreground_notes
@@ -539,15 +542,25 @@ def _recorded_line(source, work, events, duration, trace_version, trace_source, 
 
     if trace_source in ("mix", "instrument_tracks"):
         return instrumental_line()
-    if trace_source != "separated_voice":
+    if trace_source not in ("separated_voice", "separated_player"):
         times, pitch, confidence = _fundamental(source)
         if trace_source == "single" or _single_voice(times, pitch, confidence, events):
             return _voiced_notes(source, times, pitch, confidence), "single"
     if trace_version >= 3:
         voice = _singer_in_mix(source, work, events, duration, deadline, require_foreground=trace_version >= 4)
         if voice:
-            return _with_instrumental_phrases(voice, events, duration,
-                                              mix_line=mix_line if trace_version >= 4 else None), "separated_voice"
+            separated = _with_instrumental_phrases(voice, events, duration,
+                                                   mix_line=mix_line if trace_version >= 4 else None)
+            if trace_version >= 7 and trace_source != "separated_voice" and (
+                    trace_source == "separated_player" or (HOME / "instrument-transcriber").exists()):
+                from rendition_ensemble import resolve_separated_player
+                selected = resolve_separated_player(source, work, events, separated, mix_line(), duration,
+                                                    deadline, pinned=trace_source == "separated_player")
+                if selected is not None:
+                    return selected, "separated_player"
+            return separated, "separated_voice"
+        if trace_source == "separated_player":
+            raise ValueError("The saved instrument melody could not be recovered. Check the local separator installation.")
         if trace_source == "separated_voice":
             raise ValueError("The saved vocal melody could not be recovered. Check the local separator installation.")
     return instrumental_line()

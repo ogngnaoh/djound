@@ -11,6 +11,29 @@ import rendition_melody as melody
 
 
 class EnsemblePassageTest(unittest.TestCase):
+    def test_model_context_stops_at_recording_cuts_and_keeps_the_internal_breath(self):
+        samples = np.full((3400, 2), 64, dtype="int16")
+        samples[400:600] = samples[1100:1450] = samples[2600:2900] = 0
+        samples[700:900, 0] = 0
+        self.assertEqual((600, 2600), ensemble._silent_edges(samples, 1000, 550, 2700))
+        self.assertEqual((0, len(samples)), ensemble._silent_edges(samples + 2, 1000, 550, 2700))
+
+    def test_separated_player_revision_reuses_its_route_and_old_voice_take_reuses_its_own(self):
+        melody_notes = [(0., .5, 64, .7)]
+        revised = [(0., .25, 64, .7), (.26, .5, 64, .7)]
+        with (patch.object(melody, "_fundamental", side_effect=AssertionError("Already pinned")),
+              patch.object(melody, "_singer_in_mix", return_value=melody_notes),
+              patch("rendition_foreground.foreground_notes", return_value=melody_notes),
+              patch("rendition_octaves.recover_octave_excursions", return_value=melody_notes),
+              patch.object(ensemble, "resolve_separated_player", return_value=revised) as resolve):
+            for version in (6, 7):
+                self.assertEqual(melody._recorded_line(None, None, melody_notes, 1., version, "separated_voice", None),
+                                 (melody_notes, "separated_voice"))
+            resolve.assert_not_called()
+            result = melody._recorded_line(None, None, melody_notes, 1., 7, "separated_player", None)
+            self.assertEqual((revised, "separated_player"), result)
+            self.assertTrue(resolve.call_args.kwargs["pinned"])
+
     def test_short_ensemble_phrase_is_found_at_different_offsets_in_a_long_solo(self):
         for offset in (2., 17., 23., 36.):
             with self.subTest(offset=offset):
