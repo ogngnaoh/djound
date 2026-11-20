@@ -665,6 +665,10 @@ async function walkthrough() {
   await expect(
     page.getByRole("heading", { name: "Library", exact: true }),
   ).toBeVisible();
+  await page.getByRole("link", { name: "Other tools", exact: true }).click();
+  await expect(
+    page.getByRole("heading", { name: "Other tools", exact: true }),
+  ).toBeVisible();
   const kept = page
     .locator(".kept-row")
     .filter({ hasText: `${changed.title} · Version 2` });
