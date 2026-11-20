@@ -6,6 +6,8 @@ import soundfile as sf
 from scipy.ndimage import maximum_filter1d, percentile_filter
 from scipy.signal import find_peaks
 
+from rendition_motifs import follow_supported_repeat
+
 RATE = 44100
 HOP = 882
 FPS = RATE // HOP
@@ -123,4 +125,4 @@ def foreground_notes(source, events, duration):
         for start, end in zip(attacks, attacks[1:]):
             confidence = np.median([events[i][3] for i in sources[start:end, key]])
             notes.append((float(start / FPS), min(float(end / FPS), duration), key + 21, float(confidence)))
-    return notes
+    return follow_supported_repeat(notes, events, strength, FPS)
