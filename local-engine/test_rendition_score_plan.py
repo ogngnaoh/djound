@@ -122,6 +122,22 @@ class ScorePlanTest(unittest.TestCase):
         oboe = self.plan("Unaccompanied oboe", m)
         self.assertEqual((68, []), (oboe["leadProgram"], oboe["roles"]))
 
+    def test_named_accompanists_keep_their_jobs_when_the_melody_player_is_open(self):
+        words = ("I'd love to hear this as a laid-back reggae band. Let the bass carry the groove "
+                 "and have the guitar play those short chords between the beats. Keep the tune clear.")
+        for lineup in ("Bass, guitar, flute", "Bass, guitar"):
+            chart = Musician(players=lineup)
+            plan = self.plan(words, chart)
+            self.assertNotIn(plan["leadProgram"], (32, 25))
+            self.assertIn(("bass", 32), [(r["kind"], r["program"]) for r in plan["roles"]])
+            self.assertIn(("chords", 25), [(r["kind"], r["program"]) for r in plan["roles"]])
+        # A specified duet can cover the tune and the chords on the same guitar.
+        limited = self.plan("A duet: bass carries the groove and guitar plays short chords.", Musician())
+        self.assertEqual(25, limited["leadProgram"])
+        self.assertEqual({("bass", 32), ("chords", 25)}, {(r["kind"], r["program"]) for r in limited["roles"]})
+        explicit = self.plan("Bass playing the tune and guitar playing chords.", Musician())
+        self.assertEqual(32, explicit["leadProgram"])
+
     def test_explicit_timing_overrides_language_cue(self):
         m = Musician(brief="82 BPM in 3/4 with swung eighths.")
         plan = self.plan("Play this at 126 BPM, 5/4, straight eighths.", m)

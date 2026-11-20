@@ -330,6 +330,7 @@ def _score_players(director, direction, old, additions=()):
     explicit = _explicit(direction)
     solo = not additions and _size_hint(direction) is True
     old_players = [] if not old else [old["leadProgram"]] + [KIT if r["kind"] == "percussion" else r["program"] for r in old["roles"]]
+    proposed = []
     edit = "add" if additions else None
     if old and not solo and not additions:
         edit = director.choose("How is the listener changing the existing players?",
@@ -359,14 +360,36 @@ def _score_players(director, direction, old, additions=()):
     if not players and old_players:
         players = [p for p in dict.fromkeys(old_players) if not _excluded_player(p, direction)]
     melodic = [p for p in players if p != KIT]
+    stated_leads = _stated_leads(direction)
+    backing = {}
+    if not old:
+        marked = _marked(direction)
+        for p in named:
+            if p == KIT or p in stated_leads:
+                continue
+            words = _part_words(marked, p)
+            if (re.search(r"\b(?:chords?|comping|bassline|groove|backing|accompaniment|arpeggios?|drone)\b", words)
+                    and not re.search(r"\b(?:never|without|instead|no|not)\b|n['’]t\b", words)):
+                backing[p] = _part_kind(p, words)
+        if backing:
+            free = [p for p in melodic if p not in backing]
+            limited = solo or LIMITED_CAST.search(direction) or re.search(r"\b(?:duet|duo)\b", direction, re.I)
+            if free:
+                melodic = free
+            elif not limited:
+                # All named instruments already have jobs. The conductor can cast
+                # a melody player even when its first band list named only the backing.
+                melodic = [p for p in proposed if p != KIT and p not in backing]
+            elif any(p in POLYPHONIC for p in melodic):
+                melodic = [p for p in melodic if p in POLYPHONIC]
     if not melodic:
         families = {i: names[i * 8] + " to " + names[i * 8 + 7] for i in range(16)}
         family = director.choose("Which instrument family carries the source tune?", families)
-        allowed = {p: names[p] for p in range(family * 8, family * 8 + 8) if not _excluded_player(p, direction)}
+        allowed = {p: names[p] for p in range(family * 8, family * 8 + 8)
+                   if p not in backing and not _excluded_player(p, direction)}
         if not allowed:
             raise ArrangementClarification("Choose an instrument that can carry the source melody.")
         melodic = [director.choose("Which instrument in that family plays the main tune?", allowed)]
-    stated_leads = _stated_leads(direction)
     if additions or (edit in ("add", "remove") and old["leadProgram"] in melodic and not stated_leads.intersection(melodic)):
         lead = old["leadProgram"]
     elif len(stated_leads.intersection(melodic)) == 1:
@@ -393,6 +416,9 @@ def _score_players(director, direction, old, additions=()):
         # second part. Only the new instruments need a role from the director.
         cast = [(r["kind"], KIT if r["kind"] == "percussion" else r["program"]) for r in old["roles"]]
         remaining = [p for p in remaining if p not in old_players]
+    elif lead in backing:
+        kind = backing[lead] or director.choose(f"What supporting part does {names[lead]} play?", KINDS)
+        cast.append((kind, lead))
     elif lead in POLYPHONIC:
         self_part = director.choose(f"How does the melody player ({names[lead]}) accompany their own melody? "
                                     "Allow a second-hand part in a solo or comping when appropriate.",

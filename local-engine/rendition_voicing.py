@@ -57,7 +57,7 @@ SOLO = re.compile(
     + r"\s+(?:alone|only|on its own|by itself)\b"
 )
 LEAD = re.compile(
-    INSTRUMENT + r"\s+(?:(?:takes?|carr(?:y|ies)|plays?|states?|sings?|rephrases?|has|gets?)\s+"
+    INSTRUMENT + r"\s+(?:(?:takes?|carr(?:y|ies|ying)|play(?:s|ing)?|states?|sings?|rephrases?|has|gets?)\s+"
     r"(?:(?:the|my|our|source|original|main|lead|familiar)\s+)*(?:theme|tune|melody|lead|motif|line|hook)\b"
     r"|(?:in|on)\s+(?:the\s+)?(?:lead|melody)\b|leads?\b)"
     r"|(?:\b(?:lead|melody|theme|tune|line|hook)\s+(?:to|on|for|with|played by)\s+(?:the |a )?)" + INSTRUMENT
