@@ -39,6 +39,22 @@ class SupportedRepeatTest(unittest.TestCase):
         alternate = self.lead[:-2] + [(8.32, 8.62, 65, .8), (8.64, 8.96, 67, .8), (8.96, 9.88, 68, .8)]
         self.assertIs(follow_supported_repeat(alternate, alternate + self.ending, self.strength, 50), alternate)
 
+    def test_the_same_evidence_works_in_another_key_with_a_slower_repeat(self):
+        def moved(note):
+            a, b, key, confidence = note
+            if a >= 5.56:
+                a, b = 5.56 + (a - 5.56) * 1.08, 5.56 + (b - 5.56) * 1.08
+            return a, b, key + 7, confidence
+
+        notes = [moved(n) for n in self.lead]
+        ending = [moved(n) for n in self.ending]
+        support = np.zeros((550, 88))
+        for a, b, key, _ in ending:
+            support[round(a * 50):round(b * 50), key - 21] = .6
+        result = follow_supported_repeat(notes, notes + ending, support, 50)
+        self.assertEqual([n[2] for n in result[-2:]], [72, 70])
+        self.assertEqual(result[-1][1], ending[-1][1])
+
     def test_an_unrelated_distant_phrase_cannot_become_a_template(self):
         def later(note):
             a, b, key, confidence = note
