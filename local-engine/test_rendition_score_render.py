@@ -2,6 +2,7 @@ from pathlib import Path
 import tempfile
 import time
 import unittest
+from unittest.mock import patch
 import wave
 
 import numpy as np
@@ -191,6 +192,57 @@ class ScoreRendererTest(unittest.TestCase):
                 _, _, replay = render(edited, f"replay-cascade-{legacy}", master_gain=result["scoreMasterGain"],
                                       part_gains=result["scorePartGains"])
                 np.testing.assert_array_equal(changed, replay)
+
+    @unittest.skipUnless(player.score_available(), "Run the local guide setup for soundfont tests")
+    def test_unworkable_balance_asks_for_an_audible_alternative_and_keeps_the_parent(self):
+        from rendition_performance import perform_score
+
+        piano = dict(program=0, level_db=-7., notes=[(.15,.85,69,96)])
+        answer = dict(piano, notes=[(.15,.85,69,96), (1.2,1.5,76,96)])
+        clarinet = dict(program=71, gain=1.59, level_db=-13., notes=[(.15,1.1,69,96)])
+        delay = 50 / player.RATE
+        doubling = dict(clarinet, notes=[(.15+delay,1.1+delay,69,96)])
+        later = dict(clarinet, gain=.1, notes=[(1.35,1.64,71,96)])
+        for original, edited, reason in [
+            ([clarinet,doubling], [clarinet,later], "overload"),
+            ([piano], [piano,answer], "too quiet"),
+        ]:
+            with self.subTest(reason=reason):
+                selected = self.work / f"parent-{reason}.wav"
+                plan = dict(realization="score", fromUpload=True, room=0.)
+                player.render_score(original, 1.85, selected, deadline=self.deadline, room=0., receipt=plan)
+                heard = selected.read_bytes()
+                output = self.work / f"child-{reason}.wav"
+                def transcribe(source, dest, **kwargs):
+                    dest.write_text("{}")
+                    return True
+                with (patch("rendition_performance.guide_available", return_value=True),
+                      patch("rendition_melody.transcribe_recording", side_effect=transcribe),
+                      patch("rendition_score.analyze", return_value={}),
+                      patch("rendition_score_plan.plan_arrangement", return_value=dict(plan)),
+                      patch("rendition_score.arrange", side_effect=[(original,1.85,[]), (edited,1.85,[])])):
+                    result = perform_score(selected, self.work/"upload.wav", output, self.work,
+                                           direction="Change the accompaniment and keep the lead.",
+                                           caption="", parent_caption="", parent_plan=plan,
+                                           parent_map=None, recover_original=False)
+                self.assertEqual(result["state"], "clarify")
+                self.assertIn(reason, result["error"])
+                self.assertIn("choose Original", result["error"])
+                self.assertEqual(selected.read_bytes(), heard)
+                self.assertFalse(output.exists() or (self.work/"arrangement.wav").exists())
+
+                # Old master-only scores still use their historical fallback and
+                # rounding when replaying these exact same musical circumstances.
+                legacy = self.work / f"master-only-{reason}.wav"
+                receipt = {}
+                player.render_score(edited[::-1], 1.85, legacy, deadline=self.deadline, room=0.,
+                                    master_gain=plan["scoreMasterGain"], receipt=receipt)
+                self.assertTrue(legacy.is_file())
+                if reason == "overload":
+                    ratio = receipt["scoreMasterGain"] / plan["scoreMasterGain"]
+                    self.assertLess(20*np.log10(ratio), -3.)
+                else:
+                    self.assertLess(receipt["scorePartGains"][0], .000001)
 
 
 if __name__ == "__main__":

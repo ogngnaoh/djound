@@ -127,7 +127,7 @@ def perform_score(parent, original, destination, work, *, direction, caption, pa
     from rendition_melody import MELODY_TRACE_VERSION, transcribe_recording
     from rendition_score import Timeline, analyze, arrange
     from rendition_score_plan import plan_arrangement
-    from rendition_score_render import render_score, score_available
+    from rendition_score_render import ScoreBalanceConflict, render_score, score_available
 
     inherit_input = parent_score_input is not None and not recover_original and parent_plan is not None
     if not (guide_available() and score_available()):
@@ -215,8 +215,12 @@ def perform_score(parent, original, destination, work, *, direction, caption, pa
                                scored_ancestor["source"] if scored_ancestor else parent, work, deadline)
     plan.pop("scoreMasterGain", None)
     plan.pop("scorePartGains", None)
-    render_score(tracks, seconds, score, deadline=deadline, room=plan.get("room", .44), **mix,
-                 receipt=plan if plan.get("realization") == "score" else None)
+    try:
+        render_score(tracks, seconds, score, deadline=deadline, room=plan.get("room", .44), **mix,
+                     receipt=plan if plan.get("realization") == "score" else None)
+    except ScoreBalanceConflict as issue:
+        return {"state": "clarify", "error": f"{issue} Try changing when the part comes in, "
+                "or choose Original and ask for a fresh arrangement with a new balance."}
     if scored_ancestor:
         intervals = scored_ancestor["editedFrames"]
         same_performance = all(plan.get(field) == parent_plan.get(field) for field in
