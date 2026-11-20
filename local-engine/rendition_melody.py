@@ -21,7 +21,7 @@ MAX_FRAMES = 300 * RATE
 MODEL = Path("basic-pitch/basic_pitch/saved_models/icassp_2022/nmp.onnx")
 BANK = "FluidR3_GM.sf2"
 NO_LINE = 3
-MELODY_TRACE_VERSION = 9
+MELODY_TRACE_VERSION = 10
 TRACE_SOURCES = ("single", "mix", "separated_voice", "instrument_tracks", "separated_player", "harmonic_solo")
 
 
@@ -542,6 +542,9 @@ def _recorded_line(source, work, events, duration, trace_version, trace_source, 
         if trace_version >= 9:
             from rendition_sustains import keep_supported_sustains
             notes = keep_supported_sustains(source, events, notes)
+        if trace_version >= 10:
+            from rendition_turns import recover_supported_turns
+            notes = recover_supported_turns(source, events, notes)
         return notes, "mix"
 
     if trace_source in ("mix", "instrument_tracks"):
