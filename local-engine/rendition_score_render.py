@@ -93,6 +93,21 @@ def _schedule(track, frames, path, remaining_notes):
     return len(notes)
 
 
+def _edge_changes(settings):
+    entries = settings if isinstance(settings, list) else [settings]
+    if len(entries) > 32:
+        raise ValueError("Supply at most 32 different note counts per lead edge.")
+    changes = {}
+    for entry in entries:
+        if not isinstance(entry, dict) or entry.keys() != {"count", "db"}:
+            raise ValueError("Lead note dynamics need a note count and a decibel change.")
+        count = _number(entry["count"], 1, 32, "number of lead attacks", True)
+        if count in changes:
+            raise ValueError("Each note count can appear only once per lead edge.")
+        changes[count] = _number(entry["db"], -24, 12, "lead dynamic in decibels")
+    return changes.items()
+
+
 def _edge_envelopes(track):
     """Locate opening and closing gain changes on the actual played attacks."""
     dynamics = track.get("note_dynamics", {})
@@ -109,22 +124,19 @@ def _edge_envelopes(track):
     onsets = sorted(ends)
     curves = []
     for edge, settings in dynamics.items():
-        if not isinstance(settings, dict) or settings.keys() != {"count", "db"}:
-            raise ValueError("Lead note dynamics need a note count and a decibel change.")
-        count = _number(settings["count"], 1, 32, "number of lead attacks", True)
-        db = _number(settings["db"], -24, 12, "lead dynamic in decibels")
-        if not onsets or db == 0:
-            continue
         opening = edge == "opening"
-        selected = onsets[:count] if opening else onsets[-count:]
-        if len(selected) == 1:
-            start = selected[0]
-            # Change a single note without introducing a step at its boundary.
-            end = min(ends[start], onsets[1]) if opening and len(onsets) > 1 else ends[start]
-            ramp = min(round(.008 * RATE), end - start)
-            selected = [end - ramp, end] if opening else [start, start + ramp]
-        levels = [db * i / (len(selected) - 1) for i in range(len(selected))]
-        curves.append((selected, levels[::-1] if opening else levels))
+        for count, db in _edge_changes(settings):
+            if not onsets or db == 0:
+                continue
+            selected = onsets[:count] if opening else onsets[-count:]
+            if len(selected) == 1:
+                start = selected[0]
+                # Change a single note without introducing a step at its boundary.
+                end = min(ends[start], onsets[1]) if opening and len(onsets) > 1 else ends[start]
+                ramp = min(round(.008 * RATE), end - start)
+                selected = [end - ramp, end] if opening else [start, start + ramp]
+            levels = [db * i / (len(selected) - 1) for i in range(len(selected))]
+            curves.append((selected, levels[::-1] if opening else levels))
     return curves
 
 
@@ -160,6 +172,7 @@ def _add_part(mix, raw, schedule, frames, level, gain, pan, deadline, curves):
                 # quieting a few attacks never lifts their unaffected neighbors.
                 sample = np.arange(frame, frame + len(part))
                 db = sum(np.interp(sample, at, levels) for at, levels in curves)
+                np.clip(db, -24., 12., out=db)
                 balanced *= np.power(10., db / 20).astype(np.float32)[:, None]
             mix.write(np.asarray(previous + balanced, dtype="<f4").tobytes())
     raw.unlink()

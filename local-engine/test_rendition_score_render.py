@@ -47,6 +47,10 @@ class ScoreRendererTest(unittest.TestCase):
         for invalid in ({"count": 0, "db": -6}, {"count": True, "db": -6}, {"count": 4, "db": float("nan")}):
             with self.subTest(invalid=invalid), self.assertRaises(ValueError):
                 player._edge_envelopes({"note_dynamics": {"ending": invalid}, "notes": notes})
+        for entries in ([{"count": 1, "db": 0}, {"count": 1, "db": -2}], [None],
+                        [{"count": 1, "db": -2}] * 33):
+            with self.subTest(entries=entries), self.assertRaises(ValueError):
+                player._edge_envelopes({"note_dynamics": {"opening": entries}, "notes": []})
 
     def test_arrangement_attaches_note_dynamics_only_to_the_existing_lead(self):
         from rendition_score import analyze, arrange
@@ -107,6 +111,30 @@ class ScoreRendererTest(unittest.TestCase):
         window = slice(round(.21 * player.RATE), round(.25 * player.RATE))
         self.assertLess(np.linalg.norm(soft_start[window, 0].astype(float)),
                         .65 * np.linalg.norm(before[window, 0].astype(float)))
+
+    @unittest.skipUnless(player.score_available(), "Install the local score performer")
+    def test_successive_note_tapers_preserve_the_earlier_edit_and_cap_their_combined_gain(self):
+        lead = dict(program=42, level_db=-32., notes=[(.15+i*.27, .33+i*.27, 52+i, 90) for i in range(6)])
+        previous = {"count": 4, "db": -8}
+        narrower = {"count": 2, "db": -4}
+        def ending(name, settings):
+            return self.render(name, [dict(lead, note_dynamics={"ending": settings})])
+
+        unchanged = self.render("untouched.wav", [lead])
+        first = ending("first.wav", previous)
+        np.testing.assert_array_equal(ending("single-item-replay.wav", [previous]), first)
+        stacked = ending("second.wav", [previous, narrower])
+        penultimate = round(lead["notes"][-2][0] * player.RATE)
+        np.testing.assert_array_equal(stacked[:penultimate], first[:penultimate])
+        self.assertFalse(np.array_equal(stacked[:penultimate], unchanged[:penultimate]))
+        final = round(lead["notes"][-1][0] * player.RATE)
+        def last_note_change(pcm):
+            return 20 * np.log10(np.linalg.norm(pcm[final:]) / np.linalg.norm(unchanged[final:]))
+        self.assertAlmostEqual(last_note_change(stacked), -12., delta=.03)
+        for broad, narrow, limit in [(-16, -12, -24), (10, 6, 12)]:
+            with self.subTest(limit=limit):
+                limited = ending(f"bounded-{limit}.wav", [{"count": 4, "db": broad}, {"count": 2, "db": narrow}])
+                self.assertAlmostEqual(last_note_change(limited), limit, delta=.03)
 
     @unittest.skipUnless(player.score_available(), "Install the local score performer")
     def test_overloaded_note_boost_cannot_lower_a_protected_solo(self):
