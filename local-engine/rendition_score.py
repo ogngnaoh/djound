@@ -350,6 +350,8 @@ def arrange(notes, analysis, plan):
     timeline = Timeline(analysis, plan)
     palette = _chord_palette(notes, timeline, plan)
     lead = _lead_track(notes, timeline, plan)
+    if plan.get("leadBalanceDb"):
+        lead["gain"] = 10 ** (plan["leadBalanceDb"] / 20)
     if plan.get("leadNoteDynamics"):
         lead["note_dynamics"] = plan["leadNoteDynamics"]
     cue = lead
@@ -367,6 +369,8 @@ def arrange(notes, analysis, plan):
                  "pan": role_pan(role, idx),
                  "level_db": {"bass": -21., "percussion": -22., "chords": -24., "arpeggio": -23.,
                               "counterline": -24., "pedal": -24.}[kind], "notes": []}
+        if role.get("balanceDb"):
+            track["gain"] = 10 ** (role["balanceDb"] / 20)
         for pos, end, raw_pos, hit in _backing_events(role, timeline, plan, sections, attacks, releases):
             cell = min(len(palette) - 1, int(raw_pos // (timeline.meter / 2)))
             root, tones = palette[cell]

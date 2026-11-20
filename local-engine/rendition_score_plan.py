@@ -666,12 +666,53 @@ def _lead_register(direction, old, director):
     return None if choice == "other" else choice
 
 
+def balance_marks(plan):
+    levels = [plan.get("leadBalanceDb", 0)] + [r.get("balanceDb", 0) for r in plan.get("roles", [])]
+    return [(index, db) for index, db in enumerate(levels) if db]
+
+
+def _balance_parts(plan, direction, director):
+    """Adjust only the marked player's level, relative to the take being revised."""
+    names = _catalog()[0]
+    parts = [("melody", plan["leadProgram"], plan, "leadBalanceDb")]
+    parts.extend((role["kind"], role["program"], role, "balanceDb") for role in plan["roles"])
+    choices = {i: f"{names[p] if p is not None else 'drum kit'} {kind} part {i + 1}"
+               for i, (kind, p, _, _) in enumerate(parts)}
+    asks = [line for line in re.split(r"[.!?;]", direction) if
+            re.search(r"\b(?:louder|quieter|volume|turn|softer)\b", line, re.I)]
+    named = set(_members(" ".join(asks)))
+    named_parts = [i for i, (_, p, _, _) in enumerate(parts) if (KIT if p is None else p) in named]
+    if len(named_parts) == 1:
+        target = named_parts[0]
+    else:
+        choices["absent"] = "the requested player is absent or cannot be identified"
+        target = director.choose("Which existing part should change volume? Ignore parts the listener likes "
+                                 "or asks to keep. Focus on the requested change.", choices,
+                                 context=direction)
+        if target == "absent":
+            raise ArrangementClarification("Which of the players in this take should change volume?")
+    step = director.choose("How much should this part change in loudness relative to the saved take? "
+                           "A little or a touch is a small change.", {-3: "slightly quieter, a little less forward",
+                            3: "slightly louder, a little more forward", -6: "much quieter, a clear reduction",
+                            6: "much louder, a clear increase"}, context=direction)
+    _, _, part, key = parts[target]
+    level = part.get(key, 0) + step
+    if not -36 <= level <= 18:
+        raise ArrangementClarification("This part has reached its available volume range. Choose a different part to balance.")
+    if level:
+        part[key] = level
+    else:
+        part.pop(key, None)
+
+
 def _changes(director, direction, register=None):
     axes = {"revoice": "change only the instrument that plays the existing lead melody",
             "players": "instruments / lineup only", "pulse": "speed only", "groove": "meter / rhythm or groove only",
             "phrasing": "lead articulation or timing only", "harmony": "chords or harmonic color only",
             "interaction": "when the accompanists hold back, answer the lead, or build at a returning theme",
-            "dynamics": "intensity / room ambience only", "form": "opening, ending or form only",
+            "dynamics": "whole-ensemble intensity or room ambience",
+            "balance": "turn a specific existing player up or down in the mix, without changing what they play",
+            "form": "opening, ending or form only",
             "production": "sound treatment or studio effects only",
             "feel": "performance feel or mood with same players", "all": "entire new musical arrangement or style",
             "several": "specific changes to two or more of the above"}
@@ -689,8 +730,9 @@ def _changes(director, direction, register=None):
              "ensemble": "reshape the pace and intensity of the whole ensemble"})
         return {"phrasing"} if scope == "lead" else {"pulse", "phrasing", "dynamics"}
     if axis == "several":
-        return {group for group in GROUPS if director.choose(f"Did the listener request a change to {axes[group]}?",
-                                                              {False: "keep the current decision", True: "change it"})}
+        return {group for group in (*GROUPS, "balance")
+                if director.choose(f"Did the listener request a change to {axes[group]}?",
+                                   {False: "keep the current decision", True: "change it"})}
     return {axis}
 
 
@@ -816,6 +858,9 @@ def _arrange(analysis, direction, old, director, *, tempo_instruction=None):
     if old:
         changes = {"players"} if additions else _changes(director, direction, register)
     plan = copy.deepcopy(old) if old else {"version": 1}
+    if changes == {"balance"}:
+        _balance_parts(plan, direction, director)
+        return plan
     assigned = _stated_leads(direction) if register else set()
     if register == "natural":
         plan.pop("leadOctaveShift", None)
@@ -931,6 +976,8 @@ def _arrange(analysis, direction, old, director, *, tempo_instruction=None):
                 role["followPhrases"] = _phrase_part(director, role, direction)
             elif "followPhrases" in prior:
                 role["followPhrases"] = prior["followPhrases"]
+    if "balance" in changes:
+        _balance_parts(plan, direction, director)
     return plan
 
 
@@ -1146,7 +1193,8 @@ def _run(request):
         director = _Director(context)
     tempo_instruction = _listener_tempo(director, direction)
     plan = _arrange(analysis, direction, old, director, tempo_instruction=tempo_instruction)
-    if old and plan.get("bpm") == old["bpm"] and not _backing_additions(direction, old):
+    if (old and plan.get("bpm") == old["bpm"] and not _backing_additions(direction, old)
+            and balance_marks(plan) == balance_marks(old)):
         requested, references = tempo_instruction
         proposed = _single_tempo(director.brief)
         if isinstance(requested, (int, float)):

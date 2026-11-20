@@ -317,6 +317,29 @@ class ScoreRevisionTest(unittest.TestCase):
         solo = planner._arrange(analysis, "Remove the bass and piano.", child, musician)
         self.assertEqual(([original[0]], seconds, clock), arrange(self.notes, analysis, solo))
 
+    def test_balancing_a_player_keeps_the_heard_performance_and_its_mix_correction(self):
+        from unittest.mock import Mock
+        from rendition_performance import _inherited_score_mix
+
+        old = dict(self.parent, leadProgram=33, scoreMasterGain=.8, scorePartGains=[.84, 1., .72],
+                   roles=[{"kind": k, "program": p, "pattern": planner._pattern(k, g, 4)}
+                          for k, p, g in (("bass", 32, "walk"), ("chords", 25, "pulse"))])
+        analysis = analyze(self.notes)
+        musician = Mock()
+        musician.choose.side_effect = lambda q, choices, **kw: "balance" if "balance" in choices else -3
+        words = "I like the guitar playing between the beats. Could you make that guitar a little quieter? The tune and bass are just right."
+        after = planner._arrange(analysis, words, old, musician)
+        before_tracks = arrange(self.notes, analysis, old)
+        tracks, seconds, mapping = arrange(self.notes, analysis, after)
+        self.assertEqual((before_tracks[0][:2], before_tracks[1:]), (tracks[:2], (seconds, mapping)))
+        self.assertEqual(dict(before_tracks[0][2], gain=10 ** (-3 / 20)), tracks[2])
+        mix = _inherited_score_mix(before_tracks, tracks, seconds, after, old, None, self.root, None)
+        self.assertEqual([.84, 1., .72], mix["part_gains"])
+        self.assertEqual([0, 1, 2], mix["protected_parts"])
+        musician.choose.side_effect = lambda q, choices, **kw: "balance" if "balance" in choices else 3
+        restored = planner._arrange(analysis, "Turn the guitar back up a little.", json.loads(json.dumps(after)), musician)
+        self.assertEqual(before_tracks, arrange(self.notes, analysis, restored))
+
     def test_adding_backing_to_a_take_the_listener_likes(self):
         from unittest.mock import Mock
 

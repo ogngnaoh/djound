@@ -55,12 +55,13 @@ def _inherited_score_mix(previous, tracks, seconds, plan, parent_plan, recorded,
         for old, old_part in enumerate(old_tracks):
             if (new == 0) != (old == 0) or old in used or not part["notes"]:
                 continue
-            # A note-level envelope is applied after the instrument's normalization.
-            # Reuse the recorded gain so that unity outside the envelope means unchanged PCM.
+            # A balance or envelope edit is relative to the previously heard level.
+            # The original normalization and headroom correction still belong to the part.
             same = part == old_part
-            if not same and new == 0:
-                same = ({k: v for k, v in part.items() if k != "note_dynamics"} ==
-                        {k: v for k, v in old_part.items() if k != "note_dynamics"})
+            if not same and (new == 0 or "gain" in part or "gain" in old_part):
+                controls = ("gain", "note_dynamics")
+                same = ({k: v for k, v in part.items() if k not in controls} ==
+                        {k: v for k, v in old_part.items() if k not in controls})
             if same:
                 matches[new] = old
                 used.add(old)
@@ -144,7 +145,7 @@ def perform_score(parent, original, destination, work, *, direction, caption, pa
     """Let a local arranger revise the playing decisions and render them against the source phrases."""
     from rendition_melody import MELODY_TRACE_VERSION, transcribe_recording
     from rendition_score import Timeline, analyze, arrange
-    from rendition_score_plan import apply_lead_note_edit, plan_arrangement
+    from rendition_score_plan import apply_lead_note_edit, balance_marks, plan_arrangement
     from rendition_score_render import ScoreBalanceConflict, render_score, score_available
 
     inherit_input = parent_score_input is not None and not recover_original and parent_plan is not None
@@ -210,6 +211,8 @@ def perform_score(parent, original, destination, work, *, direction, caption, pa
         if repeats_parent(plan, performance):
             if lead_note_edit:
                 return {"state": "clarify", "error": "I couldn't find the lead notes to change in this take."}
+            if balance_marks(plan) != balance_marks(parent_plan):
+                return {"state": "clarify", "error": "That part has no sounding notes to adjust in this take."}
             plan = plan_arrangement(analysis, direction, parent_caption, deadline=deadline, reconsider=True)
             if plan is not None:
                 performance = arrange(notes, analysis, plan)
