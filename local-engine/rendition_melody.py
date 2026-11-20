@@ -20,8 +20,8 @@ MAX_FRAMES = 300 * RATE
 MODEL = Path("basic-pitch/basic_pitch/saved_models/icassp_2022/nmp.onnx")
 BANK = "FluidR3_GM.sf2"
 NO_LINE = 3
-MELODY_TRACE_VERSION = 5
-TRACE_SOURCES = ("single", "mix", "separated_voice")
+MELODY_TRACE_VERSION = 6
+TRACE_SOURCES = ("single", "mix", "separated_voice", "instrument_tracks")
 
 
 def guide_available() -> bool:
@@ -68,7 +68,8 @@ def _extract_to_file(source, output, program, deadline, preserve_register, *, no
                      trace_version=MELODY_TRACE_VERSION, trace_source=None):
     if type(trace_version) is not int or not 1 <= trace_version <= MELODY_TRACE_VERSION:
         raise ValueError("This saved take uses an unsupported melody transcription.")
-    if trace_source is not None and (trace_version < 3 or trace_source not in TRACE_SOURCES):
+    if trace_source is not None and (trace_version < 3 or trace_source not in TRACE_SOURCES
+                                     or (trace_source == "instrument_tracks" and trace_version < 6)):
         raise ValueError("This saved take has an unknown melody source.")
     if type(preserve_register) is not bool:
         raise ValueError("Specify whether to keep the recorded octave.")
@@ -524,8 +525,18 @@ def _recorded_line(source, work, events, duration, trace_version, trace_source, 
             return notes
         return _select_polyphonic(events, duration, trace_version=trace_version)
 
-    if trace_source == "mix":
-        return mix_line(), "mix"
+    def instrumental_line():
+        notes = mix_line()
+        if trace_version >= 6 and trace_source != "mix":
+            from rendition_ensemble import resolve_players
+            players = resolve_players(source, work, events, notes, duration, deadline,
+                                      pinned=trace_source == "instrument_tracks")
+            if players is not None:
+                return players, "instrument_tracks"
+        return notes, "mix"
+
+    if trace_source in ("mix", "instrument_tracks"):
+        return instrumental_line()
     if trace_source != "separated_voice":
         times, pitch, confidence = _fundamental(source)
         if trace_source == "single" or _single_voice(times, pitch, confidence, events):
@@ -537,7 +548,7 @@ def _recorded_line(source, work, events, duration, trace_version, trace_source, 
                                               mix_line=mix_line if trace_version >= 4 else None), "separated_voice"
         if trace_source == "separated_voice":
             raise ValueError("The saved vocal melody could not be recovered. Check the local separator installation.")
-    return mix_line(), "mix"
+    return instrumental_line()
 
 
 def _synthesize(notes, path, program, frames, preserve_register=False):

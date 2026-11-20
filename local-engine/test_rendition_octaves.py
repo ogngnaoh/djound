@@ -38,12 +38,13 @@ class OctaveExcursionTest(unittest.TestCase):
         with (patch("rendition_melody._select_polyphonic", return_value=notes) as historical,
               patch("rendition_foreground.foreground_notes", return_value=notes) as foreground,
               patch("rendition_octaves.recover_octave_excursions", return_value=notes) as excursion):
-            for version in (1, 2, 3, 4, MELODY_TRACE_VERSION):
+            for version in (1, 2, 3, 4, 5, MELODY_TRACE_VERSION):
                 self.assertEqual(_recorded_line("sample.wav", None, notes, 1., version, "mix", None), (notes, "mix"))
-            self.assertEqual(MELODY_TRACE_VERSION, 5)
+            self.assertEqual(MELODY_TRACE_VERSION, 6)
             self.assertEqual([args.kwargs["trace_version"] for args in historical.call_args_list], [1, 2, 3])
-            self.assertEqual(foreground.call_count, 2)
-            excursion.assert_called_once_with("sample.wav", notes, notes, 1.)
+            self.assertEqual(foreground.call_count, 3)
+            self.assertEqual(excursion.call_count, 2)
+            excursion.assert_called_with("sample.wav", notes, notes, 1.)
 
 
 if __name__ == "__main__":
