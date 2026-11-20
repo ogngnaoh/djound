@@ -10,6 +10,7 @@ export class RenditionError extends Error {
   constructor(
     public status: number,
     message: string,
+    public code?: string,
   ) {
     super(message);
   }
@@ -21,6 +22,7 @@ export async function renditionRequest(path: string, options?: RequestInit) {
     throw new RenditionError(
       res.status,
       details.detail || details.message || `Request failed (${res.status}).`,
+      details.code,
     );
   }
   return res;

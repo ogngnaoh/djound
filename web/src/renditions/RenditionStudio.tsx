@@ -9,6 +9,7 @@ import { Failure, Loading } from "../studio/Views";
 import {
   projectKey,
   recordingList,
+  RenditionError,
   readProject,
   renditionRequest,
   type RecordingProject,
@@ -17,6 +18,7 @@ import {
   type RenditionCommand,
 } from "./api";
 import { useRecoverableRequest } from "./useRecoverableRequest";
+import { RestoreRecording } from "./RestoreRecording";
 import { correspondingPosition, passageAuditionStart } from "./songTime";
 import "./renditions.css";
 
@@ -81,6 +83,11 @@ export default function RenditionStudio() {
     refetchInterval: (q) =>
       q.state.data?.takes.some(inProgress) ? 1500 : false,
   });
+  if (
+    query.error instanceof RenditionError &&
+    query.error.code === "RENDITION_PROJECT_TRASHED"
+  )
+    return <RestoreRecording id={id} />;
   if (!query.data)
     return query.isError ? (
       <Failure
