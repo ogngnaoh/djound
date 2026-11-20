@@ -106,7 +106,8 @@ class Installation:
     def start(self, checkpoint=None, result_url=None, mode="FIXTURE"):
         assert self.process is None
         self.starts += 1
-        env = dict(os.environ, DJOUND_DB_URL=f'jdbc:postgresql://127.0.0.1:55432/{self.db}',
+        db_port = os.environ.get("DJOUND_DB_PORT", "55432")
+        env = dict(os.environ, DJOUND_DB_URL=f'jdbc:postgresql://127.0.0.1:{db_port}/{self.db}',
                    DJOUND_DATA_DIR=str(self.data), DJOUND_PORT=str(PORT), DJOUND_MODE=mode,
                    DJOUND_FIXTURE_DELAY_MS='800', DJOUND_FIXTURE_REVIEW_CONTROLS='true',
                    DJOUND_ALLOWED_ORIGINS=BASE)

@@ -9,7 +9,7 @@ mkdir -p .runtime/checks
 run_dir="$(mktemp -d "$DJOUND_ROOT/.runtime/checks/upgrade.XXXXXX")"
 test_db="djound_upgrade_$$_${RANDOM}"
 export DJOUND_PORT="${DJOUND_CHECK_PORT:-18087}"
-export DJOUND_DB_URL="jdbc:postgresql://127.0.0.1:55432/$test_db"
+export DJOUND_DB_URL="jdbc:postgresql://127.0.0.1:$DJOUND_DB_PORT/$test_db"
 export DJOUND_DATA_DIR="$run_dir/data"
 export DJOUND_MODE="${DJOUND_UPGRADE_MODE:-UNCONFIGURED}"
 export DJOUND_FIXTURE_REVIEW_CONTROLS=false

@@ -25,7 +25,7 @@ trap cleanup EXIT
 docker compose up -d --pull never --wait db
 docker compose exec -T db createdb -U djound "$test_db"
 database_created=1
-export DJOUND_DB_URL="jdbc:postgresql://127.0.0.1:55432/$test_db"
+export DJOUND_DB_URL="jdbc:postgresql://127.0.0.1:$DJOUND_DB_PORT/$test_db"
 export DJOUND_DATA_DIR="$run_dir/data"
 export DJOUND_PORT="$test_port"
 export DJOUND_ALLOWED_ORIGINS="http://127.0.0.1:$test_port"

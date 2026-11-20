@@ -6,6 +6,7 @@ mode="${1:-all}"
 case "$mode" in
   fast)
     export DJOUND_MODE=UNCONFIGURED
+    export DJOUND_TEST_DB_URL="${DJOUND_TEST_DB_URL:-jdbc:postgresql://127.0.0.1:$DJOUND_DB_PORT/djound}"
     python3 tests/runtime_check_test.py
     python3 -m unittest discover -s local-engine -p 'test_*.py'
     docker compose up -d --pull never --wait db

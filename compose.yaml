@@ -3,7 +3,7 @@ services:
   db:
     image: postgres:18@sha256:3a4264520e121176619f54ff867d12774bc81e95e7b84db58d63bccdb6144b81
     ports:
-      - "127.0.0.1:55432:5432"
+      - "127.0.0.1:${DJOUND_DB_PORT:-55432}:5432"
     environment:
       POSTGRES_DB: djound
       POSTGRES_USER: djound

@@ -6,6 +6,7 @@ else
   DJOUND_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 fi
 export DJOUND_ROOT
+export DJOUND_DB_PORT="${DJOUND_DB_PORT:-55432}"
 if [[ -d "$DJOUND_ROOT/.tools/jdk/Contents/Home" ]]; then
   export JAVA_HOME="$DJOUND_ROOT/.tools/jdk/Contents/Home"
   export PATH="$JAVA_HOME/bin:$PATH"
