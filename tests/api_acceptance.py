@@ -71,13 +71,18 @@ def problem(status, body, allowed):
     return result
 
 
-# A browser refresh asks the packaged server for the editor URL directly.
-status, _, index_html = request('/')
-expect(200, status, 'studio entry point')
-for view in ('melody', 'notes'):
-    status, headers, body = request(f'/remix/deep-link-check/{view}')
-    expect(200, status, f'{view} deep link')
-    assert headers.get_content_type() == 'text/html' and body == index_html
+# Bookmarks must reopen the right page and retain the chosen project and edit.
+project_id, edit_id = str(uuid.uuid4()), str(uuid.uuid4())
+for path, destination, marker in (
+        ('/', '/', b'id="player"'),
+        ('/renditions', '/library.html', b'id="record-list"'),
+        ('/tools/library', '/library.html', b'id="record-list"'),
+        (f'/renditions/{project_id}', f'/studio.html?project={project_id}', b'id="workspace"'),
+        (f'/renditions/{project_id}?take={edit_id}', f'/studio.html?project={project_id}&edit={edit_id}', b'id="workspace"')):
+    with urllib.request.urlopen(BASE + path, timeout=20) as response:
+        expect(200, response.status, path)
+        assert response.geturl() == BASE + destination, path
+        assert response.headers.get_content_type() == 'text/html' and marker in response.read(), path
 
 
 status, _, body = request('/api/workspace')
@@ -228,9 +233,6 @@ assert unconfigured['draft'] == current['draft']
 status, _, body = request('/api/explorations')
 expect(200, status, 'library after failed uploads')
 assert len(json.loads(body)['items']) == before + 2, 'Rejected uploads created library entries or replay duplicated one'
-status, headers, body = request('/remix/' + exploration_id)
-expect(200, status, 'packaged deep route')
-assert 'text/html' in headers['Content-Type'] and b'id="root"' in body
 status, headers, body = request('/api/not-a-route')
 expect(404, status, 'unknown API route')
 assert 'application/problem+json' in headers['Content-Type']
