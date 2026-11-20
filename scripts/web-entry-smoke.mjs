@@ -20,6 +20,7 @@ async function openPage() {
   const context = await browser.newContext({
     baseURL: base,
     acceptDownloads: true,
+    reducedMotion: "reduce",
   });
   const page = await context.newPage();
   page.on("pageerror", (error) => errors.push(error.message));
@@ -64,21 +65,43 @@ async function checkEntry(page) {
   ).toBeVisible();
   const seek = page.getByRole("slider");
   await expect(seek).toBeEnabled();
-  await page.getByRole("button", { name: "Play Evening Study" }).click();
-  await expect(page.locator("#elapsed")).not.toHaveText("0:00");
-  await page.getByRole("button", { name: "Jazz trio", exact: true }).click();
-  await expect(page.locator("#player")).toHaveAttribute("data-source", "edit");
+  const jazz = page.getByRole("button", { name: "Jazz trio", exact: true });
+  const handoff = page.getByRole("link", { name: "Try an edit" });
+
+  // Compare the phrase and its Studio bookmark while both clocks are stationary.
+  // ArrowRight seeks one tenth of the 12 second original. Those 1.2 seconds
+  // follow a two-bar intro in the trio and fall inside its first mapped phrase.
+  await seek.press("Home");
+  await seek.press("ArrowRight");
+  assert.ok(Math.abs(Number(await seek.inputValue()) - 1.2) < 0.01);
+  await jazz.click();
+  const mappedTime = 294000 / 44100 + (1.2 * (753375 - 294000)) / 467460;
   await expect
     .poll(async () => Number(await seek.inputValue()))
-    .toBeGreaterThan(6);
-  await page.getByRole("button", { name: "Pause playback" }).click();
-  // Evening Study's trio enters after a two-bar introduction.
-  const editTime = Number(await seek.inputValue());
-  assert.ok(editTime > 6, "The trio restarted or skipped its song-time map");
-  const handoff = page.getByRole("link", { name: "Try an edit" });
+    .toBeCloseTo(mappedTime, 2);
   const demo = new URL(await handoff.getAttribute("href"), base);
   assert.equal(demo.searchParams.get("demo"), "edit");
-  assert.ok(Math.abs(Number(demo.searchParams.get("at")) - editTime) < 0.05);
+  assert.ok(Math.abs(Number(demo.searchParams.get("at")) - mappedTime) < 0.01);
+
+  // Also switch during real playback. The edit has a different duration,
+  // so the slider maximum identifies the performance actually being heard.
+  await page.getByRole("button", { name: "Original", exact: true }).click();
+  await page.getByRole("button", { name: "Play Evening Study" }).click();
+  await expect
+    .poll(async () => Number(await seek.inputValue()))
+    .toBeGreaterThan(1.3);
+  await jazz.click();
+  await expect
+    .poll(async () => Number(await seek.getAttribute("max")))
+    .toBeGreaterThan(24);
+  await expect
+    .poll(async () => Number(await seek.inputValue()))
+    .toBeGreaterThan(mappedTime);
+  await page.getByRole("button", { name: "Pause playback" }).click();
+  await expect(page.locator("#player")).toHaveAttribute(
+    "data-playing",
+    "false",
+  );
   await page.getByRole("link", { name: "Bring a recording" }).click();
   await expect(page.getByRole("dialog")).toBeVisible();
   await page.getByRole("button", { name: "Close import" }).click();
