@@ -1,6 +1,6 @@
 # Djound
 
-Djound is an open-source music project for reimagining a recording and refining it in your own words. The local engine and recording API are available in this checkout. The workspace is being redesigned and the web entry is intentionally empty. [Product vision](guide/product.md) · [API contract](contracts/openapi.yaml)
+Djound is an open-source music studio for reimagining a recording in your own words. Bring a song, choose a style or describe how you want it to sound, then listen and refine the edit you like. Your original, edit history and exported WAVs stay on your Mac. [Product vision](guide/product.md) · [API contract](contracts/openapi.yaml)
 
 ## run it locally
 
@@ -13,6 +13,8 @@ bash local-engine/renditions.sh check
 bash scripts/package.sh
 DJOUND_MODE=LOCAL bash scripts/run.sh
 ```
+
+Open **http://127.0.0.1:8080**. Choose **Bring a recording** to start from your own file, or **Try an edit** to open the example jazz arrangement. Select an edit in Studio before asking for the next change.
 
 Setup downloads the tools and models. Use the [running guide](guide/running.md) for model choices, the optional mix and melody engines and installation checks.
 
