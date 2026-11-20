@@ -10,18 +10,16 @@ bash scripts/verify.sh
 
 This runs the unit tests, builds the app, checks its API against PostgreSQL, and exercises the packaged interface with Playwright. Docker must be running. On macOS, install Google Chrome or the Playwright Chromium browser. CI runs the same model-free suite on Linux.
 
-For recording-led changes, open **New project** on the packaged app, import a recording, make a take and play the downloaded WAV. [Rendition setup](guide/running.md#generate-song-renditions)
+The frontend entry currently serves an empty document while the next workspace is in design. The packaged browser check verifies this on home and former studio routes. The backend checks still exercise the API, recovery and stored audio.
 
-For changes to the short-melody editor, exercise its real audio flow on an Apple Silicon Mac after packaging and installing the melody engine.
+For local inference work, use the planner integration check after packaging and installing the local engine.
 
 ```sh
-bash scripts/verify-local.sh jazz
+bash scripts/verify-local.sh planner
 ```
-
-The check uploads the included melody, creates and plays two versions, compares the served audio with the source and checks both versions after a restart. With the full model installation, `bash scripts/verify-local.sh studio` also covers the longer refinement and recovery flow.
 
 ## Working on the interface or API
 
-Use `source scripts/env.sh` to select the project toolchain, then `pnpm --dir web dev` to start Vite. Open `/renditions?mode=backend` for the recording-led studio or `/?mode=prototype` for the melody editor’s sample library.
+Use `source scripts/env.sh` to select the project toolchain, then `pnpm --dir web dev` to start the empty Vite entry.
 
 Edit [the OpenAPI contract](contracts/openapi.yaml) before changing a public API shape, then run `pnpm --dir web generate`. In a pull request, describe the user-visible change and which checks you ran. Include a screenshot for interface changes or a small attributable fixture for an audio regression. Keep recordings from your own library, model downloads and local credentials on your machine.

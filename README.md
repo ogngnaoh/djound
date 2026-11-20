@@ -1,35 +1,6 @@
 # Djound
 
-bring a recording you love and hear it played another way. the aim is a performance where you can hum along with the tune while the players surprise you. choose **Jazz Trio**, **Solo Piano**, **Lo-fi Hip-hop**, or **Cinematic Strings**, or type your own idea, such as “fingerpicked guitar and cello, with the tune on cello.” switch between the new take and the original, refine it, and download the one you want to share. [run it locally](#run-it-locally)
-
-## reimagine a recording
-
-[the listening experience and first-release scope](guide/product.md)
-
-1. choose **New project** or **Reimagine a recording** in the library and bring an MP3, WAV, or M4A. a song, a friend's performance, or a hummed voice memo can be the starting point. the importer accepts mono or stereo recordings from one second to five minutes, up to 64 MiB.
-2. describe the sound you want or tap a suggestion to hear an instrumental take. “make it jazz” leaves the choice of players open. **Jazz Trio** asks for piano, bass and drums. on a sung demo, try “give the tune to a cello.” listen for the phrase you used to sing. the model can lose some of the tune or leave traces of the voice.
-3. play the take you want to change and describe the next move. try “keep the piano, but make the ending quieter.” choose a passage if you want exact boundaries. you can switch back to the original at the corresponding point in the song or pick an earlier take and start another version from it.
-4. choose **Keep as favorite** to reopen the project on that take. every completed version stays in the project. **Download this take** saves the selected stereo WAV to send to a friend.
-
-on an early *to zanarkand* take, the listener recognized the tune and wanted a stronger jazz feel. they would keep the later full-length trio performance. in a separate synth-pop take, they heard the wistful feeling return while the beat stayed the same. on a 16 GB M2 Pro, one 24-second sung recording took 45 seconds to turn into **Solo Piano**. an eight-second ending revision on a 2:49 piano performance took 23 seconds and preserved every sample before the edit.
-
-## edit a finished mix
-
-choose **edit a finished mix** in the studio and drop a stereo mp3. the editor accepts recordings up to five minutes at 44.1 or 48 kHz. select up to 30 seconds, loop the passage and type “bring the vocal forward here.” switch A/B at the same song position to hear the difference. after hearing a preview, try “a little less.” you can also adjust the drums or reuse the drum setting from an earlier take.
-
-the separator estimates vocals and drums from the stereo recording. cymbals, guitars and reverb can leak into the estimates. if a boost would clip, choose a smaller change or approve a trim for that passage. **keep** saves the take you heard. you can return to its parent with **undo**, reopen a project and export the kept stereo WAV.
-
-## arrange a melody
-
-start from the original or pick a version you like. try “make this soundtrack jazz like” or choose **try swing combo**. review the chords and tempo, then create a version with piano, walking bass and swing ride behind your recording. select that version and type “quieter drums” to lower just the drums by 3 dB.
-
-you can also change a single chord, set a track’s gain or pan, and preview a warmer or brighter tone in the full mix. keep the takes you like in your library.
-
-<details>
-<summary>see the library</summary>
-
-
-</details>
+Djound is an open-source music project for reimagining a recording and refining it in your own words. The local engine and recording API are available in this checkout. The workspace is being redesigned and the web entry is intentionally empty. [Product vision](guide/product.md) · [API contract](contracts/openapi.yaml)
 
 ## run it locally
 
@@ -43,16 +14,12 @@ bash scripts/package.sh
 DJOUND_MODE=LOCAL bash scripts/run.sh
 ```
 
-setup downloads the tools and models. the native Metal backend runs ACE-Step 1.5 Turbo locally and can use ACE-Step Base to play a requested supporting instrument in a duet. the four style buttons supply a musical direction directly. Qwen interprets custom requests in the context of the take you chose. the running guide also covers configuring the ACE-Step HTTP service on a larger host. [open Reimagine](http://127.0.0.1:8080/renditions?mode=backend) · [rendition setup and backend choices](guide/running.md#generate-song-renditions)
-
-for the finished mix editor, use `bash local-engine/setup_localengine.sh --finished-mix` and open **Mix editor**. it uses its own vocal and drum separation model.
-
-for the melody workflow, run `bash local-engine/setup_localengine.sh --audio-only`. upload an isolated phrase as a 1 to 12 second pcm16 wav or mp3 at 44.1 or 48 khz. choose **detect melody**, listen, then select **use this melody**. [sample melody](fixtures/audio/local-demo-source.wav)
+Setup downloads the tools and models. Use the [running guide](guide/running.md) for model choices, the optional mix and melody engines and installation checks.
 
 ## how it works
 
-in the rendition studio, the same local Qwen3 4B model interprets your request and directs the arrangement. older installations can use the smaller Qwen3.5 0.8B model. when the worker can follow a tune in the recording, the director chooses how fast to play it, who carries the melody and how the other players accompany it. a new take can have its own tempo and ending. its saved arrangement gives the next request something concrete to change. the player performs the score locally. ACE-Step handles generated sound treatments, passage changes and direct covers of recordings with little reliable pitch information. each ready take keeps its own audio and the request that led to it.
+in the rendition engine, the same local Qwen3 4B model interprets your request and directs the arrangement. older installations can use the smaller Qwen3.5 0.8B model. when the worker can follow a tune in the recording, the director chooses how fast to play it, who carries the melody and how the other players accompany it. a new take can have its own tempo and ending. its saved arrangement gives the next request something concrete to change. the player performs the score locally. ACE-Step handles generated sound treatments, passage changes and direct covers of recordings with little reliable pitch information. each ready take keeps its own audio and the request that led to it.
 
-in the melody editor, Basic Pitch detects the notes. you can correct them, keep the uploaded performance as the lead, or play them on a different instrument. the renderer builds the backing from the arrangement you approve. the melody setup includes built-in text edits and direct controls. running `bash local-engine/setup_localengine.sh` without flags installs the melody and finished mix engines plus the optional Qwen arrangement planner.
+in the melody engine, Basic Pitch detects the notes. you can correct them, keep the uploaded performance as the lead, or play them on a different instrument. the renderer builds the backing from the arrangement you approve. the melody setup includes built-in text edits and direct controls. running `bash local-engine/setup_localengine.sh` without flags installs the melody and finished mix engines plus the optional Qwen arrangement planner.
 
-react and typescript run the studio. spring boot manages the api, postgres keeps project history, and a python worker handles transcription and rendering. [architecture](guide/architecture.md) · [setup and troubleshooting](guide/running.md) · [contributing](CONTRIBUTING.md) · [license](LICENSE)
+spring boot manages the api, postgres keeps project history, and a python worker handles transcription and rendering. [architecture](guide/architecture.md) · [setup and troubleshooting](guide/running.md) · [contributing](CONTRIBUTING.md) · [license](LICENSE)

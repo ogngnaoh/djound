@@ -19,7 +19,7 @@ case "$mode" in
     python3 tests/api_acceptance.py
     ;;
   browser)
-    node scripts/studio-smoke.mjs
+    node scripts/web-entry-smoke.mjs
     ;;
   fixture)
     bash scripts/verify-installation.sh fixture-api

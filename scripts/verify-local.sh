@@ -3,14 +3,10 @@
 set -euo pipefail
 source "$(dirname "$0")/env.sh"
 cd "$DJOUND_ROOT"
-case "${1:-studio}" in
-  studio) browser_check=scripts/studio-local-smoke.mjs ;;
-  jazz) browser_check=scripts/studio-local-smoke.mjs
-        export DJOUND_CHECK_JAZZ=1 ;;
-  playback) browser_check=tests/playback/measure.cjs ;;
-  planner) ;;
-  *) echo 'Usage: verify-local.sh [studio|jazz|playback|planner]' >&2; exit 2 ;;
-esac
+if [[ "${1:-planner}" != planner ]]; then
+  echo 'The previous studio walkthroughs were retired. Use verify-local.sh planner for the current local API check.' >&2
+  exit 2
+fi
 mkdir -p .runtime/checks
 run_dir="$(mktemp -d "$DJOUND_ROOT/.runtime/checks/local.XXXXXX")"
 test_db="djound_local_check_$$_${RANDOM}"
@@ -53,57 +49,4 @@ start_app() {
   exit 1
 }
 start_app
-if [[ "${1:-studio}" == planner ]]; then
-  python3 tests/planner/verify_api.py "${@:2}"
-  exit 0
-fi
-if [[ "${1:-studio}" == playback ]]; then
-  mkdir -p "$DJOUND_SCREENSHOT_DIR"
-  python3 - "$DJOUND_SCREENSHOT_DIR" <<'PYTHON'
-from pathlib import Path
-import sys
-import wave
-
-for seconds in (4, 8, 12):
-    path = Path(sys.argv[1]) / f"source-{seconds}.wav"
-    with wave.open("fixtures/audio/local-demo-source.wav") as source, wave.open(str(path), "wb") as clip:
-        clip.setparams(source.getparams())
-        clip.writeframes(source.readframes(seconds * source.getframerate()))
-PYTHON
-  node "$browser_check"
-  exit 0
-fi
-node "$browser_check" | tee "$run_dir/result.json"
-audio_check=tests/local_audio_acceptance.py
-if [[ "${1:-studio}" == jazz ]]; then audio_check=tests/jazz_audio_acceptance.py; fi
-"${DJOUND_LOCAL_PYTHON:-$DJOUND_ROOT/.runtime/local-engine/venv/bin/python}" "$audio_check" "$run_dir/result.json" "$DJOUND_DATA_DIR"
-kill "$app_pid"
-wait "$app_pid" || true
-app_pid=''
-start_app
-python3 - "$run_dir/result.json" <<'PY'
-import hashlib, json, os, sys, urllib.request
-result = json.load(open(sys.argv[1]))
-base = os.environ['DJOUND_TEST_BASE_URL']
-def get(route):
-    with urllib.request.urlopen(base + route) as response:
-        return json.load(response)
-saved = get('/api/explorations/' + result['explorationId'])
-assert saved == result['snapshot'], 'Restart changed exploration metadata'
-assert get('/api/explorations/' + result['explorationId'] + '/local') == result['localSnapshot'], 'Restart changed notes or plan'
-for recording in [saved['original'], *saved['renditions']]:
-    with urllib.request.urlopen(base + recording['mediaUrl']) as response:
-        assert hashlib.sha256(response.read()).hexdigest() == recording['sha256']
-command = urllib.request.Request(base + '/api/explorations/' + saved['id'] + '/requests', method='POST',
-    data=json.dumps(result['acceptedCommand']).encode(),
-    headers={'Content-Type':'application/json', 'Idempotency-Key':result['acceptedKey']})
-with urllib.request.urlopen(command) as response:
-    receipt = json.load(response)
-assert receipt['replayed'] and receipt['attemptId'] == result['attemptId']
-assert get('/api/explorations/' + saved['id']) == saved, 'Receipt replay created new work'
-print('PASS: local restart retains confirmed notes, recipe, metadata and exact audio; receipt replay creates no new work.')
-PY
-echo "PASS: actual local-model app flow. Evidence: $run_dir"
-if [[ "${DJOUND_KEEP_LOCAL_CHECK:-0}" == 1 ]]; then
-  echo "Retained isolated review installation. Source $run_dir/review.env before launching the app."
-fi
+python3 tests/planner/verify_api.py "${@:2}"

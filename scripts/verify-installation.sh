@@ -61,7 +61,7 @@ start_app() {
 start_app
 if [[ "$check_mode" == studio ]]; then
   python3 tests/api_acceptance.py | tee "$run_dir/api-result.json"
-  node scripts/studio-smoke.mjs | tee "$run_dir/studio-result.json"
+  node scripts/web-entry-smoke.mjs | tee "$run_dir/studio-result.json"
 elif [[ "$check_mode" == fixture-api ]]; then
   python3 tests/fixture_acceptance.py | tee "$run_dir/api-result.json"
   python3 tests/recovery_acceptance.py | tee "$run_dir/recovery-api-result.json"
