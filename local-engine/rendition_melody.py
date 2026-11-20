@@ -20,7 +20,7 @@ MAX_FRAMES = 300 * RATE
 MODEL = Path("basic-pitch/basic_pitch/saved_models/icassp_2022/nmp.onnx")
 BANK = "FluidR3_GM.sf2"
 NO_LINE = 3
-MELODY_TRACE_VERSION = 4
+MELODY_TRACE_VERSION = 5
 TRACE_SOURCES = ("single", "mix", "separated_voice")
 
 
@@ -517,7 +517,11 @@ def _recorded_line(source, work, events, duration, trace_version, trace_source, 
     def mix_line():
         if trace_version >= 4:
             from rendition_foreground import foreground_notes
-            return foreground_notes(source, events, duration)
+            notes = foreground_notes(source, events, duration)
+            if trace_version >= 5:
+                from rendition_octaves import recover_octave_excursions
+                return recover_octave_excursions(source, events, notes, duration)
+            return notes
         return _select_polyphonic(events, duration, trace_version=trace_version)
 
     if trace_source == "mix":

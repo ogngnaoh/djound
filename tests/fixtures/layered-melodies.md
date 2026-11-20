@@ -25,3 +25,11 @@ Use the local engine's Python environment. Supply the published archive or its e
 The evaluator verifies the release audio and MIDI fingerprints as well as the resulting clip's PCM hash. It scores the opening violin, first horn phrase and closing horn phrase separately (11, 11 and 10 notes), as well as both cello arches (7 notes each). A direct autocorrelation check of each published lead stem at these 46 note centers independently confirmed the aligned pitch to the nearest semitone. At 18 of 21 horn centers and 13 of 14 cello centers another instrument plays a higher pitch.
 
 Every phrase must recover at least 70% of the reference pitches to within one semitone, including register, and at least 60% exactly. Both thresholds apply to two counts. The midpoint count checks the pitch sounding at each reference note's center. The distinct count also requires a separate ordered played event covering at least half of that reference note. An extended note spanning several repetitions earns a single distinct match. The exit status is nonzero if any phrase misses any threshold. These counts describe the extracted line. Listener judgment and rendered arrangements are evaluated separately.
+
+## Octave excursion and alternate endings
+
+A separate check uses recorded gestures from the Schubert stems to make a short cello phrase, B3–C4–C3–C4–B3. An E-flat 5 violin enters over the C3. Two alternate versions let the cello rest or hold C4 while the same violin plays. The test presents the same candidate pitches for all three versions and checks the disputed note against the waveform. Each version is also resampled two semitones down and three semitones up. This isolates what the octave check contributes once a note detector has supplied the candidates. The original instrumental acceptance checks above exercise the complete transcription.
+
+```sh
+.runtime/local-engine/venv/bin/python tests/octave_excursion_acceptance.py /path/to/TRIOS.zip
+```
