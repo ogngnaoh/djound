@@ -47,6 +47,7 @@
 /showcase/release/*
 !/showcase/release/after-hours-piano.mp4
 !/showcase/release/after-hours-piano.jpg
+!/showcase/release/djound-banner.png
 
 # Machine configuration, credentials and private backups
 .DS_Store

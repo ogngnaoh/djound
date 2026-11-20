@@ -1,10 +1,14 @@
-[![Play After Hours Piano, a Djound film about reimagining Aerith’s Theme](showcase/release/after-hours-piano.jpg)](showcase/release/after-hours-piano.mp4)
-
-[Watch with sound · 33 seconds](showcase/release/after-hours-piano.mp4). At 0:16, listen to the same phrase again. The brushes drop out and an acoustic piano carries Aerith’s melody over soft electric piano. [Music credits](THIRD_PARTY_NOTICES.md#featured-film)
-
-# Djound
+[![Djound. Jump to the After Hours Piano film.](showcase/release/djound-banner.png)](#after-hours-piano)
 
 Djound is an open source music studio for editing a recording in your own words. The music and the models stay on your Mac.
+
+## After Hours Piano
+
+https://github.com/user-attachments/assets/4e4c4495-6e98-49cd-a9b3-9fc61b7fcebe
+
+Listen at **0:16**. The brushes drop out and an acoustic piano carries Aerith’s melody over soft electric piano. [Download the film](showcase/release/after-hours-piano.mp4) · [Music credits](THIRD_PARTY_NOTICES.md#featured-film)
+
+## Editing a recording
 
 1. **Bring a recording.** Choose a song and describe what you want to hear. In the film, part of the request was “No drums. No bass.”
 2. **Play the new edit.** Switch between performances to hear what changed. Choose the version you like under **Editing from** and ask for another change. The last request for *After Hours Piano* was “Cut the outro. Finish with the melody.”
