@@ -671,6 +671,53 @@ def balance_marks(plan):
     return [(index, db) for index, db in enumerate(levels) if db]
 
 
+def _scope_gap_answers(plan, direction, director):
+    """Change a named accompanist's placement without rewriting the whole ensemble."""
+    gap = r"\b(?:gaps?|rests?|pauses?|breaths?|between (?:the |my |its )?(?:lines|phrases)|stops playing)\b"
+    continuous = r"\b(?:throughout|continuously|under the (?:tune|melody)|all the way through)\b"
+    answering = any("answerTiming" in r for r in plan["roles"])
+    clauses = [clause for clause in re.split(r"[.!?;]", direction)
+               if re.search(gap, clause, re.I) or (answering and re.search(continuous, clause, re.I))]
+    if not clauses:
+        return False
+    action = ". ".join(clauses)
+    named = set(_members(action))
+    if not named:
+        return False
+    candidates = {i: role for i, role in enumerate(plan["roles"])
+                  if named.intersection((KIT if role["kind"] == "percussion" else role["program"],
+                                         role.get("soundProgram")))}
+    if not candidates:
+        return False
+    names = _catalog()[0]
+    options = {i: f"{'drums' if r['kind'] == 'percussion' else names[r.get('soundProgram', r['program'])]} {r['kind']}"
+               for i, r in candidates.items()}
+    options["whole"] = "the whole band, several players, the lead itself, or no specific accompanist"
+    target = director.choose("Which ONE existing accompanist changes WHEN they play relative to the lead? "
+                             "Exclude the player being answered and anyone the listener wants to keep.", options,
+                             context=action)
+    if target == "whole":
+        return False
+    role = candidates[target]
+    mode = director.choose("When should this player be heard in relation to the tune? Read the listener's instruction.",
+                           {"gaps": "only answer while the lead takes a breath or leaves space",
+                            "cycle": "resume playing the usual figure underneath the melody",
+                            "other": "a different change or no instruction about this player's placement"},
+                           context=action)
+    if mode == "other" or (mode == "cycle" and "answerTiming" not in role):
+        return False
+    if mode == "cycle":
+        role.pop("answerTiming")
+    else:
+        # Remember the particular lead performance this player is answering,
+        # including when a previous revision preserved an older cue for other players.
+        cue = {k: copy.deepcopy(plan[k]) for k in ("phrasing", "leadTouch") if k in plan}
+        if role.get("answerTiming") == cue:
+            raise ArrangementClarification("That player already answers in the melody's gaps. Which other change would you like?")
+        role["answerTiming"] = cue
+    return True
+
+
 def _part_sound(plan, direction, director):
     """Keep the selected player's written figure while changing the sound used to play it."""
     names = _catalog()[0]
@@ -903,6 +950,8 @@ def _arrange(analysis, direction, old, director, *, tempo_instruction=None):
     if old:
         changes = {"players"} if additions else _changes(director, direction, register)
     plan = copy.deepcopy(old) if old else {"version": 1}
+    if changes == {"interaction"} and _scope_gap_answers(plan, direction, director):
+        return plan
     if changes == {"balance"}:
         _balance_parts(plan, direction, director)
         return plan
@@ -1251,7 +1300,8 @@ def _run(request):
     tempo_instruction = _listener_tempo(director, direction)
     plan = _arrange(analysis, direction, old, director, tempo_instruction=tempo_instruction)
     if (old and plan.get("bpm") == old["bpm"] and not _backing_additions(direction, old)
-            and balance_marks(plan) == balance_marks(old)):
+            and balance_marks(plan) == balance_marks(old)
+            and all(a.get("answerTiming") == b.get("answerTiming") for a, b in zip(plan["roles"], old["roles"]))):
         requested, references = tempo_instruction
         proposed = _single_tempo(director.brief)
         if isinstance(requested, (int, float)):

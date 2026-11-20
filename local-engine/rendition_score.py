@@ -345,6 +345,42 @@ def _backing_events(role, timeline, plan, sections, attacks, releases):
     return events
 
 
+def _gap_answers(events, role, lead, timeline):
+    """Fit replies inside actual rests between the lead's notes, preserving the written intro and coda."""
+    written = sorted(events, key=lambda event: event[0])
+    starts = [event[0] for event in written]
+    answers = []
+    # A little space on either side leaves both players' attacks distinct.
+    padding = .04 / timeline.beat
+    minimum = .075 / timeline.beat
+    for earlier, later in zip(lead, lead[1:]):
+        left = earlier[1] / timeline.beat + padding
+        right = later[0] / timeline.beat - padding
+        if right - left < minimum:
+            continue
+        slots = written[bisect_left(starts, left):bisect_right(starts, right - minimum)]
+        if not slots:
+            # When the original figure misses this breath, move one of its own
+            # notes into the gap. This retains the player's register and pattern.
+            hit = role["pattern"][len(answers) % len(role["pattern"])]
+            slots = [(left, left + hit["duration"], left, hit)]
+        # Two answer attacks leave space in a long rest; simultaneous kit
+        # strokes or pitches at an attack still belong together.
+        first_two = set(sorted({event[0] for event in slots})[:2])
+        for start, end, raw, hit in slots:
+            if start not in first_two:
+                break
+            stop = min(right, end)
+            if stop - start + 1e-9 >= min(minimum, hit["duration"]):
+                answers.append((start, stop, raw, hit))
+    if not answers:
+        from rendition_score_plan import ArrangementClarification
+        raise ArrangementClarification("The lead leaves too little space for an audible reply. "
+                                       "Try shorter melody notes, or let the player answer over the ends of phrases.")
+    outside = [event for event in written if event[2] < timeline.intro or event[2] >= timeline.beats[-1]]
+    return sorted([*outside, *answers], key=lambda event: event[0])
+
+
 def arrange(notes, analysis, plan):
     """Return timed voices, total duration, and the mapping from performed phrases to source frames."""
     timeline = Timeline(analysis, plan)
@@ -373,7 +409,12 @@ def arrange(notes, analysis, plan):
                               "counterline": -24., "pedal": -24.}[kind], "notes": []}
         if role.get("balanceDb"):
             track["gain"] = 10 ** (role["balanceDb"] / 20)
-        for pos, end, raw_pos, hit in _backing_events(role, timeline, plan, sections, attacks, releases):
+        events = _backing_events(role, timeline, plan, sections, attacks, releases)
+        if timing := role.get("answerTiming"):
+            answer_cue = _lead_track(notes, timeline, dict(plan, phrasing=timing["phrasing"],
+                                                          leadTouch=timing.get("leadTouch")))
+            events = _gap_answers(events, role, answer_cue["notes"], timeline)
+        for pos, end, raw_pos, hit in events:
             cell = min(len(palette) - 1, int(raw_pos // (timeline.meter / 2)))
             root, tones = palette[cell]
             if drum:
@@ -386,7 +427,7 @@ def arrange(notes, analysis, plan):
                 interval = tones[degree % len(tones)] + 12 * (degree // len(tones))
                 base = 36 if kind in ("bass", "pedal") else 55
                 pitch = base + (root - base) % 12 + interval
-                if kind == "counterline":
+                if kind == "counterline" and not role.get("answerTiming"):
                     # Let the response occupy space between theme notes.
                     if any(a < end * timeline.beat and b > pos * timeline.beat for a,b,_,_ in cue["notes"]):
                         continue
