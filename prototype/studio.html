@@ -133,9 +133,27 @@
                 rows="2"
                 placeholder="How would you like this to sound?"
               ></textarea>
+              <details id="passage" hidden>
+                <summary>Edit a time range</summary>
+                <div class="passage-bounds">
+                  <label
+                    >From (seconds)<input
+                      id="range-start"
+                      type="number"
+                      min="0"
+                      step="any"
+                  /></label>
+                  <label
+                    >To (seconds)<input
+                      id="range-end"
+                      type="number"
+                      min="0"
+                      step="any"
+                  /></label>
+                </div>
+              </details>
               <div class="composer-foot">
-                <span id="preview-note"
-                  >Interactive preview · simulated generation</span
+                <span id="preview-note"></span
                 ><button type="submit" id="generate" class="make">
                   <i data-icon="sliders"></i> Create edit
                 </button>
@@ -157,7 +175,7 @@
                 <span id="percentage" class="clock"></span>
               </div>
               <progress
-                aria-label="Simulated generation progress"
+                aria-label="Generation progress"
                 id="progress"
                 max="100"
                 value="0"
@@ -171,6 +189,7 @@
               >
                 <i data-icon="play"></i> Play new edit
               </button>
+              <div id="job-actions" class="job-actions"></div>
             </div>
           </section>
         </div>

@@ -1,5 +1,8 @@
-import { getProject, saveProject, audioUrl, renderPreview } from "./data.js";
+import { live } from "./environment.js";
 import { createPlayer, currentTime } from "./studio-player.js";
+
+const engine = live ? await import("./live-studio.js") : null;
+const preview = live ? null : await import("./data.js");
 
 const $ = (id) => document.getElementById(id);
 const paths = {
@@ -39,7 +42,11 @@ const textElement = (tag, text) => {
   return el;
 };
 const params = new URLSearchParams(location.search);
-let project,
+const positions = new Map();
+let connection,
+  trackedJob,
+  ranges = {},
+  project,
   heard,
   parent,
   compareTo,
@@ -57,13 +64,26 @@ const isOriginal = (id) => id === original().id;
 const tell = (msg) => {
   $("message").textContent = msg;
 };
-const player = createPlayer({ audioUrl, icon, report: tell });
+const player = createPlayer({
+  audioUrl: live ? (url) => url : preview.audioUrl,
+  getWaveform: engine?.waveform,
+  icon,
+  report: tell,
+});
 const sessionKey = () => "djound.studio." + project.id;
 function storeSession() {
   try {
     sessionStorage.setItem(
       sessionKey(),
-      JSON.stringify({ heard, parent, compareTo, drafts, at: currentTime() }),
+      JSON.stringify({
+        heard,
+        parent,
+        compareTo,
+        drafts,
+        ranges,
+        trackedJob,
+        at: currentTime(),
+      }),
     );
   } catch {}
 }
@@ -100,7 +120,7 @@ function repairSelections() {
 function persist() {
   saving = saving
     .then(async () => {
-      await saveProject(project);
+      await preview.saveProject(project);
       repairSelections();
     })
     .catch((err) => {
@@ -119,6 +139,7 @@ function syncUI() {
   $("heard-name").textContent = item(heard).name;
   $("export-top").disabled = false;
   const favorite = $("favorite");
+  favorite.hidden = live && isOriginal(heard);
   favorite.setAttribute("aria-pressed", String(!!item(heard).favorite));
   favorite.setAttribute(
     "aria-label",
@@ -208,17 +229,29 @@ function syncUI() {
     lineage.innerHTML = icon("quote");
     lineage.append(textElement("span", item(heard).prompt));
   }
-  const proposals = canJazz()
-    ? [
-        "Play it as a jazz trio",
-        "Soften it for studying",
-        "Give it a warmer tone",
-      ]
-    : [
-        "Soften it for studying",
-        "Give it a warmer tone",
-        "Keep the groove, soften the highs",
-      ];
+  const proposals = live
+    ? isOriginal(parent)
+      ? [
+          "Play it as a jazz trio",
+          "Make a study soundtrack",
+          "Turn it into synth-pop",
+        ]
+      : [
+          "Keep the groove and give the melody to a cello",
+          "Make the ending quieter",
+          "Give it a warmer feel",
+        ]
+    : canJazz()
+      ? [
+          "Play it as a jazz trio",
+          "Soften it for studying",
+          "Give it a warmer tone",
+        ]
+      : [
+          "Soften it for studying",
+          "Give it a warmer tone",
+          "Keep the groove, soften the highs",
+        ];
   $("suggestions").replaceChildren(
     ...proposals.map((p) => {
       const b = textElement("button", p);
@@ -236,9 +269,19 @@ function syncUI() {
     replacement.focus({ preventScroll: true });
   }
 }
-async function listen(id, autoPlay, keepPair = false) {
+async function listen(id, autoPlay, keepPair = false, startAt) {
   if (!item(id)) return;
-  const at = currentTime();
+  positions.set(heard, currentTime());
+  const at =
+    startAt ??
+    (live
+      ? engine.correspondingPosition(
+          currentTime(),
+          item(heard)?.songTimeMap,
+          item(id).songTimeMap,
+          positions.get(id),
+        )
+      : currentTime());
   if (!keepPair) {
     if (!isOriginal(id)) compareTo = id;
     else if (item(comparisonChild()?.parentId)?.id !== original().id) {
@@ -255,6 +298,13 @@ async function listen(id, autoPlay, keepPair = false) {
     }
   }
   syncUI();
+  if (live) {
+    const url = new URL(location.href);
+    url.searchParams.set("edit", heard);
+    url.searchParams.delete("resume");
+    url.searchParams.delete("at");
+    history.replaceState({ ...history.state, studioOpened: true }, "", url);
+  }
   storeSession();
 }
 function setDraft(value) {
@@ -270,6 +320,7 @@ function setParent(id) {
   if (!item(id)) return;
   parent = id;
   $("request").value = drafts[id] || "";
+  restoreRange();
   syncUI();
   storeSession();
 }
@@ -292,11 +343,227 @@ function stage(value, detail) {
   $("percentage").textContent = value + "%";
   $("job-detail").textContent = detail;
 }
+function updateProject(next) {
+  const previous = project;
+  project = next;
+  if (!previous || !heard) return;
+  const changed =
+    previous.edits.length !== next.edits.length ||
+    next.edits.some((edit, i) => {
+      const old = previous.edits[i];
+      return (
+        old?.id !== edit.id ||
+        old.name !== edit.name ||
+        old.favorite !== edit.favorite
+      );
+    });
+  if (!changed) return;
+  if (!item(parent)) {
+    parent =
+      item(previous.edits.find((e) => e.id === parent)?.parentId)?.id ||
+      original().id;
+    $("request").value = drafts[parent] || "";
+    restoreRange();
+  }
+  if (!item(heard)) {
+    const removed = previous.edits.find((e) => e.id === heard);
+    const fallback = item(removed?.parentId) || original();
+    const at = engine.correspondingPosition(
+      currentTime(),
+      removed?.songTimeMap,
+      fallback.songTimeMap,
+    );
+    heard = fallback.id;
+    void player
+      .audition(fallback.audioKey, at, player.isPlaying())
+      .catch(() => tell("The recording could not be loaded."));
+  }
+  syncUI();
+  storeSession();
+}
+
+function restoreRange() {
+  if (!live) return;
+  const range = ranges[parent];
+  $("passage").open = !!range?.open;
+  $("range-start").value = range?.start ?? "";
+  $("range-end").value = range?.end ?? "";
+  for (const id of ["range-start", "range-end"]) {
+    $(id).max = item(parent).durationSeconds;
+    $(id).disabled = !$("passage").open;
+    $(id).setCustomValidity("");
+  }
+}
+function readRange() {
+  if (!$("passage").open) return {};
+  const start = $("range-start");
+  const end = $("range-end");
+  if (!start.value && !end.value) return {};
+  if (!start.value || !end.value || start.valueAsNumber >= end.valueAsNumber) {
+    const field = !start.value ? start : end;
+    field.setCustomValidity(
+      "Enter a start and a later end within this performance.",
+    );
+    field.reportValidity();
+    return;
+  }
+  return { startSeconds: start.valueAsNumber, endSeconds: end.valueAsNumber };
+}
+function storeRange() {
+  if (!live || !parent) return;
+  $("range-start").setCustomValidity("");
+  $("range-end").setCustomValidity("");
+  for (const id of ["range-start", "range-end"])
+    $(id).disabled = !$("passage").open;
+  ranges[parent] = {
+    open: $("passage").open,
+    start: $("range-start").value,
+    end: $("range-end").value,
+  };
+  storeSession();
+}
+$("passage").addEventListener("toggle", storeRange);
+for (const id of ["range-start", "range-end"])
+  $(id).addEventListener("input", storeRange);
+
+const stages = [
+  "Planning your take…",
+  "Learning the tune…",
+  "Arranging the instruments…",
+  "Rendering the performance…",
+  "Finishing the take…",
+];
+function showJob(take) {
+  const state = take?.state;
+  $("job").dataset.state = state || "";
+  busy = [
+    "submitting",
+    "unconfirmed",
+    "queued",
+    "running",
+    "reconnecting",
+  ].includes(state);
+  syncSubmit();
+  ready = state === "ready" ? take.id : null;
+  if (take?.id) trackedJob = take.id;
+  $("job").hidden = !take;
+  $("hear-result").hidden = !ready;
+  $("job-actions").replaceChildren();
+  $("progress").hidden = !["queued", "running", "submitting"].includes(state);
+  $("progress").removeAttribute("value");
+  $("progress").removeAttribute("aria-valuetext");
+  $("progress").textContent = "";
+  $("percentage").hidden = true;
+  if (!take) {
+    trackedJob = null;
+    storeSession();
+    return;
+  }
+  const action = (label, perform) => {
+    const button = textElement("button", label);
+    button.type = "button";
+    button.className = "quiet outlined";
+    button.addEventListener("click", () =>
+      Promise.resolve(perform()).catch((err) => tell(err.message)),
+    );
+    $("job-actions").append(button);
+  };
+  const parentName =
+    item(take.parentId)?.name || take.parentLabel || "removed edit";
+  let title,
+    detail,
+    glyph = "sliders";
+  switch (state) {
+    case "submitting":
+      title = "Sending your request";
+      detail = "";
+      break;
+    case "queued":
+    case "running": {
+      title = state === "queued" ? "Edit queued" : "Creating your edit";
+      detail =
+        take.progress ||
+        (state === "queued"
+          ? "Waiting for the local engine"
+          : "Starting the local engine");
+      const index = stages.indexOf(take.progress);
+      if (index >= 0) {
+        $("progress").max = stages.length;
+        $("progress").value = index + 1;
+        $("progress").setAttribute("aria-valuetext", detail);
+        $("percentage").hidden = false;
+        $("percentage").textContent =
+          "Stage " + (index + 1) + " of " + stages.length;
+      }
+      break;
+    }
+    case "reconnecting":
+      title = "Reconnecting to the engine";
+      detail = "Checking the status of your edit…";
+      break;
+    case "unconfirmed":
+      title = "Check your request";
+      detail = take.error;
+      action("Reconnect and check", take.retry);
+      break;
+    case "ready":
+      glyph = "check";
+      title = item(ready).name + " is ready";
+      detail = "Saved to Edits · from " + parentName;
+      if (drafts[take.parentId] === take.request) {
+        delete drafts[take.parentId];
+        if (parent === take.parentId) $("request").value = "";
+      }
+      break;
+    case "clarify":
+    case "failed":
+    case "rejected":
+      glyph = state === "clarify" ? "quote" : "close";
+      title =
+        state === "clarify" ? "One more detail" : "Couldn’t finish this edit";
+      detail = take.error || take.caption || "Try another request.";
+      if (take.clarificationKind === "retained_passage") {
+        action("Keep the edited passage", () =>
+          connection.answer(take.id, "keep"),
+        );
+        action("Change the passage too", () =>
+          connection.answer(take.id, "develop"),
+        );
+      } else if (item(take.parentId)) {
+        action("Revise request", () => {
+          setParent(take.parentId);
+          setDraft(take.request);
+          if (take.startSeconds != null && take.endSeconds != null) {
+            ranges[parent] = {
+              open: true,
+              start: take.startSeconds,
+              end: take.endSeconds,
+            };
+            restoreRange();
+          }
+          $("request").focus();
+        });
+      }
+      break;
+  }
+  $("job-glyph").innerHTML = icon(glyph);
+  $("job-title").textContent = title;
+  $("job-detail").textContent = detail;
+  syncSubmit();
+  storeSession();
+}
+
 async function generate(event) {
   event.preventDefault();
   if (busy) return;
   const prompt = $("request").value.trim();
   if (!prompt) return;
+  if (live) {
+    const bounds = readRange();
+    if (!bounds) return;
+    await connection.create({ parentId: parent, prompt, ...bounds });
+    return;
+  }
   const chosen = treatment(prompt);
   if (!chosen) {
     tell(
@@ -329,7 +596,7 @@ async function generate(event) {
     const [audioKey] = await Promise.all([
       chosen.effect === "jazz"
         ? Promise.resolve("jazz")
-        : renderPreview(source.audioKey, chosen.effect),
+        : preview.renderPreview(source.audioKey, chosen.effect),
       wait(740),
     ]);
     stage(85, "Preparing playback and saving the edit");
@@ -388,6 +655,10 @@ function toast(message, undo) {
 async function favorite(id) {
   const edit = item(id);
   if (!edit) return;
+  if (live) {
+    if (!isOriginal(id)) await connection.favorite(edit.favorite ? null : id);
+    return;
+  }
   edit.favorite = !edit.favorite;
   await persist();
   syncUI();
@@ -395,7 +666,9 @@ async function favorite(id) {
 async function exportEdit(id) {
   const edit = item(id);
   if (!edit) return;
-  const response = await fetch(await audioUrl(edit.audioKey));
+  const response = await fetch(
+    live ? edit.exportUrl : await preview.audioUrl(edit.audioKey),
+  );
   if (!response.ok) throw new Error("The audio could not be exported.");
   const blob = await response.blob();
   const url = URL.createObjectURL(blob);
@@ -414,6 +687,14 @@ async function remove(id) {
   const index = project.edits.findIndex((e) => e.id === id),
     deleted = item(id);
   if (!deleted) return;
+  if (live) {
+    await connection.trash(id);
+    toast("Deleted " + deleted.name, async () => {
+      await connection.restore(id);
+      toast("Restored " + deleted.name);
+    });
+    return;
+  }
   const children = project.edits.filter((e) => e.parentId === id);
   for (const e of children) e.parentName = deleted.name;
   const fallback = item(deleted.parentId)?.id || original().id;
@@ -480,6 +761,7 @@ function openMenu(anchor, id) {
     );
   menu.replaceChildren();
   for (const [glyph, label, action] of actions) {
+    if (live && isOriginal(id) && glyph === "star") continue;
     const b = document.createElement("button");
     b.type = "button";
     b.innerHTML = icon(glyph);
@@ -558,7 +840,12 @@ $("parent").addEventListener("change", (event) =>
 $("hear-result").addEventListener("click", () => {
   if (item(ready)) {
     setParent(ready);
-    void listen(ready, true);
+    void listen(
+      ready,
+      true,
+      false,
+      engine?.passageAuditionStart(item(ready).appliedStartSeconds),
+    );
   }
 });
 $("favorite").addEventListener("click", () =>
@@ -578,9 +865,12 @@ $("rename-form").addEventListener("submit", async (event) => {
   }
   const e = item(renameId);
   if (!e) return;
-  e.name = name;
   try {
-    await persist();
+    if (live) await connection.rename(e.id, name);
+    else {
+      e.name = name;
+      await persist();
+    }
     $("rename").close();
     syncUI();
     if (ready === e.id) $("job-title").textContent = name + " is ready";
@@ -618,7 +908,20 @@ window.addEventListener("pagehide", () => {
   }
 });
 try {
-  project = await getProject(params.get("project") || "zanarkand");
+  if (live) {
+    if (params.has("demo")) await engine.resolveDemo(params);
+    if (!params.get("project"))
+      throw new Error("Choose a recording to open in Studio.");
+    connection = engine.connect(params.get("project"), updateProject, showJob);
+    await connection.load();
+    $("preview-note").textContent = "Local engine";
+    $("passage").hidden = false;
+    $("request").maxLength = 1000;
+  } else {
+    $("preview-note").textContent =
+      "Interactive preview · simulated generation";
+    project = await preview.getProject(params.get("project") || "zanarkand");
+  }
   if (!project?.edits.length)
     throw new Error("This recording isn’t in this browser’s Library.");
   try {
@@ -627,6 +930,7 @@ try {
     session = {};
   }
   drafts = session.drafts || {};
+  ranges = session.ranges || {};
   // A direct share or homepage handoff selects the named performance. Returning
   // to a session restores the separately chosen editing parent and its draft.
   const resumeSession =
@@ -641,8 +945,10 @@ try {
     item(requested)?.id ||
     canonicalJazz ||
     (requested ? original().id : item(session.heard)?.id) ||
+    (live && project.edits.find((edit) => edit.favorite)?.id) ||
     original().id;
   parent = requested ? heard : item(session.parent)?.id || heard;
+  restoreRange();
   compareTo = requested ? heard : item(session.compareTo)?.id || heard;
   $("request").value = drafts[parent] || "";
   $("loading").hidden = true;
@@ -656,6 +962,13 @@ try {
     ) || 0;
   history.replaceState({ ...history.state, studioOpened: true }, "");
   await player.audition(item(heard).audioKey, Math.max(0, pos), false);
+  if (live) {
+    try {
+      await connection.resume(session.trackedJob);
+    } catch (err) {
+      tell(err.message || "The previous request could not be recovered.");
+    }
+  }
   if (requested && !item(requested) && !canonicalJazz)
     tell(
       "That edit was removed. Listening to Original. You can create another edit from it.",

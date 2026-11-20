@@ -612,6 +612,15 @@
   background: var(--apricot);
   border-radius: 8px;
 }
+.job-actions,
+.passage-bounds {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+.job-actions:not(:empty),
+.passage-bounds,
 .job #hear-result {
   margin-top: 10px;
 }
@@ -857,4 +866,26 @@
   .toast {
     min-width: min(320px, 90vw);
   }
+}
+
+#passage {
+  margin: 0 14px 10px;
+  color: var(--muted);
+  font-size: 13px;
+}
+#passage summary {
+  cursor: pointer;
+}
+.passage-bounds label {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+}
+.passage-bounds input {
+  width: 6em;
+  padding: 4px;
+  border-radius: 4px;
+  border: 1px solid var(--line);
+  background: var(--page);
+  color: var(--ink);
 }

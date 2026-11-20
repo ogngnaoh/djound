@@ -121,7 +121,12 @@ function seek(t) {
   audio.currentTime = Math.min(audio.duration, Math.max(0, t));
   refresh();
 }
-export function createPlayer({ audioUrl, icon, report }) {
+export function createPlayer({
+  audioUrl,
+  getWaveform = envelope,
+  icon,
+  report,
+}) {
   async function audition(key, at, autoPlay) {
     const token = ++generation;
     pendingAt = at;
@@ -129,7 +134,7 @@ export function createPlayer({ audioUrl, icon, report }) {
     audio.pause();
     peaks = null;
     refresh();
-    const url = await audioUrl(key);
+    const url = new URL(await audioUrl(key), location.href).href;
     if (token !== generation) return;
     if (audio.src !== url || audio.error) {
       audio.src = url;
@@ -151,7 +156,7 @@ export function createPlayer({ audioUrl, icon, report }) {
     };
     if (audio.readyState >= 1) await finish();
     else audio.addEventListener("loadedmetadata", finish, { once: true });
-    envelope(url)
+    getWaveform(url)
       .then((values) => {
         if (generation === token) {
           peaks = values;
