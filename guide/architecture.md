@@ -73,9 +73,9 @@ On a revision, the arranger can propose a new tempo even when the rest of the pl
 
 ### How to judge an engine change
 
-Follow one recording through an initial interpretation and a revision. Keep the source, the selected take and its requested change together. Listen to the corresponding phrase before and after. The failure determines which part of the engine to revisit.
+Agents choose representative recordings and write the directions a casual listener might give. They run the studio headlessly from import through export, one local inference at a time. For each revision, compare the same musical phrase across the source, the selected take and the result. Check both what was asked to change and what was asked to stay. When a check fails, repair the responsible stage and replay the same request. Agents own that decision to proceed. Voluntary listening feedback can supply a new case or describe a preference the audio measurements cannot establish.
 
-| Listener's expectation | What the engine can check | What needs a listener |
+| Listener's expectation | What the engine can check | What listening feedback can add |
 | --- | --- | --- |
 | “I can hum my tune in the new style.” | Compare the performed melody with known source phrases. Include rests and returning motifs. | Can someone recognize the tune, and does the playing evoke the requested style? |
 | “I love that beat. Change how the tune feels.” | Compare the rhythm section's note onsets, releases, pitches and velocities on the selected take. Check that the lead's delivery actually changes in the audio. | Does the new delivery express the requested feeling? |
