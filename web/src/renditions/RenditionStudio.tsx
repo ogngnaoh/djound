@@ -123,21 +123,28 @@ function RecordingSession({
   const [saving, setSaving] = useState(false);
   const [previousId, setPreviousId] = useState("");
   const [lastRequest, setLastRequest] = useState("");
+  const [audition, setAudition] = useState<{
+    workingId: string;
+    referenceId: string;
+  } | null>(null);
   const wanted = params.get("take") || project.favoriteId || "original";
   const selected = project.takes.find(
     (t) => t.id === wanted && t.state === "ready" && t.audioUrl,
   );
   const activeId = selected?.id ?? "original";
-  const activeUrl = selected?.audioUrl ?? project.originalUrl;
-  const duration = selected?.durationSeconds ?? project.durationSeconds;
+  const heardId =
+    audition?.workingId === activeId ? audition.referenceId : activeId;
+  const heard = project.takes.find((take) => take.id === heardId);
+  const heardUrl = heard?.audioUrl ?? project.originalUrl;
+  const duration = heard?.durationSeconds ?? project.durationSeconds;
   const label = (id: string) => {
     const index = project.takes.findIndex((t) => t.id === id);
     if (index < 0) return id === "original" ? "Original" : "Earlier take";
     return `Take ${index + 1} · ${project.takes[index].label}`;
   };
   const activeName = label(activeId);
-  const parentId = revising?.parentId ?? activeId;
-  const parentTake = project.takes.find((t) => t.id === parentId) ?? null;
+  const parentId = activeId;
+  const parentTake = selected ?? null;
   const parentDuration = parentTake?.durationSeconds ?? project.durationSeconds;
   const comparisonTakes = project.takes.filter(
     (take) =>
@@ -202,12 +209,17 @@ function RecordingSession({
     return () => audio?.pause();
   }, [clearLegacyPlayer]);
   useEffect(() => {
+    setAudition((current) =>
+      current && current.workingId !== activeId ? null : current,
+    );
+  }, [activeId]);
+  useEffect(() => {
     const audio = player.current;
-    if (audio && audio.getAttribute("src") !== activeUrl) {
+    if (audio && audio.getAttribute("src") !== heardUrl) {
       seekOnLoad.current = null;
-      audio.src = activeUrl;
+      audio.src = heardUrl;
     }
-  }, [activeUrl]);
+  }, [heardUrl]);
 
   function positionIn(target: Rendition | null) {
     const audio = player.current;
@@ -224,24 +236,23 @@ function RecordingSession({
     );
   }
 
-  function play(take: Rendition | null, from?: number, startPlayback = true) {
+  function switchAudio(
+    take: Rendition | null,
+    from?: number,
+    startPlayback = true,
+  ) {
     const audio = player.current;
     const url = take ? take.audioUrl : project.originalUrl;
     if (!audio || !url) return;
     const same = audio.getAttribute("src") === url;
     if (!same)
       lastPosition.current.set(
-        activeId,
+        heardId,
         seekOnLoad.current ?? audio.currentTime,
       );
     const position = from ?? (audio.ended ? 0 : positionIn(take));
     stopAt.current = null;
     setNotice("");
-    if (activeId !== (take?.id ?? "original")) {
-      setPreviousId(activeId);
-      if (!revising) setRange(null);
-    }
-    setParams({ take: take?.id ?? "original" }, { replace: true });
     if (!same) {
       seekOnLoad.current = position;
       audio.src = url;
@@ -261,6 +272,37 @@ function RecordingSession({
         );
       }
     });
+  }
+  function chooseTake(
+    take: Rendition | null,
+    from?: number,
+    startPlayback = true,
+  ) {
+    const id = take?.id ?? "original";
+    if (id !== activeId) {
+      setPreviousId(activeId);
+      setRange(null);
+      setText("");
+      setRevising(null);
+    } else {
+      setAudition(null);
+    }
+    setParams(
+      (current) => {
+        const next = new URLSearchParams(current);
+        next.set("take", id);
+        return next;
+      },
+      { replace: true },
+    );
+    switchAudio(take, from, startPlayback);
+  }
+  function compare(take: Rendition | null) {
+    const referenceId = take?.id ?? "original";
+    const returnToWorking = heardId === referenceId;
+    const target = returnToWorking ? (selected ?? null) : take;
+    setAudition(returnToWorking ? null : { workingId: activeId, referenceId });
+    switchAudio(target, positionIn(target), player.current?.paused === false);
   }
   function passageAt(position: number, length: number): Passage {
     const start = Math.max(0, Math.min(Math.floor(position), length - 1));
@@ -290,7 +332,7 @@ function RecordingSession({
             parent?.durationSeconds ?? project.durationSeconds,
           )
         : null);
-    play(
+    chooseTake(
       parent,
       next ? passageAuditionStart(Number(next.start)) : position,
       player.current?.paused === false,
@@ -366,7 +408,10 @@ function RecordingSession({
   }
   const locked = creation.busy || !!creation.pending;
   return (
-    <section className="mix-editor rendition-studio">
+    <section
+      className="mix-editor rendition-studio"
+      data-working-take-id={activeId}
+    >
       <header className="mix-heading">
         <Link to="/renditions">
           <ArrowLeft size={15} /> Your recordings
@@ -376,15 +421,18 @@ function RecordingSession({
       <div className="mix-edit-grid">
         <div className="mix-main">
           <div className="mix-time">
-            <strong>{activeName}</strong>
+            <strong>
+              {label(heardId)}
+              {heardId !== activeId && " · Comparing"}
+            </strong>
             <span>{clock(duration)}</span>
           </div>
           <audio
             ref={player}
             controls
             preload="metadata"
-            aria-label={"Listen to " + activeName}
-            data-take-id={activeId}
+            aria-label={"Listen to " + label(heardId)}
+            data-take-id={heardId}
             onError={() =>
               setNotice("This audio could not be opened. Try playing it again.")
             }
@@ -415,15 +463,27 @@ function RecordingSession({
                 key={take.id}
                 size="sm"
                 variant="outline"
-                onClick={() => play(take)}
+                aria-pressed={heardId === take.id}
+                onClick={() => compare(take)}
               >
-                <Play /> Compare {label(take.id)}
+                <Play />{" "}
+                {heardId === take.id
+                  ? "Return to " + activeName
+                  : "Compare " + label(take.id)}
               </Button>
             ))}
             {selected && (
               <>
-                <Button size="sm" variant="outline" onClick={() => play(null)}>
-                  <Play /> Compare original
+                <Button
+                  size="sm"
+                  variant="outline"
+                  aria-pressed={heardId === "original"}
+                  onClick={() => compare(null)}
+                >
+                  <Play />{" "}
+                  {heardId === "original"
+                    ? "Return to " + activeName
+                    : "Compare original"}
                 </Button>
                 <Button
                   size="sm"
@@ -434,12 +494,17 @@ function RecordingSession({
                   {project.favoriteId === activeId ? <Check /> : <Bookmark />}
                   {project.favoriteId === activeId
                     ? "Kept as favorite"
-                    : "Keep as favorite"}
+                    : heardId !== activeId
+                      ? "Keep " + activeName + " as favorite"
+                      : "Keep as favorite"}
                 </Button>
                 {selected.exportUrl && (
                   <Button asChild size="sm" variant="ghost">
                     <a href={selected.exportUrl} download>
-                      <Download /> Download this take
+                      <Download />{" "}
+                      {heardId !== activeId
+                        ? "Download " + activeName
+                        : "Download this take"}
                     </a>
                   </Button>
                 )}
@@ -560,7 +625,8 @@ function RecordingSession({
                     size="sm"
                     disabled={!validRange}
                     onClick={() => {
-                      play(parentTake, start);
+                      setAudition(null);
+                      switchAudio(parentTake, start);
                       stopAt.current = end;
                     }}
                   >
@@ -586,7 +652,7 @@ function RecordingSession({
                   <Button
                     variant="secondary"
                     onClick={() =>
-                      play(
+                      chooseTake(
                         latest,
                         passageAuditionStart(
                           latest.appliedStartSeconds ?? latest.startSeconds,
@@ -653,7 +719,11 @@ function RecordingSession({
         <aside className="mix-takes">
           <h2>Recordings</h2>
           <article className={activeId === "original" ? "current" : ""}>
-            <button onClick={() => play(null)} aria-label="Play original">
+            <button
+              onClick={() => chooseTake(null)}
+              aria-current={activeId === "original" ? "true" : undefined}
+              aria-label="Play original"
+            >
               <Play size={16} /> Original
             </button>
           </article>
@@ -664,7 +734,8 @@ function RecordingSession({
             >
               {take.audioUrl && take.state === "ready" ? (
                 <button
-                  onClick={() => play(take)}
+                  onClick={() => chooseTake(take)}
+                  aria-current={activeId === take.id ? "true" : undefined}
                   aria-label={"Play " + label(take.id)}
                 >
                   <Play size={16} />
