@@ -16,6 +16,7 @@ import sys
 import time
 
 from common import HERE, HOME
+from rendition_drum_notes import counted_drum_notes
 from rendition_rhythm import FIGURES, choose_chart_figure, write_chart_figure
 from rendition_score_render import MAX_TRACKS
 from rendition_voicing import _catalog, _excluded, _explicit, _role_names, _size_hint
@@ -56,7 +57,7 @@ GESTURES = {
 }
 ROOMS = {0.16: "close and dry", 0.44: "natural small room", 0.76: "spacious room", 1.0: "large resonant space"}
 POLYPHONIC = set(range(16)) | {16, 17, 18, 19, 20, 21, 22} | set(range(24, 32)) | {46, 48, 49, 50, 51, 88, 89, 104, 105, 107, 108}
-DRUMS = re.compile(r"\b(?:drum machine|drums?|drum\s?kit|percussion|brushes|hi[ -]?hat|ride cymbal|congas?|bongos?)\b", re.I)
+DRUMS = re.compile(r"\b(?:drum machine|drums?|drummers?|drum\s?kit|percussion(?:ists?)?|brushes|hi[ -]?hat|ride cymbal|congas?|bongos?)\b", re.I)
 INSTRUMENT_TERMS = {
     "synth bass 2": 39, "synth bass 1": 38, "synth bass": 38, "synthesized bass": 38, "synthesizer bass": 38,
     "synth lead": 81, "lead synth": 81, "bright synth": 81, "sawtooth synth": 81, "saw wave": 81,
@@ -157,6 +158,8 @@ def _part_words(marked, program):
 
 
 def _phrase_part(director, role, direction):
+    if role["kind"] == "percussion" and role["gesture"] == "written":
+        return False
     program = KIT if role["kind"] == "percussion" else role["program"]
     # Keep coordinated verbs attached to their player ("piano plays the theme
     # and answers with chords"). Start a new subject with each named instrument.
@@ -295,6 +298,10 @@ def apply_lead_note_edit(parent, edit):
 
 def _backing_additions(direction, old):
     """Resolve a directly requested supporting player without reassigning the protected lead."""
+    # A performer invited to play has the same effect as "add a drummer."
+    direction = re.sub(r"\b(?:(?:could|can|would)\s+(?:you\s+(?:have|get)\s+)?|let\s+|have\s+)"
+                       r"(?:a|the)\s+(drummer|percussionist)\s+(?=tap|play|hit|strike)",
+                       r"add a \1 to ", direction, flags=re.I)
     if not old or not re.search(r"\b(?:add|bring in|layer in|introduce)\b", direction, re.I):
         return []
     existing = {old["leadProgram"], *(KIT if r["kind"] == "percussion" else r["program"] for r in old["roles"])}
@@ -303,6 +310,8 @@ def _backing_additions(direction, old):
     additions = []
     supporting = False
     for phrase in (c.strip() for c in clauses if c.strip()):
+        if re.fullmatch(r"i (?:really )?(?:like|love) (?:this|it|this take|where this is going|how this sounds)", phrase, re.I):
+            continue
         liked = _liked_part(phrase)
         if liked:
             players = _members(phrase)
@@ -319,9 +328,11 @@ def _backing_additions(direction, old):
             return []
         performer = re.split(r"\b(?:alongside|beneath|behind|underneath|under|over)\b", add[1], maxsplit=1, flags=re.I)[0]
         programs = _members(performer)
+        if not programs and counted_drum_notes(performer, old["meter"]):
+            programs = [KIT]
         if not programs or MELODY_PART.search(performer) or any(p in existing or _excluded_player(p, phrase) for p in programs):
             return []
-        supporting |= bool(re.search(r"\b(?:backing|accompaniment|rhythm section|chords?|comping|behind|underneath)\b", phrase, re.I))
+        supporting |= programs == [KIT] or bool(re.search(r"\b(?:backing|accompaniment|rhythm section|chords?|comping|behind|underneath)\b", phrase, re.I))
         additions.extend(programs)
     return list(dict.fromkeys(additions)) if supporting else []
 
@@ -517,6 +528,9 @@ KICK_SNARE_ONLY = re.compile(r"(?:\bonly\s+" + KICK_SNARE + "|" + KICK_SNARE + r
 
 def _kit_parts(meter, direction, brief):
     # A listener's positive or negative kit instruction supersedes a conflicting cue.
+    written = counted_drum_notes(direction, meter)
+    if written:
+        return {"written": [_event(beat, .16, 0, 70, pitch) for beat, pitch in written]}
     specified = OMITTED_PAIR.search(direction) or re.search(KIT_COMPONENT + "|" + KICK_SNARE, direction, re.I)
     words = direction if specified else brief
     pair = re.search(KICK_SNARE, OMITTED_PAIR.sub("", words), re.I)
@@ -571,6 +585,8 @@ def _roles(director, cast, meter, direction):
                     "hold": r"\b(?:sustained|held)\b", "offbeat": r"\boffbeats?\b"}
         patterns = _kit_parts(meter, direction, director.brief) if kind == "percussion" else None
         available = {g: label for g, label in GESTURES[kind].items() if patterns is None or g in patterns}
+        if patterns is not None and "written" in patterns:
+            available = {"written": "the listener’s counted drum hits"}
         if patterns is not None and "backbeat" in patterns and {h["pitch"] for h in patterns["backbeat"]} == {36, 38}:
             available["backbeat"] = "kick and snare on alternating beats"
         gesture = next((g for g, pattern in gestures.items() if g in available and re.search(pattern, words)), None)

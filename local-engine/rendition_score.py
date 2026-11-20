@@ -303,10 +303,9 @@ def _backing_events(role, timeline, plan, sections, attacks, releases):
             end = min(timeline.last, pos + hit["duration"])
             if end <= pos:
                 continue
-            # A written offbeat chord part keeps its short strokes through the
-            # ending. Moving its last chord to beat one obscures the groove.
+            # These strokes have an explicit place in the bar, including the coda.
             if (raw >= timeline.beats[-1] and bar == bars - 1
-                    and not (kind == "chords" and role.get("gesture") == "offbeat")):
+                    and (kind, role.get("gesture")) not in (("chords", "offbeat"), ("percussion", "written"))):
                 if idx:
                     continue
                 pos = bar * timeline.meter
