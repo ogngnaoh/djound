@@ -6,10 +6,9 @@ Original Djound code is distributed under the [MIT license](LICENSE). The compon
 
 | Material | Source and terms |
 | --- | --- |
-| Inter font | `@fontsource-variable/inter` 5.3.0, used by the application. Copyright 2016 The Inter Project Authors. [SIL Open Font License 1.1](web/public/licenses/inter-OFL.txt), retained from the installed package and included in web builds. [Upstream Inter](https://github.com/rsms/inter). |
+| Inter font | `@fontsource-variable/inter` 5.3.0, retained in the web dependency lockfile. Copyright 2016 The Inter Project Authors. [SIL Open Font License 1.1](web/public/licenses/inter-OFL.txt), retained from the font package. [Upstream Inter](https://github.com/rsms/inter). |
 | Prototype sample audio | `warm.wav` and `pulse.wav` derive from the authored fixtures listed in [fixtures/manifest.json](fixtures/manifest.json), dedicated under CC0 1.0 in [fixtures/README.md](fixtures/README.md). [Prototype provenance](web/public/audio/PROVENANCE.txt) records the mapping. |
 | Local demo source | `fixtures/audio/local-demo-source.wav` and its byte-identical `web/public/audio/original.wav` copy are a separately authored synthetic melody. [Source metadata](fixtures/audio/local-demo-source.json) identifies the composition and preparation. This original project fixture is provided under the [project MIT license](LICENSE), separately from the three CC0 fixtures above. |
-| Djound artwork | The application includes its published [brand marks](web/public/brand/). |
 
 ## Featured film
 
