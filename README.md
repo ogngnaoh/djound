@@ -1,14 +1,22 @@
+[![Play After Hours Piano, a Djound film about reimagining Aerith’s Theme](showcase/release/after-hours-piano.jpg)](showcase/release/after-hours-piano.mp4)
+
+[Watch with sound · 33 seconds](showcase/release/after-hours-piano.mp4). At 0:16, listen to the same phrase again. The brushes drop out and an acoustic piano carries Aerith’s melody over soft electric piano. [Music credits](THIRD_PARTY_NOTICES.md#featured-film)
+
 # Djound
 
-Djound is an open-source music studio for reimagining a recording in your own words. Bring a song, choose a style or describe how you want it to sound, then listen and refine the edit you like. Your original, edit history and exported WAVs stay on your Mac. [Product vision](guide/product.md) · [API contract](contracts/openapi.yaml)
+Djound is an open source music studio for editing a recording in your own words. The music and the models stay on your Mac.
 
-[![Play After Hours Piano, a 33-second film showing Aerith’s Theme reimagined in Djound](showcase/release/after-hours-piano.jpg)](showcase/release/after-hours-piano.mp4)
+1. **Bring a recording.** Choose a song and describe what you want to hear. In the film, part of the request was “No drums. No bass.”
+2. **Play the new edit.** Switch between performances to hear what changed. Choose the version you like under **Editing from** and ask for another change. The last request for *After Hours Piano* was “Cut the outro. Finish with the melody.”
+3. **Keep your favorite.** Star it, reopen it from your library, or choose **Export audio** to save the WAV.
 
-**[Watch After Hours Piano with sound](showcase/release/after-hours-piano.mp4)** · Listen for the brushes under the held piano note. At 0:16 the same phrase returns as a drumless piano duet. [Music credits](THIRD_PARTY_NOTICES.md#featured-film)
+## How the engine works
 
-## run it locally
+For an arrangement like the piano duet, a Python worker transcribes the melody. Qwen interprets the request and directs a score with parts for each player. A local synthesizer performs it. The studio saves the score with the audio, so the next request can change the ending and keep the piano parts you liked. For edits to the recorded sound itself, the worker can use a local audio model. Spring Boot manages the jobs and PostgreSQL keeps each edit tied to its parent. [Inside the engine](guide/architecture.md)
 
-for the local rendition studio, use an Apple Silicon Mac with Git, Apple Command Line Tools, CMake, Python 3.11, uv, FFmpeg, pnpm 11.5.0 and Docker with Compose. start Docker, then run these commands from the repo root.
+## Run it locally
+
+Start Docker on an Apple Silicon Mac and install the [prerequisites](guide/running.md). Run these commands from the checkout.
 
 ```sh
 bash scripts/bootstrap.sh
@@ -18,14 +26,4 @@ bash scripts/package.sh
 DJOUND_MODE=LOCAL bash scripts/run.sh
 ```
 
-Open **http://127.0.0.1:8080**. Choose **Bring a recording** to start from your own file, or **Try an edit** to open the example jazz arrangement. Select an edit in Studio before asking for the next change.
-
-Setup downloads the tools and models. Use the [running guide](guide/running.md) for model choices, the optional mix and melody engines and installation checks.
-
-## how it works
-
-in the rendition engine, the same local Qwen3 4B model interprets your request and directs the arrangement. older installations can use the smaller Qwen3.5 0.8B model. when the worker can follow a tune in the recording, the director chooses how fast to play it, who carries the melody and how the other players accompany it. a new take can have its own tempo and ending. its saved arrangement gives the next request something concrete to change. the player performs the score locally. ACE-Step handles generated sound treatments, passage changes and direct covers of recordings with little reliable pitch information. each ready take keeps its own audio and the request that led to it.
-
-in the melody engine, Basic Pitch detects the notes. you can correct them, keep the uploaded performance as the lead, or play them on a different instrument. the renderer builds the backing from the arrangement you approve. the melody setup includes built-in text edits and direct controls. running `bash local-engine/setup_localengine.sh` without flags installs the melody and finished mix engines plus the optional Qwen arrangement planner.
-
-spring boot manages the api, postgres keeps project history, and a python worker handles transcription and rendering. [architecture](guide/architecture.md) · [setup and troubleshooting](guide/running.md) · [contributing](CONTRIBUTING.md) · [license](LICENSE)
+Open [the studio](http://127.0.0.1:8080) and choose **Try an edit** to hear the included example. [Setup and troubleshooting](guide/running.md) · [Contributing](CONTRIBUTING.md) · [License](LICENSE)
