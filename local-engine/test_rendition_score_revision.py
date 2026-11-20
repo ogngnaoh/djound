@@ -133,6 +133,85 @@ class ScoreRevisionTest(unittest.TestCase):
                 self.assertTrue(self.output.is_file())
                 self.output.unlink()
 
+    def test_explicit_register_follows_the_heard_lead_or_the_upload_through_revisions(self):
+        role = {"program": 0, "kind": "arpeggio", "pattern": planner._pattern("arpeggio", "wave", 4)}
+        trumpet = dict(self.parent, leadProgram=56, roles=[role])
+        analysis = analyze(self.notes)
+        trumpet_tracks, _, _ = arrange(self.notes, analysis, trumpet)
+        words = ("Keep the beat and the accompaniment exactly as they are. "
+                 "Give the tune to a cello in the same octave as this trumpet.")
+        def revise(prior, direction, axis):
+            with patch.object(planner, "_changes", return_value={axis}), patch.object(planner, "_Director") as director:
+                chart = director.return_value
+                chart.brief = "Keep the established pulse."
+                chart.identity = "scripted"
+                # If offered both players, the director favors the comparator.
+                chart.choose.side_effect = lambda _, players: 56 if 56 in players else next(iter(players))
+                revised = planner._run({"analysis": dict(analysis, parentPlan=prior), "direction": direction,
+                                        "parentCaption": "A saved instrumental."})
+            tracks, _, _ = arrange(self.notes, analysis, revised)
+            self.assertEqual(trumpet_tracks[1:], tracks[1:])
+            return revised, [event[2] for event in tracks[0]["notes"]]
+
+        pitches = [n[2] for n in trumpet_tracks[0]["notes"]]
+        for classified_as in ("revoice", "players", "register"):
+            saved, heard = revise(trumpet, words, classified_as)
+            self.assertEqual((42, 0, pitches), (saved["leadProgram"], saved["leadOctaveShift"], heard))
+        saved, heard = revise(saved, "Give the tune to a bassoon.", "revoice")
+        self.assertEqual((70, 0, pitches), (saved["leadProgram"], saved["leadOctaveShift"], heard))
+        natural, lower = revise(saved, "Use the bassoon's natural register.", "register")
+        self.assertNotIn("leadOctaveShift", natural)
+        self.assertEqual([p-12 for p in pitches], lower)
+        preserved, still_lower = revise(natural, "Give the tune to a clarinet in the same octave.", "revoice")
+        self.assertEqual((71, -1, lower), (preserved["leadProgram"], preserved["leadOctaveShift"], still_lower))
+        restored, original = revise(preserved, "Use the original recording's octave for the melody.", "register")
+        self.assertEqual((0, pitches), (restored["leadOctaveShift"], original))
+        with self.assertRaisesRegex(ValueError, "Choose Original"):
+            revise(dict(preserved, fromUpload=False), "Use the upload's octave for the tune.", "register")
+
+    def test_backing_register_is_not_a_lead_placement_instruction(self):
+        from unittest.mock import Mock
+
+        lead = dict(self.parent, leadProgram=56)
+        director = Mock()
+        for words in ("Keep the bass in the same octave.", "Keep the same register for the backing.",
+                      "Give the melody to a cello and keep the bass in its natural register.",
+                      "Make a walking bass and brushed drum accompaniment."):
+            self.assertIsNone(planner._lead_register(words, lead, director), words)
+        director.choose.assert_not_called()
+
+    def test_upload_octave_uses_the_recording_actually_selected_for_transcription(self):
+        from unittest.mock import Mock
+
+        upload, parent = self.root / "upload.wav", self.root / "earlier-take.wav"
+        old = dict(self.parent, fromUpload=False, leadProgram=70, leadOctaveShift=-1)
+        words = "Use the uploaded recording's octave for the melody."
+        def transcribe(source, path, **options):
+            path.write_text(json.dumps(self.notes))
+            return True
+
+        def plan(analysis, *args, **kwargs):
+            return planner._arrange(analysis, words, analysis["parentPlan"], Mock())
+
+        def render(tracks, seconds, path, **kwargs):
+            path.write_bytes(b"score")
+            return 1.
+
+        with (patch("rendition_performance.guide_available", return_value=True),
+              patch("rendition_score_render.score_available", return_value=True),
+              patch("rendition_melody.transcribe_recording", side_effect=transcribe) as extractor,
+              patch("rendition_score_plan.plan_arrangement", side_effect=plan),
+              patch.object(planner, "_changes", return_value={"register"}),
+              patch("rendition_score_render.render_score", side_effect=render)):
+            args = dict(direction=words, caption="Melody", parent_caption="Bassoon", parent_plan=old, parent_map=None)
+            with self.assertRaisesRegex(ValueError, "Choose Original"):
+                perform_score(parent, upload, self.output, self.root, recover_original=False, **args)
+            self.assertEqual(parent, extractor.call_args.args[0])
+            reply = perform_score(parent, upload, self.output, self.root, recover_original=True, **args)
+            self.assertEqual(upload, extractor.call_args.args[0])
+            self.assertEqual(0, reply["arrangementPlan"]["leadOctaveShift"])
+            self.assertTrue(reply["arrangementPlan"]["fromUpload"])
+
     def test_revision_uses_chart_tempo_only_when_the_listener_allows_a_new_pace(self):
         parent = dict(self.parent, bpm=72)
         analysis = analyze(self.notes)

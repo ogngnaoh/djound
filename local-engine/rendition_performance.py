@@ -167,6 +167,7 @@ def perform_score(parent, original, destination, work, *, direction, caption, pa
         return None
     notes = json.loads(transcription.read_text())
     analysis = analyze(notes)
+    analysis["scoreInputIsUpload"] = from_upload
     if parent_plan:
         analysis["parentPlan"] = parent_plan
     report_stage("arranging")

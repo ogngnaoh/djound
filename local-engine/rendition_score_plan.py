@@ -349,7 +349,53 @@ def _roles(director, cast, meter, direction):
     return roles
 
 
-def _changes(director, direction):
+REGISTER_CUE = re.compile(r"\b(?:octaves?|register|pitch(?:es)?|transpos(?:e|ed|ing|ition)|"
+                          r"(?:natural|comfortable|normal|usual)\s+(?:playing\s+)?range)\b", re.I)
+MELODY_PART = re.compile(r"\b(?:lead|tune|melody|theme|hook|motif)\b", re.I)
+BACKING_PART = re.compile(r"\b(?:bass(?:line)?|backing|accompaniment|chords?|countermelody|rhythm section)\b", re.I)
+
+
+def _lead_register(direction, old, director):
+    """Resolve listener-authored lead placement. The director's own chart cannot create this constraint."""
+    if not REGISTER_CUE.search(direction):
+        return None
+    lead_players = _stated_leads(direction) or ({old["leadProgram"]} if old else set())
+    phrases = []
+    for clause in re.split(r"[.;,!?]|\b(?:and|but|while)\b", direction, flags=re.I):
+        cue = REGISTER_CUE.search(clause)
+        if not cue:
+            continue
+        # "same octave as the trumpet" names a reference. In "keep the same
+        # octave for the bass", the bass is the subject of the instruction.
+        subject = clause[:cue.end()] + re.split(r"\bas\b", clause[cue.end():], maxsplit=1, flags=re.I)[0]
+        if not MELODY_PART.search(subject):
+            players = set(_members(subject))
+            if (players and lead_players and players.isdisjoint(lead_players)) or (
+                    BACKING_PART.search(subject) and not (players & lead_players)):
+                continue
+        phrases.append(clause.strip())
+    if not phrases:
+        return None
+    words = " ".join(phrases).casefold()
+    if not re.search(r"\b(?:not|never|instead|rather|without)\b|n['’]t\b", words):
+        if re.search(r"\b(?:natural|comfortable|normal|usual)\s+(?:playing\s+)?(?:register|octave|range)\b", words):
+            return "natural"
+        if re.search(r"\b(?:original (?:recording|upload|pitches|octave|register)|upload(?:ed)?|source (?:recording|octave|pitches|register))\b", words):
+            return "upload"
+        if re.search(r"\b(?:same|existing|current)\s+(?:exact\s+)?(?:octave|register|pitch(?:es)?)\b", words):
+            return "current"
+    choice = director.choose(
+        "Is the listener explicitly asking to place the main tune in a particular octave? "
+        "Read the listener's words, including negatives. Ignore requests about supporting parts, key or tuning.",
+        {"other": "no explicit choice among these for the lead",
+         "current": "match the actual pitches/register of the currently selected lead",
+         "upload": "match the octave of the tune in the originally uploaded recording",
+         "natural": "use a comfortable register for the chosen new melody instrument"},
+        context=json.dumps({"listener": direction, "registerPhrases": phrases}, ensure_ascii=False))
+    return None if choice == "other" else choice
+
+
+def _changes(director, direction, register=None):
     axes = {"revoice": "change only the instrument that plays the existing lead melody",
             "players": "instruments / lineup only", "pulse": "speed only", "groove": "meter / rhythm or groove only",
             "phrasing": "lead articulation or timing only", "harmony": "chords or harmonic color only",
@@ -358,6 +404,8 @@ def _changes(director, direction):
             "production": "sound treatment or studio effects only",
             "feel": "performance feel or mood with same players", "all": "entire new musical arrangement or style",
             "several": "specific changes to two or more of the above"}
+    if register:
+        axes["register"] = "just the melody's octave placement, preserving all other parts"
     axis = director.choose("What is the listener asking to change in the selected arrangement? "
                            "Keep unmentioned decisions on a revision.", axes)
     if axis == "all":
@@ -484,8 +532,19 @@ def _lead_touch(director, direction, phrasing, old):
 
 
 def _arrange(analysis, direction, old, director, *, tempo_instruction=None):
-    changes = _changes(director, direction) if old else set(GROUPS)
+    register = _lead_register(direction, old, director)
+    changes = _changes(director, direction, register) if old else set(GROUPS)
     plan = copy.deepcopy(old) if old else {"version": 1}
+    assigned = _stated_leads(direction) if register else set()
+    if register == "natural":
+        plan.pop("leadOctaveShift", None)
+    elif register == "current" and old:
+        from rendition_score import lead_octave
+        plan["leadOctaveShift"] = lead_octave(old, analysis.get("melodyMedianPitch"))
+    elif register:
+        if register == "upload" and analysis.get("scoreInputIsUpload", (old or {}).get("fromUpload")) is False:
+            raise ValueError("Choose Original to match the uploaded recording’s octave. This score follows an earlier take.")
+        plan["leadOctaveShift"] = 0
     plan.setdefault("realization", "score")
     plan["themeAnchors"] = _anchors(analysis)
     if "production" in changes:
@@ -516,14 +575,19 @@ def _arrange(analysis, direction, old, director, *, tempo_instruction=None):
                                               {0: "close on the final phrase", 1: "one-bar cadence", 2: "two-bar coda"})
     revoice = (changes == {"players"} and len(_members(direction)) == 1
                and re.search(r"\b(?:lead|tune|melody|hook|theme)\b", direction, re.I))
+    if register and old and len(assigned) == 1 and changes in ({"players"}, {"register"}):
+        # A named reference instrument ("same octave as this trumpet") is not a new player.
+        if assigned != {old["leadProgram"]} and set(_members(direction)) <= assigned | {old["leadProgram"]}:
+            revoice = True
     if changes == {"revoice"} or revoice:
         named = [p for p in _members(direction) if p != KIT and not _excluded_player(p, direction)]
         proposed = [p for p in _members(director.brief) if p != KIT and not _excluded_player(p, direction)]
-        candidates = named or proposed
+        candidates = [p for p in named if p in assigned] or named or proposed
         if not candidates:
             raise ValueError("Which instrument should carry the tune in this take?")
         names = _catalog()[0]
-        plan["leadProgram"] = director.choose("Which performer is the new melody player?", {p: names[p] for p in candidates})
+        plan["leadProgram"] = (candidates[0] if len(candidates) == 1 and assigned == {candidates[0]} else
+                               director.choose("Which performer is the new melody player?", {p: names[p] for p in candidates}))
         return plan
     if old and changes == {"phrasing"} and "backingTiming" not in plan:
         responsive = old.get("phraseInteraction", "steady") != "steady"
@@ -733,6 +797,10 @@ def plan_arrangement(analysis: dict, direction: str, parent_caption: str = "", *
     # Pass phrase indices and compact source summaries only; a full transcription
     # can contain thousands of notes and does not belong in the language context.
     retained = {"bpm": analysis.get("bpm"), "_phraseCount": compact["phraseCount"], "themeAnchors": _anchors(analysis)}
+    if REGISTER_CUE.search(direction) and "melodyMedianPitch" in analysis:
+        retained["melodyMedianPitch"] = analysis["melodyMedianPitch"]
+        if "scoreInputIsUpload" in analysis:
+            retained["scoreInputIsUpload"] = analysis["scoreInputIsUpload"]
     if _prior(analysis):
         retained["parentPlan"] = analysis["parentPlan"]
     seconds = 120 if deadline is None else min(120, deadline - time.monotonic())

@@ -38,7 +38,8 @@ def analyze(notes):
         pitches = [p for at, _, p, _ in melody if start <= at < end]
         phrases.append({"id": len(phrases), "start": start, "end": end, "notes": len(pitches),
                         "anchorPitches": pitches[:6]})
-    return {"durationSeconds": duration, "bpm": bpm, "phrases": phrases}
+    return {"durationSeconds": duration, "bpm": bpm, "phrases": phrases,
+            "melodyMedianPitch": median(event[2] for event in melody) if melody else None}
 
 
 class Timeline:
@@ -124,16 +125,27 @@ def _level(plan, position, limit):
     return 1.
 
 
-def _lead_track(notes, timeline, plan):
-    melody = notes["melody"]
-    # For a low lead, transpose whole octaves to bring the theme into the instrument's range.
+def lead_octave(plan, median_pitch):
+    """Whole-octave displacement from the source melody, including a saved listener choice."""
+    if "leadOctaveShift" in plan:
+        shift = plan["leadOctaveShift"]
+        if type(shift) is not int or not -2 <= shift <= 2:
+            raise ValueError("The saved lead register is invalid.")
+        return shift
     import pretty_midi
     natural = pretty_midi.INSTRUMENT_MAP[plan["leadProgram"]]
     center = {"Cello": 55, "Contrabass": 43, "Acoustic Bass": 44, "Tuba": 46, "Bassoon": 52,
               "Piccolo": 84, "Viola": 64, "French Horn": 58, "Trombone": 53}.get(natural)
-    center_pitch = median(note[2] for note in melody)
-    shift = 12 * round((center - center_pitch) / 12) if center is not None else 0
-    shift = max(-24, min(24, shift))
+    if center is None:
+        return 0
+    if median_pitch is None:
+        raise ValueError("I need the selected melody's pitches to match this lead register.")
+    return max(-2, min(2, round((center - median_pitch) / 12)))
+
+
+def _lead_track(notes, timeline, plan):
+    melody = notes["melody"]
+    shift = 12 * lead_octave(plan, median(note[2] for note in melody))
     track = {"program": plan["leadProgram"], "level_db": -19., "notes": []}
     touch = plan.get("leadTouch")
     if touch:
