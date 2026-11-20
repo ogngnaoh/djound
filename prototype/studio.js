@@ -112,6 +112,7 @@ function persist() {
   return operation;
 }
 function syncUI() {
+  const focused = document.activeElement;
   repairSelections();
   $("project-title").textContent = project.title;
   document.title = project.title + " · Djound Studio";
@@ -137,6 +138,7 @@ function syncUI() {
     li.className = "entry" + (edit.id === heard ? " current" : "");
     const choose = document.createElement("button");
     choose.type = "button";
+    choose.id = "listen-" + edit.id;
     choose.className = "choose";
     choose.setAttribute("aria-label", "Listen to " + edit.name);
     choose.setAttribute("aria-pressed", String(edit.id === heard));
@@ -163,6 +165,7 @@ function syncUI() {
     });
     const more = document.createElement("button");
     more.type = "button";
+    more.id = "actions-" + edit.id;
     more.className = "icon more";
     more.innerHTML = icon("more");
     more.setAttribute("aria-label", "Actions for " + edit.name);
@@ -188,6 +191,7 @@ function syncUI() {
     for (const edit of [item(alt.parentId) || original(), alt]) {
       const b = textElement("button", edit.name);
       b.type = "button";
+      b.id = "compare-" + edit.id;
       b.title = edit.name;
       b.setAttribute("aria-pressed", String(heard === edit.id));
       b.setAttribute("aria-label", "Compare " + edit.name);
@@ -227,6 +231,10 @@ function syncUI() {
     }),
   );
   syncSubmit();
+  if (focused?.id && !focused.isConnected) {
+    const replacement = document.getElementById(focused.id) || $("play");
+    replacement.focus({ preventScroll: true });
+  }
 }
 async function listen(id, autoPlay, keepPair = false) {
   if (!item(id)) return;
@@ -495,18 +503,27 @@ function openMenu(anchor, id) {
     ) + "px";
   menu.firstElementChild.focus();
 }
+function shieldWorkspace(open) {
+  document.querySelector(".desk").inert = open;
+  document.querySelector(".topbar").inert = open;
+}
 function closeRail() {
   const was = $("rail").classList.contains("open");
   $("rail").classList.remove("open");
   $("open-edits").setAttribute("aria-expanded", "false");
-  if (was) $("open-edits").focus();
+  shieldWorkspace(false);
+  if (was && $("open-edits").offsetParent) $("open-edits").focus();
 }
 $("open-edits").addEventListener("click", () => {
   $("rail").classList.add("open");
   $("open-edits").setAttribute("aria-expanded", "true");
+  shieldWorkspace(true);
   $("close-edits").focus();
 });
 $("close-edits").addEventListener("click", closeRail);
+matchMedia("(max-width: 660px)").addEventListener("change", () => {
+  if ($("rail").classList.contains("open")) closeRail();
+});
 document.addEventListener("click", (event) => {
   if (
     $("rail").classList.contains("open") &&
@@ -610,7 +627,12 @@ try {
     session = {};
   }
   drafts = session.drafts || {};
-  const requested = params.get("edit");
+  // A direct share or homepage handoff selects the named performance. Returning
+  // to a session restores the separately chosen editing parent and its draft.
+  const resumeSession =
+    session.heard &&
+    (params.get("resume") === "1" || history.state?.studioOpened);
+  const requested = resumeSession ? null : params.get("edit");
   const canonicalJazz =
     requested === "jazz" && project.id === "zanarkand" && !item(requested)
       ? project.edits.find((e) => e.audioKey === "jazz")?.id
@@ -627,8 +649,12 @@ try {
   $("workspace").hidden = false;
   syncUI();
   const pos =
-    Number(params.has("at") ? params.get("at") : requested ? 0 : session.at) ||
-    0;
+    Number(
+      resumeSession
+        ? session.at
+        : (params.get("at") ?? (requested ? 0 : session.at)),
+    ) || 0;
+  history.replaceState({ ...history.state, studioOpened: true }, "");
   await player.audition(item(heard).audioKey, Math.max(0, pos), false);
   if (requested && !item(requested) && !canonicalJazz)
     tell(

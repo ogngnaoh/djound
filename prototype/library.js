@@ -22,6 +22,7 @@ function studioUrl(id, fromOriginal = false, resume) {
   url.searchParams.set("project", id);
   if (fromOriginal) url.searchParams.set("edit", "original");
   else if (resume) {
+    url.searchParams.set("resume", "1");
     url.searchParams.set("edit", resume.editId);
     if (Number.isFinite(resume.at) && resume.at >= 0)
       url.searchParams.set("at", resume.at);
